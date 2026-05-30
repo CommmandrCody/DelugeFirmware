@@ -171,6 +171,10 @@ void RuntimeFeatureSettings::init() {
 	                  STRING_FOR_COMMUNITY_FEATURE_CHORD_KEYBOARD, "displayChordKeyboard",
 	                  RuntimeFeatureStateToggle::Off);
 
+	// Fold Active Notes
+	SetupOnOffSetting(settings[RuntimeFeatureSettingType::Fold], STRING_FOR_COMMUNITY_FEATURE_FOLD, "fold",
+	                  RuntimeFeatureStateToggle::On);
+
 	// AlternativePlaybackStartBehaviour
 	SetupOnOffSetting(settings[RuntimeFeatureSettingType::AlternativePlaybackStartBehaviour],
 	                  STRING_FOR_COMMUNITY_FEATURE_ALTERNATIVE_PLAYBACK_START_BEHAVIOUR,

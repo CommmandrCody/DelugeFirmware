@@ -263,6 +263,32 @@ ActionResult InstrumentClipView::commandExitScaleMode() {
 ActionResult InstrumentClipView::buttonAction(deluge::hid::Button b, bool on, bool inCardRoutine) {
 	using namespace deluge::hid::button;
 
+	// SHIFT + TRIPLETS toggles Fold Active Notes (melodic clips only): show only rows that have
+	// notes. Plain TRIPLETS (no shift) falls through to the normal triplets-view handler.
+	if (b == TRIPLETS && on && Buttons::isShiftButtonPressed()
+	    && runtimeFeatureSettings.get(RuntimeFeatureSettingType::Fold) == RuntimeFeatureStateToggle::On) {
+		InstrumentClip* clip = getCurrentInstrumentClip();
+		if (clip->output->type != OutputType::KIT) {
+			if (!clip->foldMode) {
+				// Entering: refuse on an empty clip (stay unfolded), otherwise fold from the top.
+				if (clip->getNumNoteRowsWithNotes() == 0) {
+					display->displayPopup(deluge::l10n::get(deluge::l10n::String::STRING_FOR_FOLD_EMPTY));
+					return ActionResult::DEALT_WITH;
+				}
+				clip->foldScroll = 0;
+				clip->foldMode = true;
+			}
+			else {
+				clip->foldMode = false;
+			}
+			recalculateColours();
+			uiNeedsRendering(this);
+			display->displayPopup(deluge::l10n::get(clip->foldMode ? deluge::l10n::String::STRING_FOR_FOLD_ON
+			                                                       : deluge::l10n::String::STRING_FOR_FOLD_OFF));
+			return ActionResult::DEALT_WITH;
+		}
+	}
+
 	// Scale mode button
 	if (b == SCALE_MODE && currentUIMode != UI_MODE_HOLDING_LOAD_BUTTON) {
 		return handleScaleButtonAction(on, inCardRoutine);
@@ -2277,6 +2303,12 @@ void InstrumentClipView::editPadAction(bool state, uint8_t yDisplay, uint8_t xDi
 		// If no NoteRow yet...
 		if (!modelStackWithNoteRow->getNoteRowAllowNull()) {
 
+			// Fold Active Notes: don't create a new-pitch row while folded (this is a tap past the
+			// end of the folded list). Unfold to add new pitches — fold stays an existing-rows view.
+			if (clip->foldMode) {
+				return;
+			}
+
 			// Just check we're not beyond Clip length
 			if (squareStart >= clip->loopLength) {
 				return;
@@ -4215,6 +4247,22 @@ ActionResult InstrumentClipView::scrollVertical(int32_t scrollAmount, bool inCar
 	int32_t noteRowToSwapWithI;
 
 	bool isKit = outputType == OutputType::KIT;
+
+	// Fold Active Notes: scroll within the folded rows only. yScroll is left untouched so unfolding
+	// restores the previous view.
+	if (clip->foldMode && !isKit) {
+		int32_t maxFoldScroll = clip->getNumNoteRowsWithNotes() - kDisplayHeight;
+		if (maxFoldScroll < 0) {
+			maxFoldScroll = 0;
+		}
+		int32_t newFoldScroll = std::clamp<int32_t>(clip->foldScroll + scrollAmount, 0, maxFoldScroll);
+		if (newFoldScroll != clip->foldScroll) {
+			clip->foldScroll = newFoldScroll;
+			recalculateColours();
+			uiNeedsRendering(this);
+		}
+		return ActionResult::DEALT_WITH;
+	}
 
 	bool inSoundEditor = getCurrentUI() == &soundEditor;
 	bool inAutomationView = getRootUI() == &automationView;

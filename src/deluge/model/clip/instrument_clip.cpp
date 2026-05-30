@@ -126,6 +126,7 @@ void InstrumentClip::copyBasicsFrom(Clip const* otherClip) {
 
 	onKeyboardScreen = otherInstrumentClip->onKeyboardScreen;
 	inScaleMode = otherInstrumentClip->inScaleMode;
+	foldMode = otherInstrumentClip->foldMode;
 	wrapEditing = otherInstrumentClip->wrapEditing;
 	wrapEditLevel = otherInstrumentClip->wrapEditLevel;
 	yScroll = otherInstrumentClip->yScroll;
@@ -979,9 +980,45 @@ NoteRow* InstrumentClip::getNoteRowOnScreen(int32_t yDisplay, Song* song, int32_
 
 	// Non-kit
 	else {
+		if (foldMode) {
+			return getFoldedNoteRowOnScreen(yDisplay, getIndex);
+		}
 		int32_t yNote = getYNoteFromYDisplay(yDisplay, song);
 		return getNoteRowForYNote(yNote, getIndex);
 	}
+}
+
+// Fold Active Notes (melodic): the (yDisplay + foldScroll)-th NoteRow that has notes. Returns null
+// (rendered black) for screen rows past the end of the folded list.
+NoteRow* InstrumentClip::getFoldedNoteRowOnScreen(int32_t yDisplay, int32_t* getIndex) {
+	int32_t target = yDisplay + foldScroll;
+	if (target < 0) {
+		return nullptr;
+	}
+	int32_t seen = 0;
+	for (int32_t i = 0; i < noteRows.getNumElements(); i++) {
+		NoteRow* noteRow = noteRows.getElement(i);
+		if (!noteRow->hasNoNotes()) {
+			if (seen == target) {
+				if (getIndex) {
+					*getIndex = i;
+				}
+				return noteRow;
+			}
+			seen++;
+		}
+	}
+	return nullptr;
+}
+
+int32_t InstrumentClip::getNumNoteRowsWithNotes() {
+	int32_t count = 0;
+	for (int32_t i = 0; i < noteRows.getNumElements(); i++) {
+		if (!noteRows.getElement(i)->hasNoNotes()) {
+			count++;
+		}
+	}
+	return count;
 }
 
 // Will set noteRow to NULL if one couldn't be found.
@@ -2297,6 +2334,7 @@ void InstrumentClip::writeDataToFile(Serializer& writer, Song* song) {
 
 	writer.writeAttribute("clipName", name.get());
 	writer.writeAttribute("inKeyMode", inScaleMode);
+	writer.writeAttribute("foldMode", foldMode);
 	writer.writeAttribute("yScroll", yScroll);
 	writer.writeAttribute("yScrollKeyboard", keyboardState.isomorphic.scrollOffset);
 
@@ -2471,6 +2509,9 @@ someError:
 		}
 		else if (!strcmp(tagName, "inKeyMode")) {
 			inScaleMode = reader.readTagOrAttributeValueInt();
+		}
+		else if (!strcmp(tagName, "foldMode")) {
+			foldMode = reader.readTagOrAttributeValueInt();
 		}
 
 		else if (!strcmp(tagName, "instrumentPresetSlot")) {
@@ -3699,6 +3740,13 @@ bool InstrumentClip::containsAnyNotes() {
 }
 
 int32_t InstrumentClip::getYNoteFromYDisplay(int32_t yDisplay, Song* song) {
+	if (foldMode) {
+		NoteRow* noteRow = getFoldedNoteRowOnScreen(yDisplay, nullptr);
+		if (noteRow) {
+			return noteRow->y;
+		}
+		// Past the end of the folded list (a black row) — its pitch is never used, fall through.
+	}
 	return getYNoteFromYVisual(yDisplay + yScroll, song);
 }
 

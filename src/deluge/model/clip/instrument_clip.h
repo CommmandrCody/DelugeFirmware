@@ -77,6 +77,7 @@ public:
 	int32_t getYNoteFromYDisplay(int32_t yDisplay, Song* song);
 	int32_t guessRootNote(Song* song, int32_t previousRoot);
 	int32_t getNumNoteRows();
+	int32_t getNumNoteRowsWithNotes(); // Fold Active Notes: count of rows that contain at least one note.
 	void ensureInaccessibleParamPresetValuesWithoutKnobsAreZero(ModelStackWithTimelineCounter* modelStack,
 	                                                            Sound* sound);
 	bool deleteSoundsWhichWontSound(Song* song) override;
@@ -91,6 +92,8 @@ public:
 	bool containsAnyNotes();
 	ModelStackWithNoteRow* getNoteRowOnScreen(int32_t yDisplay, ModelStackWithTimelineCounter* modelStack);
 	NoteRow* getNoteRowOnScreen(int32_t yDisplay, Song* song, int32_t* getIndex = nullptr);
+	/// Fold Active Notes (melodic only): the (yDisplay + foldScroll)-th NoteRow that has notes.
+	NoteRow* getFoldedNoteRowOnScreen(int32_t yDisplay, int32_t* getIndex = nullptr);
 	bool currentlyScrollableAndZoomable() override;
 	void recordNoteOn(ModelStackWithNoteRow* modelStack, int32_t velocity, bool forcePos0 = false,
 	                  int16_t const* mpeValuesOrNull = nullptr, int32_t fromMIDIChannel = MIDI_CHANNEL_NONE);
@@ -105,6 +108,11 @@ public:
 	bool inScaleMode; // Probably don't quiz this directly - call isScaleModeClip() instead
 
 	int32_t yScroll;
+
+	// Fold Active Notes (melodic clips). foldMode persists in the song file; foldScroll is the
+	// vertical scroll *within the folded rows* (yScroll is left untouched so unfold restores it).
+	bool foldMode{};
+	int32_t foldScroll{};
 
 	// TODO: Unscope this once namespacing is done
 	deluge::gui::ui::keyboard::KeyboardState keyboardState;

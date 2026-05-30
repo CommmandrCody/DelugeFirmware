@@ -44,6 +44,7 @@ EmulatedDisplay menuEmulatedDisplay{};
 SettingToggle menuEnableKeyboardViewSidebarMenuExit(RuntimeFeatureSettingType::EnableKeyboardViewSidebarMenuExit);
 SettingToggle menuEnableLaunchEventPlayhead(RuntimeFeatureSettingType::EnableLaunchEventPlayhead);
 SettingToggle menuDisplayChordLayout(RuntimeFeatureSettingType::DisplayChordKeyboard);
+SettingToggle menuFold(RuntimeFeatureSettingType::Fold);
 SettingToggle menuAlternativePlaybackStartBehaviour(RuntimeFeatureSettingType::AlternativePlaybackStartBehaviour);
 SettingToggle menuEnableGridViewLoopPads(RuntimeFeatureSettingType::EnableGridViewLoopPads);
 SettingToggle menuAlternativeTapTempoBehaviour(RuntimeFeatureSettingType::AlternativeTapTempoBehaviour);
@@ -69,6 +70,7 @@ std::array<MenuItem*, RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettin
     &menuEnableKeyboardViewSidebarMenuExit,
     &menuEnableLaunchEventPlayhead,
     &menuDisplayChordLayout,
+    &menuFold,
     &menuAlternativePlaybackStartBehaviour,
     &menuEnableGridViewLoopPads,
     &menuAlternativeTapTempoBehaviour,

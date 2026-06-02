@@ -79,7 +79,7 @@ const uint8_t kRichBright[kDisplayHeight] = {255, 160, 102, 66, 45, 32, 24, 18};
 const char* const kNumerals[7] = {"I", "II", "III", "IV", "V", "VI", "VII"};
 const uint8_t kMajorIv[7] = {0, 2, 4, 5, 7, 9, 11};
 
-// The brain marks each suggested degree's standard core: triad (bottom) + 7th. The user chooses richer
+// The Calculator marks each suggested degree's standard core: triad (bottom) + 7th. The user chooses richer
 // voicings themselves. (kLadder[0] = triad, kLadder[4] = "7".)
 constexpr int32_t kRowTriad = 0;
 constexpr int32_t kRow7th = 4;
@@ -88,7 +88,7 @@ constexpr int32_t kRow7th = 4;
 // pad when tapped. The dark rows also visually separate the chord selector (left) from the keyboard.
 constexpr int32_t kBtnIsoView = kDisplayHeight - 1; // toggle in-key <-> chromatic iso view
 constexpr int32_t kBtnSticky = kDisplayHeight - 2;  // toggle sticky chord shape
-constexpr int32_t kBtnBrain = kDisplayHeight - 3;   // toggle the next-chord brain on/off
+constexpr int32_t kBtnCalc = kDisplayHeight - 3;    // toggle the next-chord Calculator on/off
 constexpr int32_t kStripTopButtons = 3;             // lit toggle rows at the top; rows below = clear pads
 // Bitmask of the dark (clear) rows = everything below the three toggles.
 constexpr uint8_t kClearRowsMask = (uint8_t)((1u << (kDisplayHeight - kStripTopButtons)) - 1);
@@ -138,8 +138,8 @@ void KeyboardLayoutHarmonic::recomputeSuggestions(uint8_t keyRoot, const uint8_t
 	for (uint8_t d = 0; d < 7; d++) {
 		degBright[d] = 0;
 	}
-	// Off when the brain is toggled off; otherwise diatonic-7-note only (like the Chord Library's brain).
-	if (!getState().harmonic.brainOn || sc != 7 || !getScaleModeEnabled()) {
+	// Off when the Calculator is toggled off; otherwise diatonic-7-note only (like the Chord Library's Calculator).
+	if (!getState().harmonic.calculatorOn || sc != 7 || !getScaleModeEnabled()) {
 		return;
 	}
 	// Exactly like Chord Library: take the TOP 3 next chords only (not all degrees), so just those few
@@ -163,7 +163,7 @@ void KeyboardLayoutHarmonic::recomputeSuggestions(uint8_t keyRoot, const uint8_t
 			break;
 		}
 	}
-	// Richness is the USER's choice — the brain only marks each suggested degree's standard core (triad +
+	// Richness is the USER's choice — the Calculator only marks each suggested degree's standard core (triad +
 	// 7th) in renderPads; you decide how lush by playing where you want in that column.
 }
 
@@ -303,7 +303,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			heldCols |= (uint16_t)(1u << pressed.x);
 			leftPicked = true;
 			// Persist the selection so the white highlight + iso shape stay after release, and ask the
-			// brain where to go next (suggested degree columns flash white in renderPads).
+			// Calculator where to go next (suggested degree columns flash white in renderPads).
 			selDeg = (int8_t)deg;
 			selRichness =
 			    (int8_t)((pressed.y < 0) ? 0 : (pressed.y >= kDisplayHeight ? kDisplayHeight - 1 : pressed.y));
@@ -331,7 +331,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	}
 
 	// Divider control strip: three toggles at the top (rising-edge so holding doesn't repeat); tapping any
-	// dark pad below them clears the selected chord + brain.
+	// dark pad below them clears the selected chord + Calculator.
 	uint8_t rising = (uint8_t)(dividerNowMask & ~dividerHeldMask);
 	if (rising & (uint8_t)(1u << kBtnIsoView)) {
 		hs.isoChromatic = !hs.isoChromatic;
@@ -341,16 +341,16 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		hs.stickyChord = !hs.stickyChord;
 		display->displayPopup(hs.stickyChord ? "HOLD" : "FREE");
 	}
-	if (rising & (uint8_t)(1u << kBtnBrain)) {
-		hs.brainOn = !hs.brainOn;
-		if (!hs.brainOn) {
+	if (rising & (uint8_t)(1u << kBtnCalc)) {
+		hs.calculatorOn = !hs.calculatorOn;
+		if (!hs.calculatorOn) {
 			numSuggestions = 0;
 			topDeg = -1;
 			for (uint8_t d = 0; d < 7; d++) {
 				degBright[d] = 0;
 			}
 		}
-		display->displayPopup(hs.brainOn ? "BRN" : "NOBR");
+		display->displayPopup(hs.calculatorOn ? "CALC" : "OFF");
 	}
 	if (rising & kClearRowsMask) {
 		clearSelection();
@@ -390,7 +390,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	bool chromatic = getState().harmonic.isoChromatic;
 	(void)iv;
 
-	// Breathing white pulse for the brain's next-chord suggestions (same cadence as the Chord Library).
+	// Breathing white pulse for the Calculator's next-chord suggestions (same cadence as the Chord Library).
 	uint8_t phase = (AudioEngine::audioSampleTimer >> 7) & 0xFF;     // sawtooth, full cycle ~0.75s
 	uint8_t tri = (phase < 128) ? (phase * 2) : ((255 - phase) * 2); // triangle 0..255..0
 	uint8_t pulse = 30 + (uint8_t)((uint32_t)tri * 225 / 255);       // breathe between dim and full
@@ -426,7 +426,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	for (int32_t x = 0; x < kDisplayWidth; x++) {
 		if (x < kExplorerCols) {
 			// LEFT: the chord explorer. Each column a distinct hue; the ROOT/triad (bottom) is lightest and
-			// the column darkens upward as the chord grows lusher. The brain flashes suggested degree columns
+			// the column darkens upward as the chord grows lusher. The Calculator flashes suggested degree columns
 			// white; the selected chord's cell is highlighted so you see which shape the iso panel is showing.
 			if (x >= numCols) {
 				for (int32_t y = 0; y < kDisplayHeight; y++) {
@@ -435,7 +435,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				continue;
 			}
 			RGB hue = kDegreeHue[x % 7];
-			bool haveBrain = (numSuggestions > 0); // a chord is selected and the brain is on
+			bool haveCalc = (numSuggestions > 0); // a chord is selected and the Calculator is on
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
 				// Richness gradient: bottom (triad) bright -> top (complex) dim, on a perceptual ramp.
 				RGB c = hue.adjustFractional(kRichBright[y], 255);
@@ -446,9 +446,9 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					        .g = (uint8_t)((c.g + 255) >> 1),
 					        .b = (uint8_t)((c.b + 255) >> 1)};
 				}
-				// Brain: each suggested degree flashes its standard core — triad + 7th — white, brightness =
+				// Calculator: each suggested degree flashes its standard core — triad + 7th — white, brightness =
 				// how strong the move is. Richness beyond that is the user's call (play up the column).
-				else if (haveBrain && x != selDeg && degBright[x] > 0 && (y == kRowTriad || y == kRow7th)) {
+				else if (haveCalc && x != selDeg && degBright[x] > 0 && (y == kRowTriad || y == kRow7th)) {
 					c = RGB::monochrome((uint8_t)((uint32_t)pulse * degBright[x] / 255));
 				}
 				image[y][x] = c;
@@ -459,7 +459,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 			// achromatic (white = on/active, dim grey = off) — deliberately OFF the degree palette so they
 			// never blend with the colourful chord columns; bright vs dim shows each toggle's state.
 			bool sticky = getState().harmonic.stickyChord;
-			bool brain = getState().harmonic.brainOn;
+			bool calc = getState().harmonic.calculatorOn;
 			constexpr uint8_t kOn = 245;
 			constexpr uint8_t kOff = 75;
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
@@ -470,8 +470,8 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				else if (y == kBtnSticky) {
 					c = RGB::monochrome(sticky ? kOn : kOff);
 				}
-				else if (y == kBtnBrain) {
-					c = RGB::monochrome(brain ? kOn : kOff);
+				else if (y == kBtnCalc) {
+					c = RGB::monochrome(calc ? kOn : kOff);
 				}
 				image[y][x] = c; // rows below the toggles stay dark (also the clear pads)
 			}

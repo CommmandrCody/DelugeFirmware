@@ -48,7 +48,7 @@ public:
 	bool supportsInstrument() override { return true; }
 	bool supportsKit() override { return false; }
 	RequiredScaleMode requiredScaleMode() override { return RequiredScaleMode::Enabled; }
-	// Keep re-rendering while the brain has suggestions, so the white next-chord pulse breathes.
+	// Keep re-rendering while the Calculator has suggestions, so the white next-chord pulse breathes.
 	bool requestsContinuousRender() override { return numSuggestions > 0; }
 
 protected:
@@ -80,11 +80,11 @@ private:
 	int8_t selDeg = -1;      // selected degree column 0-6 (-1 = none)
 	int8_t selRichness = -1; // selected richness row 0-(kDisplayHeight-1)
 
-	// Brain: ranks the diatonic next chords. Each suggested degree's triad + 7th flash, brightness = how
+	// Calculator: ranks the diatonic next chords. Each suggested degree's triad + 7th flash, brightness = how
 	// strong a move it is. Richness beyond the core is the user's choice.
 	ChordSuggestion suggestions[7];
 	uint8_t numSuggestions = 0;
-	uint8_t degBright[7] = {}; // per-degree brightness (0-255) = strength as a next move; 0 when no brain
+	uint8_t degBright[7] = {}; // per-degree brightness (0-255) = strength as a next move; 0 when no Calculator
 	int8_t topDeg = -1;        // the single strongest next degree; -1 = none
 
 	uint8_t dividerHeldMask = 0; // rows of the divider control-strip held last frame (rising-edge detect)

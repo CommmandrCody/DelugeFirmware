@@ -76,6 +76,24 @@ const RGB kDegreeHue[7] = {
 // the fade is obvious even across the bright lower rows, where a gentle ramp reads as flat on LEDs.
 const uint8_t kRichBright[kDisplayHeight] = {255, 160, 102, 66, 45, 32, 24, 18};
 
+// DEFAULT key-mood palette: the iso tints to the current key's colour so you can SEE the key (brightness
+// still carries the chord relationships). Mood-based, not a flat wheel — bright/dark per key's feel. This
+// is just the default; a custom + saveable per-user table is the natural next step. Indexed by root pc.
+const RGB kKeyColour[12] = {
+    RGB{.r = 240, .g = 235, .b = 220}, // C   open / pure       — warm white
+    RGB{.r = 130, .g = 55, .b = 180},  // C#  dark / mysterious — deep violet
+    RGB{.r = 255, .g = 225, .b = 50},  // D   bright / joyful   — yellow
+    RGB{.r = 190, .g = 90, .b = 50},   // D#  noble / warm-dark — deep red-gold
+    RGB{.r = 40, .g = 210, .b = 130},  // E   radiant           — emerald
+    RGB{.r = 120, .g = 195, .b = 95},  // F   calm / pastoral   — soft green
+    RGB{.r = 25, .g = 160, .b = 175},  // F#  deep / mysterious — teal
+    RGB{.r = 255, .g = 140, .b = 30},  // G   warm / friendly   — orange
+    RGB{.r = 75, .g = 70, .b = 170},   // G#  dark / deep       — indigo
+    RGB{.r = 255, .g = 190, .b = 20},  // A   energy / bright   — gold
+    RGB{.r = 220, .g = 110, .b = 90},  // A#  rich / warm       — rose-amber
+    RGB{.r = 55, .g = 130, .b = 255},  // B   brilliant / intense — bright blue
+};
+
 const char* const kNumerals[7] = {"I", "II", "III", "IV", "V", "VI", "VII"};
 const uint8_t kMajorIv[7] = {0, 2, 4, 5, 7, 9, 11};
 
@@ -534,7 +552,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				else {
 					b = 12; // faint in-key scale backdrop (the lattice)
 				}
-				image[y][x] = RGB::monochrome(b);
+				image[y][x] = kKeyColour[keyRoot % 12].adjustFractional(b, 255); // tint to the key's mood colour
 			}
 		}
 		else {
@@ -576,7 +594,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				else {
 					b = 0; // off-scale: dark
 				}
-				image[y][x] = RGB::monochrome(b);
+				image[y][x] = kKeyColour[keyRoot % 12].adjustFractional(b, 255); // tint to the key's mood colour
 			}
 		}
 	}

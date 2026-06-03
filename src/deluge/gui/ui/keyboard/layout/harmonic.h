@@ -55,16 +55,16 @@ protected:
 	bool allowSidebarType(ColumnControlFunction sidebarType) override;
 
 private:
-	static constexpr int32_t kExplorerCols = 7;                // left block: the 7 in-key chords (cols 0-6)
-	static constexpr int32_t kDividerCol = kExplorerCols;      // col 7: blank divider AND the iso-view toggle pad
-	static constexpr int32_t kIsoStartCol = kExplorerCols + 1; // iso panel starts here (cols 8-15)
-	static constexpr int32_t kIsoRowStep = 3;                  // iso panel: scale-steps per row (in-key)
+	// New model: two 7-wide grids with two bound control columns between them (7 + 2 + 7 = 16).
+	// PALETTE 0-6 | palette-ctrl 7 | iso-ctrl 8 | ISO 9-15. Handedness swap mirrors the blocks (see colInfo).
+	static constexpr int32_t kExplorerCols = 7; // legacy alias: palette block width
+	static constexpr int32_t kBlockW = 7;       // each grid block is 7 columns wide
 
 	uint8_t getScaleIntervals(uint8_t* ivOut);
 	uint8_t buildChordAtDegree(uint8_t deg, int32_t y, const uint8_t* iv, uint8_t sc, uint8_t keyRoot,
 	                           int16_t* notesOut, uint8_t maxNotes, uint8_t* rootPcOut, char* romanOut, char* absOut);
-	int32_t isoNoteAt(int32_t x, int32_t y);        // in-key mapping (matches the In-Key keyboard)
-	int32_t isoNoteChromatic(int32_t x, int32_t y); // standard chromatic isomorphic mapping
+	int32_t isoNoteAt(int32_t localX, int32_t y);        // in-key mapping (localX = iso column 0..6)
+	int32_t isoNoteChromatic(int32_t localX, int32_t y); // chromatic isomorphic mapping (localX 0..6)
 	void recomputeSuggestions(uint8_t keyRoot, const uint8_t* iv, uint8_t sc, uint8_t homeRootPc);
 	void drawName(const char* roman, const char* abs);
 
@@ -87,7 +87,8 @@ private:
 	uint8_t degBright[7] = {}; // per-degree brightness (0-255) = strength as a next move; 0 when no Calculator
 	int8_t topDeg = -1;        // the single strongest next degree; -1 = none
 
-	uint8_t dividerHeldMask = 0; // rows of the divider control-strip held last frame (rising-edge detect)
+	uint8_t palCtrlHeldMask = 0; // palette-control column rows held last frame (rising-edge detect)
+	uint8_t isoCtrlHeldMask = 0; // iso-control column rows held last frame (rising-edge detect)
 };
 
 }; // namespace deluge::gui::ui::keyboard::layout

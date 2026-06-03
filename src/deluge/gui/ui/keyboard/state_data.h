@@ -72,6 +72,7 @@ struct KeyboardStateHarmonic {
 	bool stickyChord = false;  // true = selected chord shape persists through iso free-play; false = clears
 	bool calculatorOn = true;  // true = show next-chord brain suggestions on the left
 	bool showChord = true;     // true = light the selected chord's shape on the iso; false = clean grid
+	bool swapped = false;      // handedness: false = palette LEFT / iso RIGHT; true = mirror the two blocks
 };
 /// Please note that saving and restoring currently needs to be added manually in instrument_clip.cpp and all layouts
 /// share one struct for storage

@@ -71,6 +71,7 @@ struct KeyboardStateHarmonic {
 	bool isoChromatic = false; // right panel: false = in-key (matches In-Key kbd), true = standard chromatic iso
 	bool stickyChord = false;  // true = selected chord shape persists through iso free-play; false = clears
 	bool calculatorOn = true;  // true = show next-chord brain suggestions on the left
+	bool showChord = true;     // true = light the selected chord's shape on the iso; false = clean grid
 };
 /// Please note that saving and restoring currently needs to be added manually in instrument_clip.cpp and all layouts
 /// share one struct for storage

@@ -86,10 +86,11 @@ constexpr int32_t kRow7th = 4;
 
 // Divider control strip: THREE toggle buttons at the TOP; every dark pad below them acts as a CLEAR
 // pad when tapped. The dark rows also visually separate the chord selector (left) from the keyboard.
-constexpr int32_t kBtnIsoView = kDisplayHeight - 1; // toggle in-key <-> chromatic iso view
-constexpr int32_t kBtnSticky = kDisplayHeight - 2;  // toggle sticky chord shape
-constexpr int32_t kBtnCalc = kDisplayHeight - 3;    // toggle the next-chord Calculator on/off
-constexpr int32_t kStripTopButtons = 3;             // lit toggle rows at the top; rows below = clear pads
+constexpr int32_t kBtnIsoView = kDisplayHeight - 1;   // toggle in-key <-> chromatic iso view
+constexpr int32_t kBtnSticky = kDisplayHeight - 2;    // toggle sticky chord shape
+constexpr int32_t kBtnCalc = kDisplayHeight - 3;      // toggle the next-chord Calculator on/off
+constexpr int32_t kBtnShowChord = kDisplayHeight - 4; // toggle the iso chord shape on/off (show nothing)
+constexpr int32_t kStripTopButtons = 4;               // lit toggle rows at the top; rows below = clear pads
 // Bitmask of the dark (clear) rows = everything below the three toggles.
 constexpr uint8_t kClearRowsMask = (uint8_t)((1u << (kDisplayHeight - kStripTopButtons)) - 1);
 
@@ -352,6 +353,10 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 		display->displayPopup(hs.calculatorOn ? "CALC" : "OFF");
 	}
+	if (rising & (uint8_t)(1u << kBtnShowChord)) {
+		hs.showChord = !hs.showChord;
+		display->displayPopup(hs.showChord ? "SHOW" : "HIDE");
+	}
 	if (rising & kClearRowsMask) {
 		clearSelection();
 		display->displayPopup("CLR");
@@ -405,6 +410,20 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 		}
 		return false;
 	};
+
+	// Core identity tones = the first up-to-4 voiced notes (root, 3rd, 5th, 7th — the chord's identity);
+	// anything beyond is an extension (9th/11th/13th). Core shines; extensions go ghost-dim.
+	auto isCoreTone = [&](int32_t note) {
+		uint8_t coreCount = (chordNoteCount < 4) ? chordNoteCount : 4;
+		for (uint8_t i = 0; i < coreCount; i++) {
+			if (chordNotes[i] == note) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	bool showChord = getState().harmonic.showChord;
 
 	// The same voicing repeats up the iso grid, which is noisy. Pick ONE pad per voiced note — the lowest
 	// (bottom-most, then left-most) occurrence — to draw at full white; the repeats render dim white, so a
@@ -473,13 +492,15 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				else if (y == kBtnCalc) {
 					c = RGB::monochrome(calc ? kOn : kOff);
 				}
+				else if (y == kBtnShowChord) {
+					c = RGB::monochrome(showChord ? kOn : kOff); // bright = chord shown, dim = hidden
+				}
 				image[y][x] = c; // rows below the toggles stay dark (also the clear pads)
 			}
 		}
 		else if (!chromatic) {
-			// RIGHT (in-key): matches the In-Key keyboard. Dim coloured scale grid + steady coloured tonic;
-			// the selected chord's EXACT voicing pops white; notes you play live and notes during playback
-			// light just like the In-Key/Isomorphic keyboards (via the shared note-highlight buffer).
+			// RIGHT (in-key): SOLID WHITE — brightness shows the relationships (no rainbow). Chord CORE
+			// (root/3/5/7) brightest, extensions/repeats ghost-dim, steady tonic anchor, faint scale backdrop.
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
 				int32_t note = isoNoteAt(x, y);
 				int32_t clamped = (note < 0) ? 0 : (note > 127 ? 127 : note);
@@ -493,34 +514,32 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					}
 				}
 				uint8_t hi = getHighlightedNotes()[clamped];
-				RGB nc = getNoteColour((uint8_t)clamped);
-				if (inChordExact(note)) {
-					// One instance (the lowest) full white = the identifiable shape; repeats dim white.
-					image[y][x] = RGB::monochrome(primary[y][x] ? 255 : 65);
+				uint8_t b;
+				if (showChord && inChordExact(note)) {
+					// Core tones bright (primary brightest, repeats dimmer); extensions ghost-dim but there.
+					b = isCoreTone(note) ? (primary[y][x] ? 255 : 70) : 22;
 				}
 				else if (playing) {
-					image[y][x] = nc; // notes you play live light in their own colours
+					b = 255; // notes you play live
 				}
 				else if (hi != 0
 				         && (hi >= 254
 				             || runtimeFeatureSettings.get(RuntimeFeatureSettingType::HighlightIncomingNotes)
 				                    == RuntimeFeatureStateToggle::On)) {
-					// Playback note-preview (254 = dim white) + optional incoming-note highlight, like the
-					// In-Key/Isomorphic keyboards — so the harmonic panel shows notes during playback.
-					image[y][x] = (hi >= 254) ? RGB::monochrome(hi == 255 ? 255 : 110) : nc.adjust(hi, 1);
+					b = (hi >= 254) ? (hi == 255 ? 255 : 110) : 60; // playback preview / incoming note
 				}
 				else if (within == 0) {
-					image[y][x] = nc; // bright COLOURED tonic anchor (steady, follows the key)
+					b = 32; // steady tonic anchor (orients the key)
 				}
 				else {
-					image[y][x] = nc.dim(4); // quiet dim coloured in-key grid, so chord/tonic stand out
+					b = 12; // faint in-key scale backdrop (the lattice)
 				}
+				image[y][x] = RGB::monochrome(b);
 			}
 		}
 		else {
-			// RIGHT (chromatic): matches the standard Isomorphic keyboard. Scale notes dim-coloured, root &
-			// played notes full colour, off-scale dark; the selected chord's exact voicing pops white on top,
-			// and playback notes light via the shared note-highlight buffer.
+			// RIGHT (chromatic): SOLID WHITE, same brightness hierarchy as in-key, but off-scale notes go
+			// dark (it's the chromatic isomorphic grid). Brightness = relationship, no rainbow.
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
 				int32_t note = isoNoteChromatic(x, y);
 				int32_t clamped = (note < 0) ? 0 : (note > 127 ? 127 : note);
@@ -535,25 +554,29 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				uint8_t hi = getHighlightedNotes()[clamped];
 				bool inScale = getScaleNotes().has(within);
-				RGB nc = getNoteColour((uint8_t)clamped);
-				if (inChordExact(note)) {
-					image[y][x] = RGB::monochrome(primary[y][x] ? 255 : 65); // one bright shape, dim repeats
+				uint8_t b;
+				if (showChord && inChordExact(note)) {
+					b = isCoreTone(note) ? (primary[y][x] ? 255 : 70) : 22; // core bright, extensions ghost
 				}
-				else if (playing || within == 0) {
-					image[y][x] = nc; // root + live-played notes at full colour
+				else if (playing) {
+					b = 255;
 				}
 				else if (hi != 0
 				         && (hi >= 254
 				             || runtimeFeatureSettings.get(RuntimeFeatureSettingType::HighlightIncomingNotes)
 				                    == RuntimeFeatureStateToggle::On)) {
-					image[y][x] = (hi >= 254) ? RGB::monochrome(hi == 255 ? 255 : 110) : nc.adjust(hi, 1);
+					b = (hi >= 254) ? (hi == 255 ? 255 : 110) : 60;
+				}
+				else if (within == 0) {
+					b = 32; // tonic anchor
 				}
 				else if (inScale) {
-					image[y][x] = nc.forTail(); // dim scale note, like the Isomorphic keyboard
+					b = 12; // faint scale backdrop
 				}
 				else {
-					image[y][x] = RGB::monochrome(0); // off-scale: dark
+					b = 0; // off-scale: dark
 				}
+				image[y][x] = RGB::monochrome(b);
 			}
 		}
 	}

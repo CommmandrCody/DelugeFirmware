@@ -143,7 +143,8 @@ constexpr int32_t kRow7th = 4;
 constexpr int32_t kBtnIsoView = kDisplayHeight - 1;   // iso-ctrl: in-key <-> chromatic
 constexpr int32_t kBtnShowChord = kDisplayHeight - 2; // iso-ctrl: show / hide the chord shape
 constexpr int32_t kBtnSticky = kDisplayHeight - 3;    // iso-ctrl: sticky chord voicing
-constexpr uint8_t kIsoCtrlClearMask = (uint8_t)((1u << (kDisplayHeight - 3)) - 1); // rows below = clear
+constexpr int32_t kBtnLattice = kDisplayHeight - 4;   // iso-ctrl: full chord lattice on/off
+constexpr uint8_t kIsoCtrlClearMask = (uint8_t)((1u << (kDisplayHeight - 4)) - 1); // rows below = clear
 
 constexpr int32_t kBtnCalc = kDisplayHeight - 1; // pal-ctrl: next-chord Calculator on/off
 constexpr int32_t kBtnSwap = kDisplayHeight - 2; // pal-ctrl: swap the two sides (handedness)
@@ -404,6 +405,10 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		hs.stickyChord = !hs.stickyChord;
 		display->displayPopup(hs.stickyChord ? "HOLD" : "FREE");
 	}
+	if (risingIso & (uint8_t)(1u << kBtnLattice)) {
+		hs.latticeOn = !hs.latticeOn;
+		display->displayPopup(hs.latticeOn ? "LATT" : "ONE");
+	}
 	if (risingIso & kIsoCtrlClearMask) {
 		clearSelection();
 		display->displayPopup("CLR");
@@ -467,6 +472,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	bool sticky = getState().harmonic.stickyChord;
 	bool calc = getState().harmonic.calculatorOn;
 	bool swapped = getState().harmonic.swapped;
+	bool latticeOn = getState().harmonic.latticeOn;
 	int32_t isoStart = isoStartCol(swapped);
 	(void)iv;
 
@@ -494,6 +500,26 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 		}
 		return false;
 	};
+	// Pitch-class versions for the full LATTICE (every octave/position of a chord tone, not just the voicing).
+	auto inChordPc = [&](uint8_t pcq) {
+		for (uint8_t i = 0; i < chordNoteCount; i++) {
+			if ((uint8_t)(((chordNotes[i] % 12) + 12) % 12) == pcq) {
+				return true;
+			}
+		}
+		return false;
+	};
+	auto isCorePc = [&](uint8_t pcq) {
+		uint8_t coreCount = (chordNoteCount < 4) ? chordNoteCount : 4;
+		for (uint8_t i = 0; i < coreCount; i++) {
+			if ((uint8_t)(((chordNotes[i] % 12) + 12) % 12) == pcq) {
+				return true;
+			}
+		}
+		return false;
+	};
+	int32_t chordRoot = (chordNoteCount > 0) ? chordNotes[0] : -1; // bottom note = the chord's root
+	uint8_t chordRootPc = (chordRoot >= 0) ? (uint8_t)(((chordRoot % 12) + 12) % 12) : 255;
 
 	// The voicing repeats up the iso grid. Pick ONE pad per voiced note — the lowest (bottom-most, then
 	// left-most) occurrence — to draw at full brightness; repeats render dimmer, so one clean shape reads.
@@ -566,6 +592,9 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				else if (y == kBtnSticky) {
 					c = RGB::monochrome(sticky ? kCtrlOn : kCtrlOff);
 				}
+				else if (y == kBtnLattice) {
+					c = RGB::monochrome(latticeOn ? kCtrlOn : kCtrlOff);
+				}
 				image[y][x] = c;
 			}
 		}
@@ -587,30 +616,51 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					}
 				}
 				uint8_t hi = getHighlightedNotes()[clamped];
-				uint8_t b;
-				if (showChord && inChordExact(note)) {
-					// Core tones bright (primary brightest, repeats dimmer); extensions ghost-dim but there.
-					b = isCoreTone(note) ? (primary[y][x] ? 255 : 120) : 45;
+				RGB key = kKeyColour[keyRoot % 12];
+				RGB out;
+				if (playing) {
+					out = key.adjustFractional(255, 255); // notes you play live
 				}
-				else if (playing) {
-					b = 255; // notes you play live
+				else if (showChord && latticeOn && chordNoteCount > 0 && inChordPc(pc)) {
+					// FULL lattice: EVERY chord-tone pad lit; brightness fades UPWARD so it reads as a glowing
+					// stack, not a flat wall. The chord ROOT pops white wherever it recurs.
+					uint8_t base = isCorePc(pc) ? 210 : 70;
+					uint8_t fade = (uint8_t)((uint32_t)base * (uint32_t)(kDisplayHeight - y) / kDisplayHeight);
+					if (fade < 16) {
+						fade = 16;
+					}
+					out = (pc == chordRootPc) ? RGB::monochrome((uint8_t)((fade > 150) ? 255 : (fade + 70)))
+					                          : key.adjustFractional(fade, 255);
+				}
+				else if (showChord && inChordExact(note)) {
+					// Single clean voicing: chord ROOT pops pure white, core bright, extensions ghost-dim.
+					if (note == chordRoot) {
+						out = RGB::monochrome(255);
+					}
+					else if (isCoreTone(note)) {
+						out = key.adjustFractional(primary[y][x] ? 235 : 120, 255);
+					}
+					else {
+						out = key.adjustFractional(50, 255);
+					}
 				}
 				else if (hi != 0
 				         && (hi >= 254
 				             || runtimeFeatureSettings.get(RuntimeFeatureSettingType::HighlightIncomingNotes)
 				                    == RuntimeFeatureStateToggle::On)) {
-					b = (hi >= 254) ? (hi == 255 ? 255 : 130) : 70; // playback preview / incoming note
+					out = key.adjustFractional((hi >= 254) ? (hi == 255 ? 255 : 130) : 70, 255);
 				}
 				else if (within == 0) {
-					b = 60; // steady tonic anchor (orients the key)
+					// ROOT/tonic anchor — bright WHITE so every root pops with hard contrast on ANY key colour.
+					out = RGB::monochrome(200);
 				}
 				else if (!chromatic || inScale) {
-					b = 22; // faint in-key scale backdrop (the lattice)
+					out = key.adjustFractional(16, 255); // faint scale backdrop
 				}
 				else {
-					b = 0; // chromatic off-scale: dark
+					out = RGB{}; // chromatic off-scale: dark
 				}
-				image[y][x] = kKeyColour[keyRoot % 12].adjustFractional(b, 255); // tint to the key's mood colour
+				image[y][x] = out;
 			}
 		}
 		else {

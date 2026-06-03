@@ -73,6 +73,8 @@ struct KeyboardStateHarmonic {
 	bool calculatorOn = true;  // true = show next-chord brain suggestions on the left
 	bool showChord = true;     // true = light the selected chord's shape on the iso; false = clean grid
 	bool swapped = false;      // handedness: false = palette LEFT / iso RIGHT; true = mirror the two blocks
+	bool latticeOn = false;    // true = light the FULL chord lattice (every repeat) with an upward fade
+	bool spreadRows = false;   // true = bottom 2 iso rows become the spread/voicing strip; false = full iso
 };
 /// Please note that saving and restoring currently needs to be added manually in instrument_clip.cpp and all layouts
 /// share one struct for storage

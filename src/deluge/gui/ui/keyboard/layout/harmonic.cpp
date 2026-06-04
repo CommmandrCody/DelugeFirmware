@@ -150,8 +150,12 @@ constexpr int32_t kBtnCalc = kDisplayHeight - 1; // pal-ctrl: next-chord Calcula
 constexpr int32_t kBtnSwap = kDisplayHeight - 2; // pal-ctrl: swap the two sides (handedness)
 constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << (kDisplayHeight - 2)) - 1); // rows below = clear
 
-constexpr uint8_t kCtrlOn = 245;
-constexpr uint8_t kCtrlOff = 75;
+// Reserved control-zone colour — a PINK used NOWHERE else in Chroma, so the two centre control columns
+// read instantly as "controls, not music". On = brighter pink, off = dim pink, whole column faintly tinted.
+const RGB kCtrlHue = RGB{.r = 255, .g = 40, .b = 150};
+constexpr uint8_t kCtrlOn = 200;
+constexpr uint8_t kCtrlOff = 55;
+constexpr uint8_t kCtrlFaint = 16;
 
 } // namespace
 
@@ -567,33 +571,33 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 			}
 		}
 		else if (ci.region == REG_PAL_CTRL) {
-			// Palette-bound controls: Calculator on/off, handedness swap. Clear pads below.
+			// Palette-bound controls: Calculator on/off, handedness swap. Reserved PINK zone; clear pads below.
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
-				RGB c{};
+				RGB c = kCtrlHue.adjustFractional(kCtrlFaint, 255); // faint pink marks the control zone
 				if (y == kBtnCalc) {
-					c = RGB::monochrome(calc ? kCtrlOn : kCtrlOff);
+					c = kCtrlHue.adjustFractional(calc ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnSwap) {
-					c = RGB::monochrome(swapped ? kCtrlOn : kCtrlOff);
+					c = kCtrlHue.adjustFractional(swapped ? kCtrlOn : kCtrlOff, 255);
 				}
 				image[y][x] = c;
 			}
 		}
 		else if (ci.region == REG_ISO_CTRL) {
-			// Iso-bound controls: in-key/chromatic view, show-chord, sticky. Clear pads below.
+			// Iso-bound controls: view, show-chord, sticky, lattice. Reserved PINK zone; clear pads below.
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
-				RGB c{};
+				RGB c = kCtrlHue.adjustFractional(kCtrlFaint, 255); // faint pink marks the control zone
 				if (y == kBtnIsoView) {
-					c = RGB::monochrome(chromatic ? kCtrlOn : kCtrlOff);
+					c = kCtrlHue.adjustFractional(chromatic ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnShowChord) {
-					c = RGB::monochrome(showChord ? kCtrlOn : kCtrlOff);
+					c = kCtrlHue.adjustFractional(showChord ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnSticky) {
-					c = RGB::monochrome(sticky ? kCtrlOn : kCtrlOff);
+					c = kCtrlHue.adjustFractional(sticky ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnLattice) {
-					c = RGB::monochrome(latticeOn ? kCtrlOn : kCtrlOff);
+					c = kCtrlHue.adjustFractional(latticeOn ? kCtrlOn : kCtrlOff, 255);
 				}
 				image[y][x] = c;
 			}
@@ -651,8 +655,9 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					out = key.adjustFractional((hi >= 254) ? (hi == 255 ? 255 : 130) : 70, 255);
 				}
 				else if (within == 0) {
-					// ROOT/tonic anchor — bright WHITE so every root pops with hard contrast on ANY key colour.
-					out = RGB::monochrome(200);
+					// ROOT/tonic anchor — WHITE so every root pops by HUE against the colour field, but kept
+					// CALM (the white itself contrasts; it doesn't need to be bright). Tunable.
+					out = RGB::monochrome(85);
 				}
 				else if (!chromatic || inScale) {
 					out = key.adjustFractional(16, 255); // faint scale backdrop

@@ -75,22 +75,23 @@ inline int32_t isoStartCol(bool swapped) {
 	return swapped ? 0 : 9;
 }
 
-// Richness ladder: y=0 (bottom) plain triad, climbing to y=7 (top) for the lushest extension. `steps`
-// are scale-degree offsets stacked from the column's degree (always diatonic). `suffix` -> name.
+// Additive richness ladder: y=0 (bottom) = the ROOT alone (bass/anchor lane), building UP by stacking
+// thirds → 13th at the top. `steps` are diatonic scale-degree offsets from the column's degree. sus2/sus4
+// left the ladder — they're ALTERATIONS (voicing edits: toggle the 3rd off, the 2nd/4th on), not richness.
 struct Richness {
 	const char* suffix;
 	int8_t steps[kMaxChordKeyboardSize];
 	uint8_t count;
 };
 const Richness kLadder[kDisplayHeight] = {
-    {"", {0, 2, 4, 0, 0, 0, 0}, 3},     // triad
-    {"sus2", {0, 1, 4, 0, 0, 0, 0}, 3}, //
-    {"sus4", {0, 3, 4, 0, 0, 0, 0}, 3}, //
-    {"6", {0, 2, 4, 5, 0, 0, 0}, 4},    //
-    {"7", {0, 2, 4, 6, 0, 0, 0}, 4},    //
-    {"9", {0, 2, 4, 6, 8, 0, 0}, 5},    //
-    {"11", {0, 2, 4, 6, 8, 10, 0}, 6},  //
-    {"13", {0, 2, 4, 6, 8, 10, 12}, 7}, //
+    {"", {0, 0, 0, 0, 0, 0, 0}, 1},     // row0 ROOT  — single note; the bass / "where it starts" anchor
+    {"5", {0, 4, 0, 0, 0, 0, 0}, 2},    // row1 DYAD  — root + 5th (power)
+    {"", {0, 2, 4, 0, 0, 0, 0}, 3},     // row2 TRIAD
+    {"6", {0, 2, 4, 5, 0, 0, 0}, 4},    // row3 6th
+    {"7", {0, 2, 4, 6, 0, 0, 0}, 4},    // row4 7th
+    {"9", {0, 2, 4, 6, 8, 0, 0}, 5},    // row5 9th
+    {"11", {0, 2, 4, 6, 8, 10, 0}, 6},  // row6 11th
+    {"13", {0, 2, 4, 6, 8, 10, 12}, 7}, // row7 13th
 };
 
 // One colour per scale degree, ordered so ADJACENT columns jump across the colour wheel (warm/cool
@@ -130,9 +131,9 @@ const RGB kKeyColour[12] = {
 const char* const kNumerals[7] = {"I", "II", "III", "IV", "V", "VI", "VII"};
 const uint8_t kMajorIv[7] = {0, 2, 4, 5, 7, 9, 11};
 
-// The Calculator marks each suggested degree's standard core: triad (bottom) + 7th. The user chooses richer
-// voicings themselves. (kLadder[0] = triad, kLadder[4] = "7".)
-constexpr int32_t kRowTriad = 0;
+// The Calculator marks each suggested degree's standard core: triad + 7th. The user chooses richer voicings
+// themselves. (Additive ladder: kLadder[2] = triad, kLadder[4] = "7".)
+constexpr int32_t kRowTriad = 2;
 constexpr int32_t kRow7th = 4;
 
 // ── Control columns ────────────────────────────────────────────────────────────────────────────────────

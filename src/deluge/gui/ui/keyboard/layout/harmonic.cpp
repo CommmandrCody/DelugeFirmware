@@ -522,8 +522,6 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 		}
 		return false;
 	};
-	int32_t chordRoot = (chordNoteCount > 0) ? chordNotes[0] : -1; // bottom note = the chord's root
-	uint8_t chordRootPc = (chordRoot >= 0) ? (uint8_t)(((chordRoot % 12) + 12) % 12) : 255;
 
 	// The voicing repeats up the iso grid. Pick ONE pad per voiced note — the lowest (bottom-most, then
 	// left-most) occurrence — to draw at full brightness; repeats render dimmer, so one clean shape reads.
@@ -622,45 +620,37 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				uint8_t hi = getHighlightedNotes()[clamped];
 				RGB key = kKeyColour[keyRoot % 12];
 				RGB out;
-				if (playing) {
-					out = key.adjustFractional(255, 255); // notes you play live
-				}
-				else if (showChord && latticeOn && chordNoteCount > 0 && inChordPc(pc)) {
-					// FULL lattice: EVERY chord-tone pad lit; brightness fades UPWARD so it reads as a glowing
-					// stack, not a flat wall. The chord ROOT pops white wherever it recurs.
-					uint8_t base = isCorePc(pc) ? 210 : 70;
+				// RULE: WHITE is reserved for THE CHORD (voiced shape + its lattice). Everything else lives in
+				// the key's COLOUR — the root pops as the brightest expression of that colour, never white.
+				if (showChord && latticeOn && chordNoteCount > 0 && inChordPc(pc)) {
+					// Chord-lattice overlay (every position the chord makes available): WHITE, fading UPWARD so
+					// it reads as a glowing stack rather than a flat wall.
+					uint8_t base = isCorePc(pc) ? 200 : 80;
 					uint8_t fade = (uint8_t)((uint32_t)base * (uint32_t)(kDisplayHeight - y) / kDisplayHeight);
-					if (fade < 16) {
-						fade = 16;
+					if (fade < 18) {
+						fade = 18;
 					}
-					out = (pc == chordRootPc) ? RGB::monochrome((uint8_t)((fade > 150) ? 255 : (fade + 70)))
-					                          : key.adjustFractional(fade, 255);
+					out = RGB::monochrome(fade);
 				}
 				else if (showChord && inChordExact(note)) {
-					// Single clean voicing: chord ROOT pops pure white, core bright, extensions ghost-dim.
-					if (note == chordRoot) {
-						out = RGB::monochrome(255);
-					}
-					else if (isCoreTone(note)) {
-						out = key.adjustFractional(primary[y][x] ? 235 : 120, 255);
-					}
-					else {
-						out = key.adjustFractional(50, 255);
-					}
+					// Voiced-chord overlay: WHITE. Primary shape brightest, repeats dimmer, extensions faint.
+					out = RGB::monochrome(isCoreTone(note) ? (primary[y][x] ? 255 : 105) : 45);
+				}
+				else if (playing) {
+					out = key.adjustFractional(255, 255); // live free-play notes glow in the KEY colour
 				}
 				else if (hi != 0
 				         && (hi >= 254
 				             || runtimeFeatureSettings.get(RuntimeFeatureSettingType::HighlightIncomingNotes)
 				                    == RuntimeFeatureStateToggle::On)) {
-					out = key.adjustFractional((hi >= 254) ? (hi == 255 ? 255 : 130) : 70, 255);
+					out = key.adjustFractional((hi >= 254) ? (hi == 255 ? 235 : 120) : 65, 255);
 				}
 				else if (within == 0) {
-					// ROOT/tonic anchor — WHITE so every root pops by HUE against the colour field, but kept
-					// CALM (the white itself contrasts; it doesn't need to be bright). Tunable.
-					out = RGB::monochrome(85);
+					// ROOT/tonic: the BRIGHTEST expression of the key's own colour — pops in-hue, never white.
+					out = key.adjustFractional(150, 255);
 				}
 				else if (!chromatic || inScale) {
-					out = key.adjustFractional(16, 255); // faint scale backdrop
+					out = key.adjustFractional(12, 255); // faint scale backdrop (dim, to let the root pop)
 				}
 				else {
 					out = RGB{}; // chromatic off-scale: dark

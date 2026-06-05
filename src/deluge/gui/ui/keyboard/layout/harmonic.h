@@ -89,6 +89,7 @@ private:
 
 	uint8_t palCtrlHeldMask = 0; // palette-control column rows held last frame (rising-edge detect)
 	uint8_t isoCtrlHeldMask = 0; // iso-control column rows held last frame (rising-edge detect)
+	uint64_t isoHeldMask = 0;    // iso pads held last frame (bit = localX*8+y) — rising-edge for voice edit
 };
 
 }; // namespace deluge::gui::ui::keyboard::layout

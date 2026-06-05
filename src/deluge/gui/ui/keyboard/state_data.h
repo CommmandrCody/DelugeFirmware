@@ -75,6 +75,7 @@ struct KeyboardStateHarmonic {
 	bool swapped = false;      // handedness: false = palette LEFT / iso RIGHT; true = mirror the two blocks
 	bool latticeOn = false;    // true = light the FULL chord lattice (every repeat) with an upward fade
 	bool spreadRows = false;   // true = bottom 2 iso rows become the spread/voicing strip; false = full iso
+	bool editVoicing = false;  // true = iso taps TOGGLE notes in/out of the selected chord's voicing
 };
 /// Please note that saving and restoring currently needs to be added manually in instrument_clip.cpp and all layouts
 /// share one struct for storage

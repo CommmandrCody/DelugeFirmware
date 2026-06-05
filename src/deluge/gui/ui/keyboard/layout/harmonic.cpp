@@ -145,7 +145,8 @@ constexpr int32_t kBtnIsoView = kDisplayHeight - 1;   // iso-ctrl: in-key <-> ch
 constexpr int32_t kBtnShowChord = kDisplayHeight - 2; // iso-ctrl: show / hide the chord shape
 constexpr int32_t kBtnSticky = kDisplayHeight - 3;    // iso-ctrl: sticky chord voicing
 constexpr int32_t kBtnLattice = kDisplayHeight - 4;   // iso-ctrl: full chord lattice on/off
-constexpr uint8_t kIsoCtrlClearMask = (uint8_t)((1u << (kDisplayHeight - 4)) - 1); // rows below = clear
+constexpr int32_t kBtnEdit = kDisplayHeight - 5;      // iso-ctrl: voice-edit (toggle notes in/out)
+constexpr uint8_t kIsoCtrlClearMask = (uint8_t)((1u << (kDisplayHeight - 5)) - 1); // rows below = clear
 
 constexpr int32_t kBtnCalc = kDisplayHeight - 1; // pal-ctrl: next-chord Calculator on/off
 constexpr int32_t kBtnSwap = kDisplayHeight - 2; // pal-ctrl: swap the two sides (handedness)
@@ -320,6 +321,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 
 	uint8_t palCtrlNow = 0;
 	uint8_t isoCtrlNow = 0;
+	uint64_t isoNowMask = 0; // iso pads pressed this frame (bit = localX*8+y) — for voice-edit rising edge
 	bool isoPlayed = false;
 	bool leftPicked = false;
 	for (int32_t idx = kMaxNumKeyboardPadPresses - 1; idx >= 0; --idx) {
@@ -341,9 +343,12 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			continue;
 		}
 		if (ci.region == REG_ISO) {
-			// The iso panel — free play. Sound the note; the selected chord highlight clears afterwards so
-			// the grid resets out of "chord mode" and you can pick a new shape (unless sticky is on).
+			// The iso panel. Sound the held note (free-play, or feedback while voice-editing). In EDIT mode a
+			// rising-edge press toggles this note in/out of the voicing (handled after the loop).
 			isoPlayed = true;
+			if (ci.local >= 0 && ci.local < kBlockWidth && pressed.y >= 0 && pressed.y < kDisplayHeight) {
+				isoNowMask |= (uint64_t)1u << (ci.local * kDisplayHeight + pressed.y);
+			}
 			int32_t note = getState().harmonic.isoChromatic ? isoNoteChromatic(ci.local, pressed.y)
 			                                                : isoNoteAt(ci.local, pressed.y);
 			if (note >= 0 && note <= 127) {
@@ -390,11 +395,42 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 	};
 
-	// Free play on the iso (without also picking a chord this frame) resets out of "chord mode" — unless
-	// sticky is on, in which case the selected shape stays put while you play around it.
-	if (isoPlayed && !leftPicked && !hs.stickyChord) {
+	// ISO voice-EDIT: a rising-edge iso press toggles that note IN/OUT of the selected chord's voicing.
+	if (hs.editVoicing) {
+		uint64_t risingIsoPads = isoNowMask & ~isoHeldMask;
+		for (int32_t b = 0; b < kBlockWidth * kDisplayHeight; b++) {
+			if (!(risingIsoPads & ((uint64_t)1u << b))) {
+				continue;
+			}
+			int32_t lx = b / kDisplayHeight, yy = b % kDisplayHeight;
+			int32_t note = hs.isoChromatic ? isoNoteChromatic(lx, yy) : isoNoteAt(lx, yy);
+			if (note < 0 || note > 127) {
+				continue;
+			}
+			int32_t found = -1;
+			for (uint8_t i = 0; i < chordNoteCount; i++) {
+				if (chordNotes[i] == note) {
+					found = (int32_t)i;
+					break;
+				}
+			}
+			if (found >= 0) { // remove this note from the voicing
+				for (uint8_t i = (uint8_t)found; i + 1 < chordNoteCount; i++) {
+					chordNotes[i] = chordNotes[i + 1];
+				}
+				chordNoteCount--;
+			}
+			else if (chordNoteCount < kMaxChordKeyboardSize) { // add it
+				chordNotes[chordNoteCount++] = (int16_t)note;
+			}
+		}
+	}
+	// Free play on the iso (without picking a chord) resets out of "chord mode" — unless sticky is on (or
+	// voice-edit, handled above, which never clears).
+	else if (isoPlayed && !leftPicked && !hs.stickyChord) {
 		clearSelection();
 	}
+	isoHeldMask = isoNowMask;
 
 	// ── ISO control column (rising-edge so holding doesn't repeat) ──
 	uint8_t risingIso = (uint8_t)(isoCtrlNow & ~isoCtrlHeldMask);
@@ -413,6 +449,10 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	if (risingIso & (uint8_t)(1u << kBtnLattice)) {
 		hs.latticeOn = !hs.latticeOn;
 		display->displayPopup(hs.latticeOn ? "LATT" : "ONE");
+	}
+	if (risingIso & (uint8_t)(1u << kBtnEdit)) {
+		hs.editVoicing = !hs.editVoicing;
+		display->displayPopup(hs.editVoicing ? "EDIT" : "PLAY");
 	}
 	if (risingIso & kIsoCtrlClearMask) {
 		clearSelection();
@@ -478,6 +518,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	bool calc = getState().harmonic.calculatorOn;
 	bool swapped = getState().harmonic.swapped;
 	bool latticeOn = getState().harmonic.latticeOn;
+	bool editVoicing = getState().harmonic.editVoicing;
 	int32_t isoStart = isoStartCol(swapped);
 	(void)iv;
 
@@ -597,6 +638,9 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (y == kBtnLattice) {
 					c = kCtrlHue.adjustFractional(latticeOn ? kCtrlOn : kCtrlOff, 255);
+				}
+				else if (y == kBtnEdit) {
+					c = kCtrlHue.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);
 				}
 				image[y][x] = c;
 			}

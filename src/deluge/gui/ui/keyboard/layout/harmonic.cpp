@@ -493,7 +493,8 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	if (risingIso & (uint8_t)(1u << kBtnEdit)) {
 		hs.editVoicing = !hs.editVoicing;
 		if (hs.editVoicing) {
-			hs.showChord = true; // editing needs the chord shown
+			hs.showChord = true;   // editing needs the chord shown
+			hs.stickyChord = true; // and HELD — so the chord survives editing/playing, doesn't vanish on a tap
 		}
 		display->displayPopup(hs.editVoicing ? "EDIT" : "PLAY");
 	}

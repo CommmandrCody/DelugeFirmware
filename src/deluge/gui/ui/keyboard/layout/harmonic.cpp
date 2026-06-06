@@ -431,13 +431,8 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 				chordNotes[chordNoteCount++] = (int16_t)note;
 			}
 		}
-		// SUSTAIN the voicing while editing so you HEAR the whole chord, live — every toggle reshapes the
-		// sound in real time (Modify and Audition collapse into one continuous gesture; no second hand).
-		for (uint8_t i = 0; i < chordNoteCount; i++) {
-			if (chordNotes[i] >= 0 && chordNotes[i] <= 127) {
-				enableNote((uint8_t)chordNotes[i], velocity);
-			}
-		}
+		// No auto-hold: edits are silent. Tap the AUDITION pad to STRIKE the voicing (it rings out per the
+		// synth's release) — hear the result of each edit on demand, nothing droning underneath.
 	}
 	// Free play on the iso (without picking a chord) resets out of "chord mode" — unless sticky is on (or
 	// voice-edit, handled above, which never clears).

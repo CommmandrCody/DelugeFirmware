@@ -114,7 +114,7 @@ const uint8_t kRichBright[kDisplayHeight] = {255, 195, 150, 115, 88, 68, 54, 42}
 // still carries the chord relationships). Mood-based, not a flat wheel — bright/dark per key's feel. This
 // is just the default; a custom + saveable per-user table is the natural next step. Indexed by root pc.
 const RGB kKeyColour[12] = {
-    RGB{.r = 240, .g = 235, .b = 220}, // C   open / pure       — warm white
+    RGB{.r = 255, .g = 150, .b = 110}, // C   open / warm       — warm coral (NOT white; white = the chord)
     RGB{.r = 130, .g = 55, .b = 180},  // C#  dark / mysterious — deep violet
     RGB{.r = 255, .g = 225, .b = 50},  // D   bright / joyful   — yellow
     RGB{.r = 190, .g = 90, .b = 50},   // D#  noble / warm-dark — deep red-gold

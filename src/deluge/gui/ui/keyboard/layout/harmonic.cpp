@@ -146,9 +146,11 @@ constexpr int32_t kBtnIsoView = kDisplayHeight - 1;   // iso-ctrl: in-key <-> ch
 constexpr int32_t kBtnShowChord = kDisplayHeight - 2; // iso-ctrl: show / hide the chord shape
 constexpr int32_t kBtnSticky = kDisplayHeight - 3;    // iso-ctrl: sticky chord voicing
 constexpr int32_t kBtnLattice = kDisplayHeight - 4;   // iso-ctrl: full chord lattice on/off
-constexpr int32_t kBtnEdit = 1;     // iso-ctrl: voice-edit toggle (the bottom TWO pads = edit + audition)
-constexpr int32_t kBtnAudition = 0; // iso-ctrl: AUDITION the voicing — momentary, hold to hear the chord
-constexpr uint8_t kIsoCtrlClearMask = (uint8_t)((1u << 2) | (1u << 3)); // rows 2-3 = clear pads
+constexpr int32_t kBtnStack = 3;                      // iso-ctrl: octave STACK level (tap to cycle 0..3)
+constexpr int32_t kBtnSpread = 2;                     // iso-ctrl: SPREAD level (drop-root open, tap to cycle 0..3)
+constexpr int32_t kBtnEdit = 1;          // iso-ctrl: voice-edit toggle (the bottom TWO pads = edit + audition)
+constexpr int32_t kBtnAudition = 0;      // iso-ctrl: AUDITION the voicing — momentary, hold to hear the chord
+constexpr uint8_t kIsoCtrlClearMask = 0; // iso-ctrl is full now (clear lives on the pal-ctrl column)
 
 constexpr int32_t kBtnCalc = kDisplayHeight - 1;       // pal-ctrl: next-chord Calculator on/off
 constexpr int32_t kBtnSwap = kDisplayHeight - 2;       // pal-ctrl: swap the two sides (handedness)
@@ -198,6 +200,53 @@ int32_t KeyboardLayoutHarmonic::isoNoteChromatic(int32_t localX, int32_t y) {
 	// Standard chromatic isomorphic mapping (semitone per column, rowInterval per row), anchored ONE
 	// OCTAVE BELOW the chord register so the voicing lands in the middle of the panel, not at the bottom.
 	return (getState().harmonic.isoOctave - 1) * 12 + getRootNote() + localX + y * getState().isomorphic.rowInterval;
+}
+
+uint8_t KeyboardLayoutHarmonic::buildVoicing(int16_t* out, uint8_t maxOut) {
+	// Gather + sort the base chord notes.
+	int16_t tmp[kMaxChordKeyboardSize];
+	uint8_t n = 0;
+	for (uint8_t i = 0; i < chordNoteCount && n < kMaxChordKeyboardSize; i++) {
+		tmp[n++] = chordNotes[i];
+	}
+	for (uint8_t i = 1; i < n; i++) {
+		int16_t v = tmp[i];
+		int32_t j = (int32_t)i - 1;
+		while (j >= 0 && tmp[j] > v) {
+			tmp[j + 1] = tmp[j];
+			j--;
+		}
+		tmp[j + 1] = v;
+	}
+	// SPREAD: drop the lowest notes down an octave to open the voicing (drop-root).
+	int8_t spread = getState().harmonic.voiceSpread;
+	for (int8_t k = 0; k < spread && k < (int8_t)n; k++) {
+		if (tmp[k] - 12 >= 0) {
+			tmp[k] = (int16_t)(tmp[k] - 12);
+		}
+	}
+	// STACK: the base (s=0) plus voiceStack octave-up copies. Dedup + clamp.
+	int8_t stack = getState().harmonic.voiceStack;
+	uint8_t cnt = 0;
+	for (int8_t s = 0; s <= stack; s++) {
+		for (uint8_t i = 0; i < n; i++) {
+			int32_t v = (int32_t)tmp[i] + 12 * s;
+			if (v < 0 || v > 127 || cnt >= maxOut) {
+				continue;
+			}
+			bool dup = false;
+			for (uint8_t k = 0; k < cnt; k++) {
+				if (out[k] == v) {
+					dup = true;
+					break;
+				}
+			}
+			if (!dup) {
+				out[cnt++] = (int16_t)v;
+			}
+		}
+	}
+	return cnt;
 }
 
 void KeyboardLayoutHarmonic::recomputeSuggestions(uint8_t keyRoot, const uint8_t* iv, uint8_t sc, uint8_t homeRootPc) {
@@ -490,6 +539,18 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 		display->displayPopup(hs.latticeOn ? "LATT" : "ONE");
 	}
+	if (risingIso & (uint8_t)(1u << kBtnStack)) {
+		hs.voiceStack = (int8_t)((hs.voiceStack + 1) % 4); // octave-double the chord (0..3 extra octaves)
+		char buf[8];
+		sprintf(buf, "STK%d", (int)hs.voiceStack);
+		display->displayPopup(buf);
+	}
+	if (risingIso & (uint8_t)(1u << kBtnSpread)) {
+		hs.voiceSpread = (int8_t)((hs.voiceSpread + 1) % 4); // open the voicing (drop the lowest notes)
+		char buf[8];
+		sprintf(buf, "SPR%d", (int)hs.voiceSpread);
+		display->displayPopup(buf);
+	}
 	if (risingIso & (uint8_t)(1u << kBtnEdit)) {
 		hs.editVoicing = !hs.editVoicing;
 		if (hs.editVoicing) {
@@ -502,11 +563,13 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		clearSelection();
 		display->displayPopup("CLR");
 	}
-	// AUDITION (momentary): while the pad is held, sound the current voicing so you can hear your edits.
+	// AUDITION (momentary): while held, sound the current VOICING (base chord through spread + stack).
 	if (isoCtrlNow & (uint8_t)(1u << kBtnAudition)) {
-		for (uint8_t i = 0; i < chordNoteCount; i++) {
-			if (chordNotes[i] >= 0 && chordNotes[i] <= 127) {
-				enableNote((uint8_t)chordNotes[i], velocity);
+		int16_t voiced[kMaxVoice];
+		uint8_t vn = buildVoicing(voiced, kMaxVoice);
+		for (uint8_t i = 0; i < vn; i++) {
+			if (voiced[i] >= 0 && voiced[i] <= 127) {
+				enableNote((uint8_t)voiced[i], velocity);
 			}
 		}
 	}
@@ -589,6 +652,8 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	bool swapped = getState().harmonic.swapped;
 	bool latticeOn = getState().harmonic.latticeOn;
 	bool editVoicing = getState().harmonic.editVoicing;
+	int8_t voiceStack = getState().harmonic.voiceStack;
+	int8_t voiceSpread = getState().harmonic.voiceSpread;
 	int32_t isoStart = isoStartCol(swapped);
 	// The highlighted chord on the iso wears its PALETTE colour (the selected degree's hue) — bright primary,
 	// faded repeats. Falls back to white when there's no degree (e.g. a voicing built from scratch in EDIT).
@@ -600,10 +665,13 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	uint8_t tri = (phase < 128) ? (phase * 2) : ((255 - phase) * 2); // triangle 0..255..0
 	uint8_t pulse = 30 + (uint8_t)((uint32_t)tri * 225 / 255);       // breathe between dim and full
 
-	// Match a pad's note against the EXACT voiced notes of the selected chord (not pitch classes).
+	// The actual VOICING (base chord expanded through SPREAD + STACK) — this is what's shown + played.
+	int16_t voiced[kMaxVoice];
+	uint8_t voicedN = buildVoicing(voiced, kMaxVoice);
+	// Match a pad's note against the EXACT voiced notes (not pitch classes).
 	auto inChordExact = [&](int32_t note) {
-		for (uint8_t i = 0; i < chordNoteCount; i++) {
-			if (chordNotes[i] == note) {
+		for (uint8_t i = 0; i < voicedN; i++) {
+			if (voiced[i] == note) {
 				return true;
 			}
 		}
@@ -631,12 +699,12 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	// The voicing repeats up the iso grid. Pick ONE pad per voiced note — the lowest (bottom-most, then
 	// left-most) occurrence — to draw at full brightness; repeats render dimmer, so one clean shape reads.
 	bool primary[kDisplayHeight][kDisplayWidth] = {};
-	for (uint8_t i = 0; i < chordNoteCount; i++) {
+	for (uint8_t i = 0; i < voicedN; i++) {
 		bool placed = false;
 		for (int32_t yy = 0; yy < kDisplayHeight && !placed; yy++) {
 			for (int32_t lx = 0; lx < kBlockWidth && !placed; lx++) {
 				int32_t nn = chromatic ? isoNoteChromatic(lx, yy) : isoNoteAt(lx, yy);
-				if (nn == chordNotes[i]) {
+				if (nn == voiced[i]) {
 					primary[yy][isoStart + lx] = true;
 					placed = true;
 				}
@@ -705,6 +773,13 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				else if (y == kBtnLattice) {
 					c = kCtrlHueIso.adjustFractional(latticeOn ? kCtrlOn : kCtrlOff, 255);
 				}
+				else if (y == kBtnStack) {
+					// brightness shows the stack level (0 = dim, 3 = bright)
+					c = kCtrlHueIso.adjustFractional(voiceStack ? (uint8_t)(60 + voiceStack * 58) : kCtrlOff, 255);
+				}
+				else if (y == kBtnSpread) {
+					c = kCtrlHueIso.adjustFractional(voiceSpread ? (uint8_t)(60 + voiceSpread * 58) : kCtrlOff, 255);
+				}
 				else if (y == kBtnEdit) {
 					c = kCtrlHueIso.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);
 				}
@@ -742,12 +817,12 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				// RULE: WHITE is reserved for THE CHORD (voiced shape + its lattice). Everything else lives in
 				// the key's COLOUR — the root pops as the brightest expression of that colour, never white.
 				if (showChord && latticeOn && chordNoteCount > 0 && inChordPc(pc)) {
-					// Chord-lattice overlay (every position the chord makes available): WHITE, fading UPWARD so
-					// it reads as a glowing stack rather than a flat wall.
-					uint8_t base = isCorePc(pc) ? 200 : 80;
+					// Chord-lattice overlay in the chord's PALETTE colour, but VERY light — a faint glow of
+					// every position the chord makes available, fading upward; never competes with the voicing.
+					uint8_t base = isCorePc(pc) ? 55 : 30;
 					uint8_t fade = (uint8_t)((uint32_t)base * (uint32_t)(kDisplayHeight - y) / kDisplayHeight);
-					if (fade < 18) {
-						fade = 18;
+					if (fade < 6) {
+						fade = 6;
 					}
 					out = chordHue.adjustFractional(fade, 255);
 				}

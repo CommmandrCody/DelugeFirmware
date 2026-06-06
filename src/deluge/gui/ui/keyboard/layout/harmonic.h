@@ -65,6 +65,9 @@ private:
 	                           int16_t* notesOut, uint8_t maxNotes, uint8_t* rootPcOut, char* romanOut, char* absOut);
 	int32_t isoNoteAt(int32_t localX, int32_t y);        // in-key mapping (localX = iso column 0..6)
 	int32_t isoNoteChromatic(int32_t localX, int32_t y); // chromatic isomorphic mapping (localX 0..6)
+	// Expand the base chord (chordNotes) into the played/shown VOICING per the SPREAD + STACK controls.
+	uint8_t buildVoicing(int16_t* out, uint8_t maxOut);
+	static constexpr uint8_t kMaxVoice = 16; // capacity for a stacked voicing
 	void recomputeSuggestions(uint8_t keyRoot, const uint8_t* iv, uint8_t sc, uint8_t homeRootPc);
 	void drawName(const char* roman, const char* abs);
 

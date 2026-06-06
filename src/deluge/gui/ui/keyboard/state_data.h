@@ -77,6 +77,8 @@ struct KeyboardStateHarmonic {
 	bool latticeOn = false;    // true = light the FULL chord lattice (every repeat) with an upward fade
 	bool spreadRows = false;   // true = bottom 2 iso rows become the spread/voicing strip; false = full iso
 	bool editVoicing = false;  // true = iso taps TOGGLE notes in/out of the selected chord's voicing
+	int8_t voiceStack = 0;     // octave STACK: 0..3 extra octave-up copies of the chord (Theory-Board style)
+	int8_t voiceSpread = 0;    // SPREAD: 0..3 lowest notes dropped an octave to open the voicing (drop-root)
 };
 /// Please note that saving and restoring currently needs to be added manually in instrument_clip.cpp and all layouts
 /// share one struct for storage

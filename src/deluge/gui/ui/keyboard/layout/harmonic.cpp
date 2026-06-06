@@ -145,8 +145,9 @@ constexpr int32_t kBtnIsoView = kDisplayHeight - 1;   // iso-ctrl: in-key <-> ch
 constexpr int32_t kBtnShowChord = kDisplayHeight - 2; // iso-ctrl: show / hide the chord shape
 constexpr int32_t kBtnSticky = kDisplayHeight - 3;    // iso-ctrl: sticky chord voicing
 constexpr int32_t kBtnLattice = kDisplayHeight - 4;   // iso-ctrl: full chord lattice on/off
-constexpr int32_t kBtnEdit = kDisplayHeight - 5;      // iso-ctrl: voice-edit (toggle notes in/out)
-constexpr uint8_t kIsoCtrlClearMask = (uint8_t)((1u << (kDisplayHeight - 5)) - 1); // rows below = clear
+constexpr int32_t kBtnEdit = 1;     // iso-ctrl: voice-edit toggle (the bottom TWO pads = edit + audition)
+constexpr int32_t kBtnAudition = 0; // iso-ctrl: AUDITION the voicing — momentary, hold to hear the chord
+constexpr uint8_t kIsoCtrlClearMask = (uint8_t)((1u << 2) | (1u << 3)); // rows 2-3 = clear pads
 
 constexpr int32_t kBtnCalc = kDisplayHeight - 1; // pal-ctrl: next-chord Calculator on/off
 constexpr int32_t kBtnSwap = kDisplayHeight - 2; // pal-ctrl: swap the two sides (handedness)
@@ -154,10 +155,10 @@ constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << (kDisplayHeight - 2)) - 1
 
 // Reserved control-zone colour — a PINK used NOWHERE else in Chroma, so the two centre control columns
 // read instantly as "controls, not music". On = brighter pink, off = dim pink, whole column faintly tinted.
-const RGB kCtrlHue = RGB{.r = 255, .g = 40, .b = 150};
-constexpr uint8_t kCtrlOn = 200;
-constexpr uint8_t kCtrlOff = 55;
-constexpr uint8_t kCtrlFaint = 16;
+const RGB kCtrlHue = RGB{.r = 255, .g = 30, .b = 145};
+constexpr uint8_t kCtrlOn = 235;
+constexpr uint8_t kCtrlOff = 90;
+constexpr uint8_t kCtrlFaint = 45; // brighter zone tint so the pink control columns clearly read as a zone
 
 } // namespace
 
@@ -458,6 +459,14 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		clearSelection();
 		display->displayPopup("CLR");
 	}
+	// AUDITION (momentary): while the pad is held, sound the current voicing so you can hear your edits.
+	if (isoCtrlNow & (uint8_t)(1u << kBtnAudition)) {
+		for (uint8_t i = 0; i < chordNoteCount; i++) {
+			if (chordNotes[i] >= 0 && chordNotes[i] <= 127) {
+				enableNote((uint8_t)chordNotes[i], velocity);
+			}
+		}
+	}
 	isoCtrlHeldMask = isoCtrlNow;
 
 	// ── PALETTE control column ──
@@ -641,6 +650,10 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (y == kBtnEdit) {
 					c = kCtrlHue.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);
+				}
+				else if (y == kBtnAudition) {
+					// AUDITION = the play button for the voicing; steady bright when a chord is loaded.
+					c = kCtrlHue.adjustFractional(chordNoteCount > 0 ? kCtrlOn : kCtrlOff, 255);
 				}
 				image[y][x] = c;
 			}

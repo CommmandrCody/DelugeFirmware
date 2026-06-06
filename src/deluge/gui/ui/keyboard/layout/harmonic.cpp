@@ -717,7 +717,11 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 			int32_t local = ci.local;
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
 				int32_t note = chromatic ? isoNoteChromatic(local, y) : isoNoteAt(local, y);
-				int32_t clamped = (note < 0) ? 0 : (note > 127 ? 127 : note);
+				if (note < 0 || note > 127) {
+					image[y][x] = RGB{}; // off the top/bottom of MIDI — no real note here, stay dark
+					continue;
+				}
+				int32_t clamped = note;
 				uint8_t pc = (uint8_t)(((clamped % 12) + 12) % 12);
 				uint8_t within = (uint8_t)(((pc + kOctaveSize) - keyRoot) % kOctaveSize); // 0 = scale tonic
 				bool inScale = getScaleNotes().has(within);

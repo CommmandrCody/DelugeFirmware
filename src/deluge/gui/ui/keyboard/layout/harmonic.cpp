@@ -82,16 +82,17 @@ struct Richness {
 	const char* suffix;
 	int8_t steps[kMaxChordKeyboardSize];
 	uint8_t count;
+	int8_t add; // chromatic semitone to add above the root (-1 = none); used for the BRIGHT major-6th
 };
 const Richness kLadder[kDisplayHeight] = {
-    {"", {0, 0, 0, 0, 0, 0, 0}, 1},     // row0 ROOT  — single note; the bass / "where it starts" anchor
-    {"5", {0, 4, 0, 0, 0, 0, 0}, 2},    // row1 DYAD  — root + 5th (power)
-    {"", {0, 2, 4, 0, 0, 0, 0}, 3},     // row2 TRIAD
-    {"6", {0, 2, 4, 5, 0, 0, 0}, 4},    // row3 6th
-    {"7", {0, 2, 4, 6, 0, 0, 0}, 4},    // row4 7th
-    {"9", {0, 2, 4, 6, 8, 0, 0}, 5},    // row5 9th
-    {"11", {0, 2, 4, 6, 8, 10, 0}, 6},  // row6 11th
-    {"13", {0, 2, 4, 6, 8, 10, 12}, 7}, // row7 13th
+    {"", {0, 0, 0, 0, 0, 0, 0}, 1, -1},     // row0 ROOT  — single note; the bass / "where it starts" anchor
+    {"5", {0, 4, 0, 0, 0, 0, 0}, 2, -1},    // row1 DYAD  — root + 5th (power)
+    {"", {0, 2, 4, 0, 0, 0, 0}, 3, -1},     // row2 TRIAD
+    {"6", {0, 2, 4, 0, 0, 0, 0}, 3, 9},     // row3 6th  — triad + a BRIGHT major 6th (root+9), borrowed if needed
+    {"7", {0, 2, 4, 6, 0, 0, 0}, 4, -1},    // row4 7th
+    {"9", {0, 2, 4, 6, 8, 0, 0}, 5, -1},    // row5 9th
+    {"11", {0, 2, 4, 6, 8, 10, 0}, 6, -1},  // row6 11th
+    {"13", {0, 2, 4, 6, 8, 10, 12}, 7, -1}, // row7 13th
 };
 
 // One colour per scale degree, ordered so ADJACENT columns jump across the colour wheel (warm/cool
@@ -257,6 +258,15 @@ uint8_t KeyboardLayoutHarmonic::buildChordAtDegree(uint8_t deg, int32_t y, const
 		if (midi < 0) {
 			midi = 0;
 		}
+		if (midi > 127) {
+			midi = 127;
+		}
+		notesOut[count++] = (int16_t)midi;
+	}
+	// Chromatic add (the BRIGHT major-6th): always a real major 6th above the root, borrowed if the scale
+	// only has the flat 6 — so the "6" rung is a bright minor-6/major-6, not a dark b6.
+	if (rich.add >= 0 && count > 0 && count < maxNotes) {
+		int32_t midi = (int32_t)notesOut[0] + rich.add;
 		if (midi > 127) {
 			midi = 127;
 		}

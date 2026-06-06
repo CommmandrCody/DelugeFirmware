@@ -406,6 +406,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	// ISO voice-EDIT: a rising-edge iso press toggles that note IN/OUT of the selected chord's voicing.
 	if (hs.editVoicing) {
 		uint64_t risingIsoPads = isoNowMask & ~isoHeldMask;
+		bool edited = false;
 		for (int32_t b = 0; b < kBlockWidth * kDisplayHeight; b++) {
 			if (!(risingIsoPads & ((uint64_t)1u << b))) {
 				continue;
@@ -431,9 +432,23 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			else if (chordNoteCount < kMaxChordKeyboardSize) { // add it
 				chordNotes[chordNoteCount++] = (int16_t)note;
 			}
+			edited = true;
 		}
-		// No auto-hold: edits are silent. Tap the AUDITION pad to STRIKE the voicing (it rings out per the
-		// synth's release) — hear the result of each edit on demand, nothing droning underneath.
+		// Each edit, CALCULATE + name the chord you've built so you can SEE what you made (works even when
+		// you started from nothing). No auto-hold — tap AUDITION to strike the voicing and hear it ring.
+		if (edited && chordNoteCount > 0) {
+			uint8_t nu[kMaxChordKeyboardSize];
+			uint8_t nc = 0;
+			for (uint8_t i = 0; i < chordNoteCount && nc < kMaxChordKeyboardSize; i++) {
+				if (chordNotes[i] >= 0 && chordNotes[i] <= 127) {
+					nu[nc++] = (uint8_t)chordNotes[i];
+				}
+			}
+			char nm[48];
+			if (nameChordFromNotes(nu, nc, nm, keyPrefersFlats(keyRoot, getScaleNotes()))) {
+				drawName(nullptr, nm);
+			}
+		}
 	}
 	// Free play on the iso (without picking a chord) resets out of "chord mode" — unless sticky is on (or
 	// voice-edit, handled above, which never clears).

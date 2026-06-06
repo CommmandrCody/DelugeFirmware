@@ -605,16 +605,6 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 		}
 		return false;
 	};
-	// Core identity tones = the first up-to-4 voiced notes (root/3/5/7); beyond is extension. Core shines.
-	auto isCoreTone = [&](int32_t note) {
-		uint8_t coreCount = (chordNoteCount < 4) ? chordNoteCount : 4;
-		for (uint8_t i = 0; i < coreCount; i++) {
-			if (chordNotes[i] == note) {
-				return true;
-			}
-		}
-		return false;
-	};
 	// Pitch-class versions for the full LATTICE (every octave/position of a chord tone, not just the voicing).
 	auto inChordPc = [&](uint8_t pcq) {
 		for (uint8_t i = 0; i < chordNoteCount; i++) {
@@ -755,7 +745,9 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (showChord && inChordExact(note)) {
 					// Voiced-chord overlay: WHITE. Primary shape brightest, repeats dimmer, extensions faint.
-					out = RGB::monochrome(isCoreTone(note) ? (primary[y][x] ? 255 : 105) : 45);
+					// The WHOLE voicing is bright white (every voiced note, incl. 9/11/13). Primary occurrence
+					// full-bright; isomorphic repeats a touch dimmer so one clean shape still reads.
+					out = RGB::monochrome(primary[y][x] ? 255 : 110);
 				}
 				else if (playing) {
 					out = key.adjustFractional(255, 255); // live free-play notes glow in the KEY colour

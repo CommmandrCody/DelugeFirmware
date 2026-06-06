@@ -590,6 +590,9 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	bool latticeOn = getState().harmonic.latticeOn;
 	bool editVoicing = getState().harmonic.editVoicing;
 	int32_t isoStart = isoStartCol(swapped);
+	// The highlighted chord on the iso wears its PALETTE colour (the selected degree's hue) — bright primary,
+	// faded repeats. Falls back to white when there's no degree (e.g. a voicing built from scratch in EDIT).
+	RGB chordHue = (selDeg >= 0 && selDeg < 7) ? kDegreeHue[selDeg] : RGB{.r = 255, .g = 255, .b = 255};
 	(void)iv;
 
 	// Breathing pulse for the Calculator's next-chord suggestions (same cadence as the Chord Library).
@@ -746,13 +749,13 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					if (fade < 18) {
 						fade = 18;
 					}
-					out = RGB::monochrome(fade);
+					out = chordHue.adjustFractional(fade, 255);
 				}
 				else if (showChord && inChordExact(note)) {
 					// Voiced-chord overlay: WHITE. Primary shape brightest, repeats dimmer, extensions faint.
 					// The WHOLE voicing is bright white (every voiced note, incl. 9/11/13). Primary occurrence
 					// full-bright; isomorphic repeats a touch dimmer so one clean shape still reads.
-					out = RGB::monochrome(primary[y][x] ? 255 : 110);
+					out = chordHue.adjustFractional(primary[y][x] ? 255 : 110, 255);
 				}
 				else if (playing) {
 					out = key.adjustFractional(255, 255); // live free-play notes glow in the KEY colour

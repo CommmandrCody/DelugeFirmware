@@ -66,19 +66,20 @@ struct KeyboardStateChord {
 // Harmonic layout: degree columns × richness rows. Horizontal scroll moves through scale degrees;
 // octaveBase sets the register of the tonic (MIDI tonic = octaveBase*12 + key root pitch class).
 struct KeyboardStateHarmonic {
-	int32_t scrollSteps = 0;   // horizontal scroll, in scale-degree steps (0 = tonic at column 0)
-	int32_t octaveBase = 3;    // PALETTE octave: register the chords are built in (pal-ctrl OCT+/- buttons)
-	int32_t isoOctave = 3;     // ISO octave SHOWN: the iso scrolls independently (vertical encoder)
-	bool isoChromatic = false; // right panel: false = in-key (matches In-Key kbd), true = standard chromatic iso
-	bool stickyChord = false;  // true = selected chord shape persists through iso free-play; false = clears
-	bool calculatorOn = true;  // true = show next-chord brain suggestions on the left
-	bool showChord = true;     // true = light the selected chord's shape on the iso; false = clean grid
-	bool swapped = false;      // handedness: false = palette LEFT / iso RIGHT; true = mirror the two blocks
-	bool latticeOn = false;    // true = light the FULL chord lattice (every repeat) with an upward fade
-	bool spreadRows = false;   // true = bottom 2 iso rows become the spread/voicing strip; false = full iso
-	bool editVoicing = false;  // true = iso taps TOGGLE notes in/out of the selected chord's voicing
-	int8_t voiceStack = 0;     // octave STACK: 0..3 extra octave-up copies of the chord (Theory-Board style)
-	int8_t voiceSpread = 0;    // SPREAD: 0..3 lowest notes dropped an octave to open the voicing (drop-root)
+	int32_t scrollSteps = 0;     // horizontal scroll, in scale-degree steps (0 = tonic at column 0)
+	int32_t octaveBase = 3;      // PALETTE octave: register the chords are built in (pal-ctrl OCT+/- buttons)
+	int32_t isoOctave = 3;       // ISO octave SHOWN: the iso scrolls independently (vertical encoder)
+	bool isoChromatic = false;   // right panel: false = in-key (matches In-Key kbd), true = standard chromatic iso
+	bool stickyChord = false;    // true = selected chord shape persists through iso free-play; false = clears
+	bool calculatorOn = true;    // true = show next-chord brain suggestions on the left
+	bool showChord = true;       // true = light the selected chord's shape on the iso; false = clean grid
+	bool swapped = false;        // handedness: false = palette LEFT / iso RIGHT; true = mirror the two blocks
+	bool latticeOn = false;      // true = light the FULL chord lattice (every repeat) with an upward fade
+	bool spreadRows = false;     // true = bottom 2 iso rows become the spread/voicing strip; false = full iso
+	bool editVoicing = false;    // true = iso taps TOGGLE notes in/out of the selected chord's voicing
+	uint8_t voiceOctaves = 0x08; // octave STACK bitmask: bits 0..6 = octave offsets -3..+3; bit3 (base) always on
+	bool stackPick = false;      // true = iso bottom row is the octave-PICKER strip (toggle which octaves)
+	int8_t voiceSpread = 0;      // SPREAD: 0..3 lowest notes dropped an octave to open the voicing (drop-root)
 };
 /// Please note that saving and restoring currently needs to be added manually in instrument_clip.cpp and all layouts
 /// share one struct for storage

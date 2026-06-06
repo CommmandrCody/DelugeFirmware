@@ -225,12 +225,16 @@ uint8_t KeyboardLayoutHarmonic::buildVoicing(int16_t* out, uint8_t maxOut) {
 			tmp[k] = (int16_t)(tmp[k] - 12);
 		}
 	}
-	// STACK: the base (s=0) plus voiceStack octave-up copies. Dedup + clamp.
-	int8_t stack = getState().harmonic.voiceStack;
+	// STACK: copy the chord into each SELECTED octave (bits 0..6 = offsets -3..+3; bit3 = base). Dedup + clamp.
+	uint8_t octaves = getState().harmonic.voiceOctaves;
 	uint8_t cnt = 0;
-	for (int8_t s = 0; s <= stack; s++) {
+	for (int8_t b = 0; b < 7; b++) {
+		if (!(octaves & (uint8_t)(1u << b))) {
+			continue;
+		}
+		int32_t off = ((int32_t)b - 3) * 12;
 		for (uint8_t i = 0; i < n; i++) {
-			int32_t v = (int32_t)tmp[i] + 12 * s;
+			int32_t v = (int32_t)tmp[i] + off;
 			if (v < 0 || v > 127 || cnt >= maxOut) {
 				continue;
 			}
@@ -415,7 +419,8 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			}
 			// Free play sounds the tapped note. In EDIT mode we DON'T sound single taps — the whole voicing
 			// drones (after the loop) so you hear the CHORD you're sculpting, not isolated pings.
-			if (!getState().harmonic.editVoicing) {
+			bool stripPad = (getState().harmonic.stackPick && pressed.y == 0); // bottom row = octave picker
+			if (!getState().harmonic.editVoicing && !stripPad) {
 				int32_t note = getState().harmonic.isoChromatic ? isoNoteChromatic(ci.local, pressed.y)
 				                                                : isoNoteAt(ci.local, pressed.y);
 				if (note >= 0 && note <= 127) {
@@ -464,6 +469,18 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 	};
 
+	// OCTAVE PICKER: in stack-pick mode, rising bottom-row iso pads toggle which octaves are in the stack
+	// (local 0..6 = offsets -3..+3; local 3 = base octave, always on).
+	if (hs.stackPick) {
+		uint64_t risingPads = isoNowMask & ~isoHeldMask;
+		for (int32_t lx = 0; lx < kBlockWidth; lx++) {
+			if ((risingPads & ((uint64_t)1u << (lx * kDisplayHeight))) && lx != 3) {
+				hs.voiceOctaves ^= (uint8_t)(1u << lx);
+			}
+		}
+		hs.voiceOctaves |= (uint8_t)(1u << 3);
+	}
+
 	// ISO voice-EDIT: a rising-edge iso press toggles that note IN/OUT of the selected chord's voicing.
 	if (hs.editVoicing) {
 		uint64_t risingIsoPads = isoNowMask & ~isoHeldMask;
@@ -473,6 +490,9 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 				continue;
 			}
 			int32_t lx = b / kDisplayHeight, yy = b % kDisplayHeight;
+			if (hs.stackPick && yy == 0) {
+				continue; // bottom row belongs to the octave picker
+			}
 			int32_t note = hs.isoChromatic ? isoNoteChromatic(lx, yy) : isoNoteAt(lx, yy);
 			if (note < 0 || note > 127) {
 				continue;
@@ -513,7 +533,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	}
 	// Free play on the iso (without picking a chord) resets out of "chord mode" — unless sticky is on (or
 	// voice-edit, handled above, which never clears).
-	else if (isoPlayed && !leftPicked && !hs.stickyChord) {
+	else if (isoPlayed && !leftPicked && !hs.stickyChord && !hs.stackPick) {
 		clearSelection();
 	}
 	isoHeldMask = isoNowMask;
@@ -540,10 +560,9 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		display->displayPopup(hs.latticeOn ? "LATT" : "ONE");
 	}
 	if (risingIso & (uint8_t)(1u << kBtnStack)) {
-		hs.voiceStack = (int8_t)((hs.voiceStack + 1) % 4); // octave-double the chord (0..3 extra octaves)
-		char buf[8];
-		sprintf(buf, "STK%d", (int)hs.voiceStack);
-		display->displayPopup(buf);
+		hs.stackPick = !hs.stackPick;          // iso bottom row becomes the octave-picker strip
+		hs.voiceOctaves |= (uint8_t)(1u << 3); // base octave always on
+		display->displayPopup(hs.stackPick ? "OCT" : "STAK");
 	}
 	if (risingIso & (uint8_t)(1u << kBtnSpread)) {
 		hs.voiceSpread = (int8_t)((hs.voiceSpread + 1) % 4); // open the voicing (drop the lowest notes)
@@ -652,7 +671,8 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	bool swapped = getState().harmonic.swapped;
 	bool latticeOn = getState().harmonic.latticeOn;
 	bool editVoicing = getState().harmonic.editVoicing;
-	int8_t voiceStack = getState().harmonic.voiceStack;
+	bool stackPick = getState().harmonic.stackPick;
+	uint8_t voiceOctaves = getState().harmonic.voiceOctaves;
 	int8_t voiceSpread = getState().harmonic.voiceSpread;
 	int32_t isoStart = isoStartCol(swapped);
 	// The highlighted chord on the iso wears its PALETTE colour (the selected degree's hue) — bright primary,
@@ -774,8 +794,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					c = kCtrlHueIso.adjustFractional(latticeOn ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnStack) {
-					// brightness shows the stack level (0 = dim, 3 = bright)
-					c = kCtrlHueIso.adjustFractional(voiceStack ? (uint8_t)(60 + voiceStack * 58) : kCtrlOff, 255);
+					c = kCtrlHueIso.adjustFractional(stackPick ? kCtrlOn : kCtrlOff, 255); // octave-picker mode
 				}
 				else if (y == kBtnSpread) {
 					c = kCtrlHueIso.adjustFractional(voiceSpread ? (uint8_t)(60 + voiceSpread * 58) : kCtrlOff, 255);
@@ -795,6 +814,13 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 			// chord CORE (root/3/5/7) brightest, extensions/repeats dimmer, steady tonic anchor, scale backdrop.
 			int32_t local = ci.local;
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
+				// OCTAVE PICKER strip on the bottom row: local 0..6 = octaves -3..+3, local 3 = base.
+				if (stackPick && y == 0) {
+					bool on = (voiceOctaves & (uint8_t)(1u << local)) != 0;
+					uint8_t pb = (local == 3) ? 255 : (on ? 200 : 28);
+					image[y][x] = chordHue.adjustFractional(pb, 255);
+					continue;
+				}
 				int32_t note = chromatic ? isoNoteChromatic(local, y) : isoNoteAt(local, y);
 				if (note < 0 || note > 127) {
 					image[y][x] = RGB{}; // off the top/bottom of MIDI — no real note here, stay dark

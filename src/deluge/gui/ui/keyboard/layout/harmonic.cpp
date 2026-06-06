@@ -380,6 +380,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			}
 			heldCols |= (uint16_t)(1u << ci.local);
 			leftPicked = true;
+			getState().harmonic.showChord = true; // picking a chord always shows it (no silent hidden state)
 			// Persist the selection so the highlight + iso shape stay after release, and ask the Calculator
 			// where to go next (suggested degree columns flash in renderPads).
 			selDeg = (int8_t)deg;
@@ -457,10 +458,16 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	}
 	if (risingIso & (uint8_t)(1u << kBtnLattice)) {
 		hs.latticeOn = !hs.latticeOn;
+		if (hs.latticeOn) {
+			hs.showChord = true; // lattice needs the chord shown — turn it on so it can't silently do nothing
+		}
 		display->displayPopup(hs.latticeOn ? "LATT" : "ONE");
 	}
 	if (risingIso & (uint8_t)(1u << kBtnEdit)) {
 		hs.editVoicing = !hs.editVoicing;
+		if (hs.editVoicing) {
+			hs.showChord = true; // editing needs the chord shown
+		}
 		display->displayPopup(hs.editVoicing ? "EDIT" : "PLAY");
 	}
 	if (risingIso & kIsoCtrlClearMask) {

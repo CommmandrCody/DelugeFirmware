@@ -67,7 +67,8 @@ struct KeyboardStateChord {
 // octaveBase sets the register of the tonic (MIDI tonic = octaveBase*12 + key root pitch class).
 struct KeyboardStateHarmonic {
 	int32_t scrollSteps = 0;   // horizontal scroll, in scale-degree steps (0 = tonic at column 0)
-	int32_t octaveBase = 3;    // octave of the tonic; vertical encoder shifts it (lower = warmer chords)
+	int32_t octaveBase = 3;    // PALETTE octave: register the chords are built in (pal-ctrl OCT+/- buttons)
+	int32_t isoOctave = 3;     // ISO octave SHOWN: the iso scrolls independently (vertical encoder)
 	bool isoChromatic = false; // right panel: false = in-key (matches In-Key kbd), true = standard chromatic iso
 	bool stickyChord = false;  // true = selected chord shape persists through iso free-play; false = clears
 	bool calculatorOn = true;  // true = show next-chord brain suggestions on the left

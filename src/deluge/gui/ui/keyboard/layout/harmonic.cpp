@@ -150,9 +150,11 @@ constexpr int32_t kBtnEdit = 1;     // iso-ctrl: voice-edit toggle (the bottom T
 constexpr int32_t kBtnAudition = 0; // iso-ctrl: AUDITION the voicing — momentary, hold to hear the chord
 constexpr uint8_t kIsoCtrlClearMask = (uint8_t)((1u << 2) | (1u << 3)); // rows 2-3 = clear pads
 
-constexpr int32_t kBtnCalc = kDisplayHeight - 1; // pal-ctrl: next-chord Calculator on/off
-constexpr int32_t kBtnSwap = kDisplayHeight - 2; // pal-ctrl: swap the two sides (handedness)
-constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << (kDisplayHeight - 2)) - 1); // rows below = clear
+constexpr int32_t kBtnCalc = kDisplayHeight - 1;       // pal-ctrl: next-chord Calculator on/off
+constexpr int32_t kBtnSwap = kDisplayHeight - 2;       // pal-ctrl: swap the two sides (handedness)
+constexpr int32_t kBtnPalOctUp = kDisplayHeight - 3;   // pal-ctrl: PALETTE octave up
+constexpr int32_t kBtnPalOctDown = kDisplayHeight - 4; // pal-ctrl: PALETTE octave down
+constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << (kDisplayHeight - 4)) - 1); // rows below = clear
 
 // Reserved control-zone colours — a "control family" (PINK + PURPLE) used NOWHERE else in Chroma. The two
 // centre columns get DIFFERENT hues so they're instantly distinguishable: palette-control = PINK,
@@ -183,7 +185,7 @@ int32_t KeyboardLayoutHarmonic::isoNoteAt(int32_t localX, int32_t y) {
 	}
 	// In-Key keyboard mapping (scale-step layout + colours). Anchor the panel ONE OCTAVE BELOW the chord
 	// register (octaveBase) so the voicing — built at octaveBase — lands up in the middle of the panel.
-	int32_t padIndex = (getState().harmonic.octaveBase - 1) * (int32_t)sc + localX + y * getState().inKey.rowInterval;
+	int32_t padIndex = (getState().harmonic.isoOctave - 1) * (int32_t)sc + localX + y * getState().inKey.rowInterval;
 	if (padIndex < 0) {
 		padIndex = 0;
 	}
@@ -195,7 +197,7 @@ int32_t KeyboardLayoutHarmonic::isoNoteAt(int32_t localX, int32_t y) {
 int32_t KeyboardLayoutHarmonic::isoNoteChromatic(int32_t localX, int32_t y) {
 	// Standard chromatic isomorphic mapping (semitone per column, rowInterval per row), anchored ONE
 	// OCTAVE BELOW the chord register so the voicing lands in the middle of the panel, not at the bottom.
-	return (getState().harmonic.octaveBase - 1) * 12 + getRootNote() + localX + y * getState().isomorphic.rowInterval;
+	return (getState().harmonic.isoOctave - 1) * 12 + getRootNote() + localX + y * getState().isomorphic.rowInterval;
 }
 
 void KeyboardLayoutHarmonic::recomputeSuggestions(uint8_t keyRoot, const uint8_t* iv, uint8_t sc, uint8_t homeRootPc) {
@@ -526,6 +528,22 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		hs.swapped = !hs.swapped;
 		display->displayPopup(hs.swapped ? "SWAP" : "NORM");
 	}
+	if (risingPal & (uint8_t)(1u << kBtnPalOctUp)) {
+		if (hs.octaveBase < 8) {
+			hs.octaveBase++;
+		}
+		char buf[8];
+		sprintf(buf, "OCT%d", (int)hs.octaveBase);
+		display->displayPopup(buf);
+	}
+	if (risingPal & (uint8_t)(1u << kBtnPalOctDown)) {
+		if (hs.octaveBase > 1) {
+			hs.octaveBase--;
+		}
+		char buf[8];
+		sprintf(buf, "OCT%d", (int)hs.octaveBase);
+		display->displayPopup(buf);
+	}
 	if (risingPal & kPalCtrlClearMask) {
 		clearSelection();
 		display->displayPopup("CLR");
@@ -539,13 +557,15 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 	if (verticalEncoderHandledByColumns(offset)) {
 		return;
 	}
+	// Vertical encoder scrolls the ISO independently (like the native iso keyboard) — the "octave shown".
+	// The PALETTE octave is separate (pal-ctrl OCT+/- buttons), so you set chord register + iso view apart.
 	KeyboardStateHarmonic& state = getState().harmonic;
-	state.octaveBase += offset;
-	if (state.octaveBase < 1) {
-		state.octaveBase = 1;
+	state.isoOctave += offset;
+	if (state.isoOctave < 1) {
+		state.isoOctave = 1;
 	}
-	if (state.octaveBase > 8) {
-		state.octaveBase = 8;
+	if (state.isoOctave > 8) {
+		state.isoOctave = 8;
 	}
 	precalculate();
 }
@@ -668,6 +688,9 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (y == kBtnSwap) {
 					c = kCtrlHue.adjustFractional(swapped ? kCtrlOn : kCtrlOff, 255);
+				}
+				else if (y == kBtnPalOctUp || y == kBtnPalOctDown) {
+					c = kCtrlHue.adjustFractional(kCtrlOn, 255); // steady-bright palette octave +/- buttons
 				}
 				image[y][x] = c;
 			}

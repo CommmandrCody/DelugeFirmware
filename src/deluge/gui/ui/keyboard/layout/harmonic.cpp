@@ -153,12 +153,14 @@ constexpr int32_t kBtnCalc = kDisplayHeight - 1; // pal-ctrl: next-chord Calcula
 constexpr int32_t kBtnSwap = kDisplayHeight - 2; // pal-ctrl: swap the two sides (handedness)
 constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << (kDisplayHeight - 2)) - 1); // rows below = clear
 
-// Reserved control-zone colour — a PINK used NOWHERE else in Chroma, so the two centre control columns
-// read instantly as "controls, not music". On = brighter pink, off = dim pink, whole column faintly tinted.
-const RGB kCtrlHue = RGB{.r = 255, .g = 30, .b = 145};
+// Reserved control-zone colours — a "control family" (PINK + PURPLE) used NOWHERE else in Chroma. The two
+// centre columns get DIFFERENT hues so they're instantly distinguishable: palette-control = PINK,
+// iso-control = PURPLE. On = bright, off = dim, whole column faintly tinted so each reads as its own zone.
+const RGB kCtrlHue = RGB{.r = 255, .g = 30, .b = 145};    // palette-control = PINK
+const RGB kCtrlHueIso = RGB{.r = 150, .g = 80, .b = 255}; // iso-control = PURPLE
 constexpr uint8_t kCtrlOn = 235;
 constexpr uint8_t kCtrlOff = 90;
-constexpr uint8_t kCtrlFaint = 45; // brighter zone tint so the pink control columns clearly read as a zone
+constexpr uint8_t kCtrlFaint = 45; // brighter zone tint so the control columns clearly read as zones
 
 } // namespace
 
@@ -633,27 +635,27 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 			}
 		}
 		else if (ci.region == REG_ISO_CTRL) {
-			// Iso-bound controls: view, show-chord, sticky, lattice. Reserved PINK zone; clear pads below.
+			// Iso-bound controls: view, show-chord, sticky, lattice, edit, audition. Reserved PURPLE zone.
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
-				RGB c = kCtrlHue.adjustFractional(kCtrlFaint, 255); // faint pink marks the control zone
+				RGB c = kCtrlHueIso.adjustFractional(kCtrlFaint, 255); // faint purple marks the iso-control zone
 				if (y == kBtnIsoView) {
-					c = kCtrlHue.adjustFractional(chromatic ? kCtrlOn : kCtrlOff, 255);
+					c = kCtrlHueIso.adjustFractional(chromatic ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnShowChord) {
-					c = kCtrlHue.adjustFractional(showChord ? kCtrlOn : kCtrlOff, 255);
+					c = kCtrlHueIso.adjustFractional(showChord ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnSticky) {
-					c = kCtrlHue.adjustFractional(sticky ? kCtrlOn : kCtrlOff, 255);
+					c = kCtrlHueIso.adjustFractional(sticky ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnLattice) {
-					c = kCtrlHue.adjustFractional(latticeOn ? kCtrlOn : kCtrlOff, 255);
+					c = kCtrlHueIso.adjustFractional(latticeOn ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnEdit) {
-					c = kCtrlHue.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);
+					c = kCtrlHueIso.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnAudition) {
 					// AUDITION = the play button for the voicing; steady bright when a chord is loaded.
-					c = kCtrlHue.adjustFractional(chordNoteCount > 0 ? kCtrlOn : kCtrlOff, 255);
+					c = kCtrlHueIso.adjustFractional(chordNoteCount > 0 ? kCtrlOn : kCtrlOff, 255);
 				}
 				image[y][x] = c;
 			}

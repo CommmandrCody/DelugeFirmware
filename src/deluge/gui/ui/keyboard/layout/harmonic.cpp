@@ -118,7 +118,7 @@ const RGB kKeyColour[12] = {
     RGB{.r = 130, .g = 55, .b = 180},  // C#  dark / mysterious — deep violet
     RGB{.r = 255, .g = 225, .b = 50},  // D   bright / joyful   — yellow
     RGB{.r = 190, .g = 90, .b = 50},   // D#  noble / warm-dark — deep red-gold
-    RGB{.r = 40, .g = 210, .b = 130},  // E   radiant           — emerald
+    RGB{.r = 25, .g = 190, .b = 70},   // E   radiant           — deeper green (less blue so it doesn't wash white)
     RGB{.r = 120, .g = 195, .b = 95},  // F   calm / pastoral   — soft green
     RGB{.r = 25, .g = 160, .b = 175},  // F#  deep / mysterious — teal
     RGB{.r = 255, .g = 140, .b = 30},  // G   warm / friendly   — orange
@@ -352,10 +352,14 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			if (ci.local >= 0 && ci.local < kBlockWidth && pressed.y >= 0 && pressed.y < kDisplayHeight) {
 				isoNowMask |= (uint64_t)1u << (ci.local * kDisplayHeight + pressed.y);
 			}
-			int32_t note = getState().harmonic.isoChromatic ? isoNoteChromatic(ci.local, pressed.y)
-			                                                : isoNoteAt(ci.local, pressed.y);
-			if (note >= 0 && note <= 127) {
-				enableNote((uint8_t)note, velocity);
+			// Free play sounds the tapped note. In EDIT mode we DON'T sound single taps — the whole voicing
+			// drones (after the loop) so you hear the CHORD you're sculpting, not isolated pings.
+			if (!getState().harmonic.editVoicing) {
+				int32_t note = getState().harmonic.isoChromatic ? isoNoteChromatic(ci.local, pressed.y)
+				                                                : isoNoteAt(ci.local, pressed.y);
+				if (note >= 0 && note <= 127) {
+					enableNote((uint8_t)note, velocity);
+				}
 			}
 			continue;
 		}
@@ -425,6 +429,13 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			}
 			else if (chordNoteCount < kMaxChordKeyboardSize) { // add it
 				chordNotes[chordNoteCount++] = (int16_t)note;
+			}
+		}
+		// SUSTAIN the voicing while editing so you HEAR the whole chord, live — every toggle reshapes the
+		// sound in real time (Modify and Audition collapse into one continuous gesture; no second hand).
+		for (uint8_t i = 0; i < chordNoteCount; i++) {
+			if (chordNotes[i] >= 0 && chordNotes[i] <= 127) {
+				enableNote((uint8_t)chordNotes[i], velocity);
 			}
 		}
 	}

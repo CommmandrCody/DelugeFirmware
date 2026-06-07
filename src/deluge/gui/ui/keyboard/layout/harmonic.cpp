@@ -169,7 +169,7 @@ constexpr int32_t kBtnShowChord = kDisplayHeight - 2; // iso-ctrl: show / hide t
 constexpr int32_t kBtnSticky = kDisplayHeight - 3;    // iso-ctrl: sticky chord voicing
 constexpr int32_t kBtnLattice = kDisplayHeight - 4;   // iso-ctrl: full chord lattice on/off
 constexpr int32_t kBtnSnap = 3;                       // iso-ctrl: SNAP — iso jumps to the chord's octave on pick
-constexpr int32_t kBtnProg = 2;                       // iso-ctrl: PROGRESSION mode toggle (bottom-row strip)
+constexpr int32_t kBtnProg = 2;                       // iso-ctrl: PROGRESSION hold-to-dial (encoders)
 constexpr int32_t kBtnEdit = 1;                       // iso-ctrl: voice-edit toggle (sculpt notes ON the iso surface)
 constexpr int32_t kBtnAudition = 0;      // iso-ctrl: AUDITION the voicing — momentary, hold to hear the chord
 constexpr uint8_t kIsoCtrlClearMask = 0; // iso-ctrl: row 2 free (for the Diff View); no clear pads here
@@ -440,8 +440,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 
 	uint8_t palCtrlNow = 0;
 	uint8_t isoCtrlNow = 0;
-	uint8_t progStripNow = 0; // bottom-row PROG strip pads pressed this frame
-	uint64_t isoNowMask = 0;  // iso pads pressed this frame (bit = localX*8+y) — for voice-edit rising edge
+	uint64_t isoNowMask = 0; // iso pads pressed this frame (bit = localX*8+y) — for voice-edit rising edge
 	bool isoPlayed = false;
 	bool leftPicked = false;
 	for (int32_t idx = kMaxNumKeyboardPadPresses - 1; idx >= 0; --idx) {
@@ -479,13 +478,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 					enableNote((uint8_t)note, velocity);
 				}
 			}
-			continue;
-		}
-		// PROG strip overlay: in Progression mode the bottom palette row is the preset/step strip, not a chord
-		// pick. (The rest of the palette still picks chords normally.) Handled on the rising edge after the loop.
-		if (getState().harmonic.progMode && ci.region == REG_PAL && pressed.y == 0 && ci.local >= 0
-		    && ci.local < kBlockWidth) {
-			progStripNow |= (uint8_t)(1u << ci.local);
 			continue;
 		}
 		if (ci.region == REG_PAL && ci.local < numCols) {
@@ -646,14 +638,28 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		// SNAP = iso jumps to the chord on pick. STAY = iso holds where you left it (play chord low, riff high).
 		display->displayPopup(hs.isoFollowsChord ? "SNAP" : "STAY");
 	}
-	if (risingIso & (uint8_t)(1u << kBtnProg)) {
-		hs.progMode = !hs.progMode;
-		if (hs.progMode) {
-			hs.progPreset = -1; // fresh entry -> bottom row shows the preset picker
+	// PROGRESSION (hold-to-dial): while purple row 2 is HELD, the encoders dial the progression — vertical wheel
+	// picks WHICH progression, horizontal wheel WALKS the chords. Holding also SUSTAINS the current step so you
+	// hear it; release leaves the chord loaded. First press previews the current (or first) progression.
+	bool progNow = (isoCtrlNow & (uint8_t)(1u << kBtnProg)) != 0;
+	if (progNow && !progPadHeld) {
+		if (hs.progPreset < 0) {
+			hs.progPreset = 0;
 			hs.progStep = 0;
 		}
-		display->displayPopup(hs.progMode ? "PROG" : "OFF");
+		loadProgStep();
+		display->displayPopup(kPresets[hs.progPreset].name);
 	}
+	if (progNow && hs.progPreset >= 0) {
+		int16_t pv[kMaxVoice];
+		uint8_t pvn = buildVoicing(pv, kMaxVoice);
+		for (uint8_t i = 0; i < pvn; i++) {
+			if (pv[i] >= 0 && pv[i] <= 127) {
+				enableNote((uint8_t)pv[i], velocity);
+			}
+		}
+	}
+	progPadHeld = progNow;
 	if (risingIso & (uint8_t)(1u << kBtnEdit)) {
 		hs.editVoicing = !hs.editVoicing;
 		if (hs.editVoicing) {
@@ -743,46 +749,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	}
 	palCtrlHeldMask = palCtrlNow;
 
-	// ── PROGRESSION strip (bottom palette row) ──────────────────────────────────────────────────────────
-	// First a preset PICKER, then the loaded progression's STEP strip. Rising-edge loads/selects; holding a
-	// step pad sustains the audition. Outside progMode this code is inert (the bottom row picks chords normally).
-	if (hs.progMode) {
-		uint8_t risingStrip = (uint8_t)(progStripNow & ~progStripHeldMask);
-		if (risingStrip) {
-			int32_t c = -1;
-			for (int32_t b = 0; b < kBlockWidth; b++) {
-				if (risingStrip & (uint8_t)(1u << b)) {
-					c = b;
-					break;
-				}
-			}
-			if (c >= 0) {
-				if (hs.progPreset < 0) {
-					if (c < kNumPresets) {
-						hs.progPreset = (int8_t)c;
-						hs.progStep = 0;
-						loadProgStep();
-					}
-				}
-				else if (c < (int32_t)kPresets[hs.progPreset].count) {
-					hs.progStep = (int8_t)c;
-					loadProgStep();
-				}
-			}
-		}
-		// Sustain the audition while a strip step pad is held (hold to hear, release to keep it revealed).
-		if (progStripNow && hs.progPreset >= 0) {
-			int16_t v[kMaxVoice];
-			uint8_t vn = buildVoicing(v, kMaxVoice);
-			for (uint8_t i = 0; i < vn; i++) {
-				if (v[i] >= 0 && v[i] <= 127) {
-					enableNote((uint8_t)v[i], velocity);
-				}
-			}
-		}
-	}
-	progStripHeldMask = progStripNow;
-
 	ColumnControlsKeyboard::evaluatePads(presses);
 }
 
@@ -826,6 +792,22 @@ void KeyboardLayoutHarmonic::loadProgStep() {
 }
 
 void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
+	// PROG hold: the vertical wheel BROWSES the progression library (which progression). Resets to step 1.
+	if (progPadHeld) {
+		KeyboardStateHarmonic& s = getState().harmonic;
+		int32_t p = (s.progPreset < 0 ? 0 : s.progPreset) + ((offset > 0) ? 1 : -1);
+		if (p < 0) {
+			p = 0;
+		}
+		if (p >= kNumPresets) {
+			p = kNumPresets - 1;
+		}
+		s.progPreset = (int8_t)p;
+		s.progStep = 0;
+		loadProgStep();
+		display->displayPopup(kPresets[p].name);
+		return;
+	}
 	if (verticalEncoderHandledByColumns(offset)) {
 		return;
 	}
@@ -845,6 +827,20 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 void KeyboardLayoutHarmonic::handleHorizontalEncoder(int32_t offset, bool shiftEnabled,
                                                      PressedPad presses[kMaxNumKeyboardPadPresses],
                                                      bool encoderPressed) {
+	// PROG hold: the horizontal wheel WALKS the loaded progression's chords (wraps, so a vamp loops).
+	if (progPadHeld && getState().harmonic.progPreset >= 0) {
+		KeyboardStateHarmonic& s = getState().harmonic;
+		int32_t cnt = (int32_t)kPresets[s.progPreset].count;
+		if (cnt > 0) {
+			int32_t st = (s.progStep + ((offset > 0) ? 1 : -1)) % cnt;
+			if (st < 0) {
+				st += cnt;
+			}
+			s.progStep = (int8_t)st;
+			loadProgStep();
+		}
+		return;
+	}
 	horizontalEncoderHandledByColumns(offset, shiftEnabled);
 }
 
@@ -860,9 +856,6 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	bool swapped = getState().harmonic.swapped;
 	bool latticeOn = getState().harmonic.latticeOn;
 	bool isoFollowsChord = getState().harmonic.isoFollowsChord;
-	bool progMode = getState().harmonic.progMode;
-	int8_t progPreset = getState().harmonic.progPreset;
-	int8_t progStep = getState().harmonic.progStep;
 	bool editVoicing = getState().harmonic.editVoicing;
 	bool stackPick = getState().harmonic.stackPick;
 	uint8_t voiceOctaves = getState().harmonic.voiceOctaves;
@@ -942,23 +935,6 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 			RGB hue = kDegreeHue[local % 7];
 			bool haveCalc = (numSuggestions > 0);
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
-				// PROG strip overlay on the bottom row: a preset PICKER (each slot a degree-hued swatch) until a
-				// preset loads, then the STEP strip (each step wears its chord's degree colour, current step
-				// brightest). Temporary — only while progMode; the rest of the palette renders normally.
-				if (progMode && y == 0) {
-					RGB sc2 = RGB{};
-					if (progPreset < 0) {
-						if (local < kNumPresets) {
-							sc2 = kDegreeHue[local % 7].adjustFractional(130, 255);
-						}
-					}
-					else if (local < (int32_t)kPresets[progPreset].count) {
-						RGB stepHue = kDegreeHue[kPresets[progPreset].steps[local].degree % 7];
-						sc2 = stepHue.adjustFractional((local == progStep) ? 255 : 80, 255);
-					}
-					image[y][x] = sc2;
-					continue;
-				}
 				RGB c = hue.adjustFractional(kRichBright[y], 255);
 				if (local == selDeg && y == selRichness) {
 					// Selected chord cell: bright near-white tint of the column colour. Blend the FULL-brightness
@@ -1022,8 +998,8 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					c = kHueSee.adjustFractional(isoFollowsChord ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnProg) {
-					// PROGRESSION mode toggle — bright when walking a progression.
-					c = grp.adjustFractional(progMode ? kCtrlOn : kCtrlOff, 255);
+					// PROGRESSION = momentary hold-to-dial button; faint ember, brighter while held.
+					c = grp.adjustFractional(progPadHeld ? kCtrlOn : kCtrlReady, 255);
 				}
 				else if (y == kBtnEdit) {
 					c = grp.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);

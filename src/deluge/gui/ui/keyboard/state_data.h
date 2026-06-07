@@ -81,6 +81,7 @@ struct KeyboardStateHarmonic {
 	bool stackPick = false;      // true = iso bottom row is the octave-PICKER strip (toggle which octaves)
 	int8_t voiceSpread = 0;      // SPREAD: 0..3 lowest notes dropped an octave to open the voicing (drop-root)
 	int8_t voiceInversion = 0;   // INVERSION: rotate the chord — move the lowest N notes up an octave
+	bool isoFollowsChord = true; // SNAP: on pick, jump iso to the chord's octave; off = leave iso parked (riff high)
 };
 /// Please note that saving and restoring currently needs to be added manually in instrument_clip.cpp and all layouts
 /// share one struct for storage

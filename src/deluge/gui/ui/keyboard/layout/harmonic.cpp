@@ -146,9 +146,10 @@ constexpr int32_t kBtnIsoView = kDisplayHeight - 1;   // iso-ctrl: in-key <-> ch
 constexpr int32_t kBtnShowChord = kDisplayHeight - 2; // iso-ctrl: show / hide the chord shape
 constexpr int32_t kBtnSticky = kDisplayHeight - 3;    // iso-ctrl: sticky chord voicing
 constexpr int32_t kBtnLattice = kDisplayHeight - 4;   // iso-ctrl: full chord lattice on/off
+constexpr int32_t kBtnSnap = 3;                       // iso-ctrl: SNAP — iso jumps to the chord's octave on pick
 constexpr int32_t kBtnEdit = 1;                       // iso-ctrl: voice-edit toggle (sculpt notes ON the iso surface)
 constexpr int32_t kBtnAudition = 0;      // iso-ctrl: AUDITION the voicing — momentary, hold to hear the chord
-constexpr uint8_t kIsoCtrlClearMask = 0; // iso-ctrl: rows 2-3 free (for the Diff View); no clear pads here
+constexpr uint8_t kIsoCtrlClearMask = 0; // iso-ctrl: row 2 free (for the Diff View); no clear pads here
 
 // VOICING controls live on the pal-ctrl column (they shape the CHORD, not the surface).
 constexpr int32_t kBtnCalc = kDisplayHeight - 1;                // pal-ctrl: next-chord Calculator on/off
@@ -473,9 +474,12 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			heldCols |= (uint16_t)(1u << ci.local);
 			leftPicked = true;
 			getState().harmonic.showChord = true; // picking a chord always shows it (no silent hidden state)
-			// SMART SNAP: bring the iso to the chord's register so the voicing always lights up on pick
-			// (the iso can still be scrolled away independently afterward).
-			getState().harmonic.isoOctave = getState().harmonic.octaveBase;
+			// SMART SNAP (optional): bring the iso to the chord's register so the voicing always lights up on
+			// pick. Turn it OFF (purple SNAP pad) to keep the iso parked where you scrolled it — play the chord
+			// low and riff the melody up high on the right. The iso can still be scrolled freely either way.
+			if (getState().harmonic.isoFollowsChord) {
+				getState().harmonic.isoOctave = getState().harmonic.octaveBase;
+			}
 			// Persist the selection so the highlight + iso shape stay after release, and ask the Calculator
 			// where to go next (suggested degree columns flash in renderPads).
 			selDeg = (int8_t)deg;
@@ -599,6 +603,11 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			hs.showChord = true; // lattice needs the chord shown — turn it on so it can't silently do nothing
 		}
 		display->displayPopup(hs.latticeOn ? "LATT" : "ONE");
+	}
+	if (risingIso & (uint8_t)(1u << kBtnSnap)) {
+		hs.isoFollowsChord = !hs.isoFollowsChord;
+		// SNAP = iso jumps to the chord on pick. STAY = iso holds where you left it (play chord low, riff high).
+		display->displayPopup(hs.isoFollowsChord ? "SNAP" : "STAY");
 	}
 	if (risingIso & (uint8_t)(1u << kBtnEdit)) {
 		hs.editVoicing = !hs.editVoicing;
@@ -726,6 +735,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	bool calc = getState().harmonic.calculatorOn;
 	bool swapped = getState().harmonic.swapped;
 	bool latticeOn = getState().harmonic.latticeOn;
+	bool isoFollowsChord = getState().harmonic.isoFollowsChord;
 	bool editVoicing = getState().harmonic.editVoicing;
 	bool stackPick = getState().harmonic.stackPick;
 	uint8_t voiceOctaves = getState().harmonic.voiceOctaves;
@@ -859,6 +869,10 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (y == kBtnLattice) {
 					c = grp.adjustFractional(latticeOn ? kCtrlOn : kCtrlOff, 255);
+				}
+				else if (y == kBtnSnap) {
+					// A SEE/navigation toggle — tint it with the SEE hue so it groups with the lens controls.
+					c = kHueSee.adjustFractional(isoFollowsChord ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnEdit) {
 					c = grp.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);

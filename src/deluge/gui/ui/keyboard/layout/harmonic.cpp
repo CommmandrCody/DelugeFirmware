@@ -859,10 +859,11 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					out = chordHue.adjustFractional(fade, 255);
 				}
 				else if (showChord && inChordExact(note)) {
-					// Voiced-chord overlay: WHITE. Primary shape brightest, repeats dimmer, extensions faint.
-					// The WHOLE voicing is bright white (every voiced note, incl. 9/11/13). Primary occurrence
-					// full-bright; isomorphic repeats a touch dimmer so one clean shape still reads.
-					out = chordHue.adjustFractional(primary[y][x] ? 255 : 110, 255);
+					// The voicing in the chord's palette colour: primary occurrence full-bright, repeats dimmer.
+					// While SOUNDING (audition/play) every occurrence lights to full — the iso lights up so you
+					// SEE what you hear.
+					uint8_t cb = playing ? 255 : (primary[y][x] ? 255 : 110);
+					out = chordHue.adjustFractional(cb, 255);
 				}
 				else if (playing) {
 					out = key.adjustFractional(255, 255); // live free-play notes glow in the KEY colour

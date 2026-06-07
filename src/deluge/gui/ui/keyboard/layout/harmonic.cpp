@@ -146,17 +146,18 @@ constexpr int32_t kBtnIsoView = kDisplayHeight - 1;   // iso-ctrl: in-key <-> ch
 constexpr int32_t kBtnShowChord = kDisplayHeight - 2; // iso-ctrl: show / hide the chord shape
 constexpr int32_t kBtnSticky = kDisplayHeight - 3;    // iso-ctrl: sticky chord voicing
 constexpr int32_t kBtnLattice = kDisplayHeight - 4;   // iso-ctrl: full chord lattice on/off
-constexpr int32_t kBtnStack = 3;                      // iso-ctrl: octave STACK level (tap to cycle 0..3)
-constexpr int32_t kBtnSpread = 2;                     // iso-ctrl: SPREAD level (drop-root open, tap to cycle 0..3)
-constexpr int32_t kBtnEdit = 1;          // iso-ctrl: voice-edit toggle (the bottom TWO pads = edit + audition)
+constexpr int32_t kBtnEdit = 1;                       // iso-ctrl: voice-edit toggle (sculpt notes ON the iso surface)
 constexpr int32_t kBtnAudition = 0;      // iso-ctrl: AUDITION the voicing — momentary, hold to hear the chord
-constexpr uint8_t kIsoCtrlClearMask = 0; // iso-ctrl is full now (clear lives on the pal-ctrl column)
+constexpr uint8_t kIsoCtrlClearMask = 0; // iso-ctrl: rows 2-3 free (for the Diff View); no clear pads here
 
-constexpr int32_t kBtnCalc = kDisplayHeight - 1;       // pal-ctrl: next-chord Calculator on/off
-constexpr int32_t kBtnSwap = kDisplayHeight - 2;       // pal-ctrl: swap the two sides (handedness)
-constexpr int32_t kBtnPalOctUp = kDisplayHeight - 3;   // pal-ctrl: PALETTE octave up
-constexpr int32_t kBtnPalOctDown = kDisplayHeight - 4; // pal-ctrl: PALETTE octave down
-constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << (kDisplayHeight - 4)) - 1); // rows below = clear
+// VOICING controls live on the pal-ctrl column (they shape the CHORD, not the surface).
+constexpr int32_t kBtnCalc = kDisplayHeight - 1;                // pal-ctrl: next-chord Calculator on/off
+constexpr int32_t kBtnSwap = kDisplayHeight - 2;                // pal-ctrl: swap the two sides (handedness)
+constexpr int32_t kBtnPalOctUp = kDisplayHeight - 3;            // pal-ctrl: PALETTE octave up
+constexpr int32_t kBtnPalOctDown = kDisplayHeight - 4;          // pal-ctrl: PALETTE octave down
+constexpr int32_t kBtnStack = 3;                                // pal-ctrl: octave STACK / picker
+constexpr int32_t kBtnSpread = 2;                               // pal-ctrl: SPREAD (drop-root open)
+constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << 2) - 1); // rows 0-1 = clear pads
 
 // Reserved control-zone colours — a "control family" (PINK + PURPLE) used NOWHERE else in Chroma. The two
 // centre columns get DIFFERENT hues so they're instantly distinguishable: palette-control = PINK,
@@ -446,8 +447,13 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			// Remember the EXACT voiced notes so the iso panel lights this one voicing.
 			chordNoteCount = 0;
 			for (uint8_t i = 0; i < n; i++) {
-				enableNote((uint8_t)notes[i], velocity);
 				chordNotes[chordNoteCount++] = notes[i];
+			}
+			// Play the VOICED chord (stack + spread applied) so what you PLAY sounds like the voicing.
+			int16_t voicedPlay[kMaxVoice];
+			uint8_t vnPlay = buildVoicing(voicedPlay, kMaxVoice);
+			for (uint8_t i = 0; i < vnPlay; i++) {
+				enableNote((uint8_t)voicedPlay[i], velocity);
 			}
 			heldCols |= (uint16_t)(1u << ci.local);
 			leftPicked = true;
@@ -564,17 +570,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 		display->displayPopup(hs.latticeOn ? "LATT" : "ONE");
 	}
-	if (risingIso & (uint8_t)(1u << kBtnStack)) {
-		hs.stackPick = !hs.stackPick;          // iso bottom row becomes the octave-picker strip
-		hs.voiceOctaves |= (uint8_t)(1u << 3); // base octave always on
-		display->displayPopup(hs.stackPick ? "OCT" : "STAK");
-	}
-	if (risingIso & (uint8_t)(1u << kBtnSpread)) {
-		hs.voiceSpread = (int8_t)((hs.voiceSpread + 1) % 4); // open the voicing (drop the lowest notes)
-		char buf[8];
-		sprintf(buf, "SPR%d", (int)hs.voiceSpread);
-		display->displayPopup(buf);
-	}
 	if (risingIso & (uint8_t)(1u << kBtnEdit)) {
 		hs.editVoicing = !hs.editVoicing;
 		if (hs.editVoicing) {
@@ -631,6 +626,17 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		char buf[8];
 		sprintf(buf, "OCT%d", (int)hs.octaveBase);
 		display->displayPopup(buf);
+	}
+	if (risingPal & (uint8_t)(1u << kBtnStack)) {
+		hs.stackPick = !hs.stackPick;
+		hs.voiceOctaves |= (uint8_t)(1u << 3);
+		display->displayPopup(hs.stackPick ? "OCT" : "STAK");
+	}
+	if (risingPal & (uint8_t)(1u << kBtnSpread)) {
+		hs.voiceSpread = (int8_t)((hs.voiceSpread + 1) % 4);
+		char sbuf[8];
+		sprintf(sbuf, "SPR%d", (int)hs.voiceSpread);
+		display->displayPopup(sbuf);
 	}
 	if (risingPal & kPalCtrlClearMask) {
 		clearSelection();
@@ -760,7 +766,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					        .g = (uint8_t)((c.g + 255) >> 1),
 					        .b = (uint8_t)((c.b + 255) >> 1)};
 				}
-				else if (haveCalc && local != selDeg && degBright[local] > 0 && (y == kRowTriad || y == kRow7th)) {
+				else if (haveCalc && local != selDeg && degBright[local] > 0 && (y >= kRowTriad && y <= kRow7th + 1)) {
 					c = RGB::monochrome((uint8_t)((uint32_t)pulse * degBright[local] / 255));
 				}
 				image[y][x] = c;
@@ -778,6 +784,12 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (y == kBtnPalOctUp || y == kBtnPalOctDown) {
 					c = kCtrlHue.adjustFractional(kCtrlOn, 255); // steady-bright palette octave +/- buttons
+				}
+				else if (y == kBtnStack) {
+					c = kCtrlHue.adjustFractional(stackPick ? kCtrlOn : kCtrlOff, 255); // octave-picker mode
+				}
+				else if (y == kBtnSpread) {
+					c = kCtrlHue.adjustFractional(voiceSpread ? (uint8_t)(60 + voiceSpread * 58) : kCtrlOff, 255);
 				}
 				image[y][x] = c;
 			}
@@ -798,12 +810,6 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (y == kBtnLattice) {
 					c = grp.adjustFractional(latticeOn ? kCtrlOn : kCtrlOff, 255);
-				}
-				else if (y == kBtnStack) {
-					c = grp.adjustFractional(stackPick ? kCtrlOn : kCtrlOff, 255); // octave-picker mode
-				}
-				else if (y == kBtnSpread) {
-					c = grp.adjustFractional(voiceSpread ? (uint8_t)(60 + voiceSpread * 58) : kCtrlOff, 255);
 				}
 				else if (y == kBtnEdit) {
 					c = grp.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);

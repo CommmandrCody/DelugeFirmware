@@ -16,12 +16,16 @@
  */
 
 #include "gui/ui/keyboard/layout/harmonic.h"
+#include "fatfs/fatfs.hpp"
 #include "gui/colour/colour.h"
 #include "gui/ui/keyboard/chords.h"
 #include "hid/display/display.h"
 #include "model/settings/runtime_feature_settings.h"
 #include "processing/engines/audio_engine.h"
+#include "storage/storage_manager.h"
 #include <stdio.h>
+#include <string.h>
+#include <strings.h>
 
 namespace deluge::gui::ui::keyboard::layout {
 
@@ -158,6 +162,170 @@ const ProgPreset kPresets[] = {
     {"DORI", {{0, kRow7th}, {3, kRow7th}}, 2},                             // Dorian vamp: i – IV
 };
 constexpr int32_t kNumPresets = (int32_t)(sizeof(kPresets) / sizeof(kPresets[0]));
+
+// Runtime progression list = the built-in presets above PLUS any progressions loaded from CHORDS/*.chordpack
+// files on the SD card. Scanned LAZILY (first PROG use), never at boot — so a malformed pack can never brick.
+constexpr int32_t kMaxProgSteps = 8;
+constexpr int32_t kMaxProgressions = 48;
+struct ProgEntry {
+	char name[8];
+	ProgStep steps[kMaxProgSteps];
+	uint8_t count;
+};
+ProgEntry gProgs[kMaxProgressions];
+int32_t gNumProgs = 0;
+bool gProgsScanned = false;
+
+// Map a chordpack <step rich="..."> label to a richness ladder row.
+int8_t richRowFromLabel(const char* v) {
+	if (v == nullptr) {
+		return (int8_t)kRow7th;
+	}
+	if (strcmp(v, "triad") == 0) {
+		return (int8_t)kRowTriad;
+	}
+	if (strcmp(v, "root") == 0 || strcmp(v, "1") == 0) {
+		return 0;
+	}
+	if (strcmp(v, "5") == 0) {
+		return 1;
+	}
+	if (strcmp(v, "6") == 0) {
+		return 3;
+	}
+	if (strcmp(v, "9") == 0) {
+		return 5;
+	}
+	if (strcmp(v, "11") == 0) {
+		return 6;
+	}
+	if (strcmp(v, "13") == 0) {
+		return 7;
+	}
+	return (int8_t)kRow7th; // "7" and anything unrecognised
+}
+
+// Parse one CHORDS/*.chordpack file, appending its <progression>s to gProgs. Follows the canonical Deluge
+// deserializer pattern: read a value then exitTag(name); a catch-all else exitTag(name) skips anything unknown.
+void parseChordPack(FilePointer* fp) {
+	if (StorageManager::openXMLFile(fp, smDeserializer, "chordpack") != Error::NONE) {
+		return;
+	}
+	char const* tag;
+	while (*(tag = smDeserializer.readNextTagOrAttributeName())) {
+		if (strcmp(tag, "progression") == 0 && gNumProgs < kMaxProgressions) {
+			ProgEntry& en = gProgs[gNumProgs];
+			en.count = 0;
+			en.name[0] = 0;
+			char const* t2;
+			while (*(t2 = smDeserializer.readNextTagOrAttributeName())) {
+				if (strcmp(t2, "name") == 0) {
+					char const* nm = smDeserializer.readTagOrAttributeValue();
+					if (nm != nullptr) {
+						strncpy(en.name, nm, sizeof(en.name) - 1);
+						en.name[sizeof(en.name) - 1] = 0;
+					}
+					smDeserializer.exitTag("name");
+				}
+				else if (strcmp(t2, "step") == 0) {
+					int32_t deg = 1;
+					int8_t rich = (int8_t)kRow7th;
+					char const* t3;
+					while (*(t3 = smDeserializer.readNextTagOrAttributeName())) {
+						if (strcmp(t3, "degree") == 0) {
+							deg = smDeserializer.readTagOrAttributeValueInt();
+							smDeserializer.exitTag("degree");
+						}
+						else if (strcmp(t3, "rich") == 0) {
+							rich = richRowFromLabel(smDeserializer.readTagOrAttributeValue());
+							smDeserializer.exitTag("rich");
+						}
+						else {
+							smDeserializer.exitTag(t3);
+						}
+					}
+					if (en.count < kMaxProgSteps) {
+						int32_t d = deg - 1; // file is 1-based (degree 1 = tonic)
+						if (d < 0) {
+							d = 0;
+						}
+						if (d > 6) {
+							d = 6;
+						}
+						en.steps[en.count].degree = (int8_t)d;
+						en.steps[en.count].rich = rich;
+						en.count++;
+					}
+					smDeserializer.exitTag("step");
+				}
+				else {
+					smDeserializer.exitTag(t2);
+				}
+			}
+			if (en.count > 0) {
+				if (en.name[0] == 0) {
+					strncpy(en.name, "PACK", sizeof(en.name) - 1);
+					en.name[sizeof(en.name) - 1] = 0;
+				}
+				gNumProgs++;
+			}
+			smDeserializer.exitTag("progression");
+		}
+		else {
+			smDeserializer.exitTag(tag);
+		}
+	}
+	smDeserializer.closeWriter();
+}
+
+// Lazy one-time scan: seed gProgs with the built-in presets, then append every CHORDS/*.chordpack progression.
+void ensureProgsLoaded() {
+	if (gProgsScanned) {
+		return;
+	}
+	gProgsScanned = true; // set up-front: a failed / partial scan must never retry-loop
+	gNumProgs = 0;
+	for (int32_t i = 0; i < kNumPresets && gNumProgs < kMaxProgressions; i++) {
+		ProgEntry& e = gProgs[gNumProgs++];
+		strncpy(e.name, kPresets[i].name, sizeof(e.name) - 1);
+		e.name[sizeof(e.name) - 1] = 0;
+		e.count = kPresets[i].count;
+		for (int32_t s = 0; s < e.count && s < kMaxProgSteps; s++) {
+			e.steps[s] = kPresets[i].steps[s];
+		}
+	}
+	if (StorageManager::initSD() != Error::NONE) {
+		return;
+	}
+	auto dres = FatFS::Directory::open("CHORDS");
+	if (!dres) {
+		return; // no CHORDS folder — built-ins only
+	}
+	FatFS::Directory& dir = *dres;
+	FilePointer packs[16];
+	int32_t nPacks = 0;
+	while (nPacks < 16) {
+		auto rr = dir.read_and_get_filepointer();
+		if (!rr) {
+			break;
+		}
+		FatFS::FileInfo info = rr->first;
+		if (info.fname[0] == 0) {
+			break; // end of directory
+		}
+		if ((info.fattrib & AM_DIR) != 0) {
+			continue;
+		}
+		const char* dot = strrchr(info.fname, '.');
+		if (dot == nullptr || strcasecmp(dot, ".chordpack") != 0) {
+			continue;
+		}
+		packs[nPacks++] = rr->second;
+	}
+	for (int32_t i = 0; i < nPacks; i++) {
+		parseChordPack(&packs[i]);
+	}
+}
 
 // ── Control columns ────────────────────────────────────────────────────────────────────────────────────
 // Each control column hosts toggles at the TOP; dark pads below act as CLEAR pads. Achromatic (white = on,
@@ -643,12 +811,15 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	// hear it; release leaves the chord loaded. First press previews the current (or first) progression.
 	bool progNow = (isoCtrlNow & (uint8_t)(1u << kBtnProg)) != 0;
 	if (progNow && !progPadHeld) {
-		if (hs.progPreset < 0) {
+		ensureProgsLoaded(); // lazy scan of CHORDS/*.chordpack on first use
+		if (hs.progPreset < 0 || hs.progPreset >= gNumProgs) {
 			hs.progPreset = 0;
 			hs.progStep = 0;
 		}
 		loadProgStep();
-		display->displayPopup(kPresets[hs.progPreset].name);
+		if (gNumProgs > 0) {
+			display->displayPopup(gProgs[hs.progPreset].name);
+		}
 	}
 	if (progNow && hs.progPreset >= 0) {
 		int16_t pv[kMaxVoice];
@@ -757,10 +928,10 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 // the audition is sustained by the strip handler while the pad is held.
 void KeyboardLayoutHarmonic::loadProgStep() {
 	KeyboardStateHarmonic& h = getState().harmonic;
-	if (h.progPreset < 0 || h.progPreset >= kNumPresets) {
+	if (h.progPreset < 0 || h.progPreset >= gNumProgs) {
 		return;
 	}
-	const ProgPreset& p = kPresets[h.progPreset];
+	const ProgEntry& p = gProgs[h.progPreset];
 	if (h.progStep < 0 || h.progStep >= (int8_t)p.count) {
 		return;
 	}
@@ -794,18 +965,22 @@ void KeyboardLayoutHarmonic::loadProgStep() {
 void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 	// PROG hold: the vertical wheel BROWSES the progression library (which progression). Resets to step 1.
 	if (progPadHeld) {
+		ensureProgsLoaded();
+		if (gNumProgs <= 0) {
+			return;
+		}
 		KeyboardStateHarmonic& s = getState().harmonic;
 		int32_t p = (s.progPreset < 0 ? 0 : s.progPreset) + ((offset > 0) ? 1 : -1);
 		if (p < 0) {
 			p = 0;
 		}
-		if (p >= kNumPresets) {
-			p = kNumPresets - 1;
+		if (p >= gNumProgs) {
+			p = gNumProgs - 1;
 		}
 		s.progPreset = (int8_t)p;
 		s.progStep = 0;
 		loadProgStep();
-		display->displayPopup(kPresets[p].name);
+		display->displayPopup(gProgs[p].name);
 		return;
 	}
 	if (verticalEncoderHandledByColumns(offset)) {
@@ -828,9 +1003,9 @@ void KeyboardLayoutHarmonic::handleHorizontalEncoder(int32_t offset, bool shiftE
                                                      PressedPad presses[kMaxNumKeyboardPadPresses],
                                                      bool encoderPressed) {
 	// PROG hold: the horizontal wheel WALKS the loaded progression's chords (wraps, so a vamp loops).
-	if (progPadHeld && getState().harmonic.progPreset >= 0) {
+	if (progPadHeld && getState().harmonic.progPreset >= 0 && getState().harmonic.progPreset < gNumProgs) {
 		KeyboardStateHarmonic& s = getState().harmonic;
-		int32_t cnt = (int32_t)kPresets[s.progPreset].count;
+		int32_t cnt = (int32_t)gProgs[s.progPreset].count;
 		if (cnt > 0) {
 			int32_t st = (s.progStep + ((offset > 0) ? 1 : -1)) % cnt;
 			if (st < 0) {

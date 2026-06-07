@@ -163,6 +163,11 @@ constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << (kDisplayHeight - 4)) - 1
 // iso-control = PURPLE. On = bright, off = dim, whole column faintly tinted so each reads as its own zone.
 const RGB kCtrlHue = RGB{.r = 255, .g = 30, .b = 145};    // palette-control = PINK
 const RGB kCtrlHueIso = RGB{.r = 150, .g = 80, .b = 255}; // iso-control = PURPLE
+// The iso-control column reads in three BANDS (SEE → SHAPE → HEAR), each a distinct shade of the purple
+// family so the column groups at a glance instead of one undifferentiated list.
+const RGB kHueSee = RGB{.r = 90, .g = 115, .b = 255};   // SEE   band (lens / overlays): bluer purple
+const RGB kHueShape = RGB{.r = 165, .g = 70, .b = 255}; // SHAPE band (voicing engine): mid violet
+const RGB kHueHear = RGB{.r = 215, .g = 65, .b = 235};  // HEAR  band (audition): warmer pink-purple
 constexpr uint8_t kCtrlOn = 235;
 constexpr uint8_t kCtrlOff = 90;
 constexpr uint8_t kCtrlFaint = 45; // brighter zone tint so the control columns clearly read as zones
@@ -778,33 +783,34 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 			}
 		}
 		else if (ci.region == REG_ISO_CTRL) {
-			// Iso-bound controls: view, show-chord, sticky, lattice, edit, audition. Reserved PURPLE zone.
+			// Iso-bound controls, banded SEE (rows 7-4) → SHAPE (3-1) → HEAR (0), each its own purple shade.
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
-				RGB c = kCtrlHueIso.adjustFractional(kCtrlFaint, 255); // faint purple marks the iso-control zone
+				RGB grp = (y >= 4) ? kHueSee : (y >= 1) ? kHueShape : kHueHear;
+				RGB c = grp.adjustFractional(kCtrlFaint, 255); // faint band tint marks the group
 				if (y == kBtnIsoView) {
-					c = kCtrlHueIso.adjustFractional(chromatic ? kCtrlOn : kCtrlOff, 255);
+					c = grp.adjustFractional(chromatic ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnShowChord) {
-					c = kCtrlHueIso.adjustFractional(showChord ? kCtrlOn : kCtrlOff, 255);
+					c = grp.adjustFractional(showChord ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnSticky) {
-					c = kCtrlHueIso.adjustFractional(sticky ? kCtrlOn : kCtrlOff, 255);
+					c = grp.adjustFractional(sticky ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnLattice) {
-					c = kCtrlHueIso.adjustFractional(latticeOn ? kCtrlOn : kCtrlOff, 255);
+					c = grp.adjustFractional(latticeOn ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnStack) {
-					c = kCtrlHueIso.adjustFractional(stackPick ? kCtrlOn : kCtrlOff, 255); // octave-picker mode
+					c = grp.adjustFractional(stackPick ? kCtrlOn : kCtrlOff, 255); // octave-picker mode
 				}
 				else if (y == kBtnSpread) {
-					c = kCtrlHueIso.adjustFractional(voiceSpread ? (uint8_t)(60 + voiceSpread * 58) : kCtrlOff, 255);
+					c = grp.adjustFractional(voiceSpread ? (uint8_t)(60 + voiceSpread * 58) : kCtrlOff, 255);
 				}
 				else if (y == kBtnEdit) {
-					c = kCtrlHueIso.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);
+					c = grp.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnAudition) {
 					// AUDITION = the play button for the voicing; steady bright when a chord is loaded.
-					c = kCtrlHueIso.adjustFractional(chordNoteCount > 0 ? kCtrlOn : kCtrlOff, 255);
+					c = grp.adjustFractional(chordNoteCount > 0 ? kCtrlOn : kCtrlOff, 255);
 				}
 				image[y][x] = c;
 			}

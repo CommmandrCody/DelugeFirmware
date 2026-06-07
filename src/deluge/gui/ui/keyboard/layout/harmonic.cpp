@@ -161,10 +161,13 @@ constexpr int32_t kBtnSpread = 2;                               // pal-ctrl: SPR
 constexpr int32_t kBtnInversion = 1;                            // pal-ctrl: INVERSION (cycle 0..3)
 constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << 1) - 1); // row 0 = clear pad
 
-// Reserved control-zone colours — a "control family" (PINK + PURPLE) used NOWHERE else in Chroma. The two
-// centre columns get DIFFERENT hues so they're instantly distinguishable: palette-control = PINK,
+// Reserved control-zone colours — a "control family" (CRIMSON + PURPLE) used NOWHERE else in Chroma. The two
+// centre columns get DIFFERENT hues so they're instantly distinguishable: palette-control = CRIMSON,
 // iso-control = PURPLE. On = bright, off = dim, whole column faintly tinted so each reads as its own zone.
-const RGB kCtrlHue = RGB{.r = 255, .g = 30, .b = 145};    // palette-control = PINK
+const RGB kCtrlHue =
+    RGB{.r = 180,
+        .g = 20,
+        .b = 55}; // palette-control = CRIMSON (dark+warm; far from the white suggestion flash + magenta degree)
 const RGB kCtrlHueIso = RGB{.r = 150, .g = 80, .b = 255}; // iso-control = PURPLE
 // The iso-control column reads in three BANDS (SEE → SHAPE → HEAR), each a distinct shade of the purple
 // family so the column groups at a glance instead of one undifferentiated list.
@@ -829,9 +832,9 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 			}
 		}
 		else if (ci.region == REG_PAL_CTRL) {
-			// Palette-bound controls: Calculator on/off, handedness swap. Reserved PINK zone; clear pads below.
+			// Palette-bound controls: Calculator on/off, handedness swap. Reserved CRIMSON zone; clear pads below.
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
-				RGB c = kCtrlHue.adjustFractional(kCtrlFaint, 255); // faint pink marks the control zone
+				RGB c = kCtrlHue.adjustFractional(kCtrlFaint, 255); // faint crimson marks the control zone
 				if (y == kBtnCalc) {
 					c = kCtrlHue.adjustFractional(calc ? kCtrlOn : kCtrlOff, 255);
 				}

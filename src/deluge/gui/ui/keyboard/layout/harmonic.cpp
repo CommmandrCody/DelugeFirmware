@@ -458,6 +458,9 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			heldCols |= (uint16_t)(1u << ci.local);
 			leftPicked = true;
 			getState().harmonic.showChord = true; // picking a chord always shows it (no silent hidden state)
+			// SMART SNAP: bring the iso to the chord's register so the voicing always lights up on pick
+			// (the iso can still be scrolled away independently afterward).
+			getState().harmonic.isoOctave = getState().harmonic.octaveBase;
 			// Persist the selection so the highlight + iso shape stay after release, and ask the Calculator
 			// where to go next (suggested degree columns flash in renderPads).
 			selDeg = (int8_t)deg;

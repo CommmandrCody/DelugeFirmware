@@ -487,12 +487,24 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	// (local 0..6 = offsets -3..+3; local 3 = base octave, always on).
 	if (hs.stackPick) {
 		uint64_t risingPads = isoNowMask & ~isoHeldMask;
+		bool octChanged = false;
 		for (int32_t lx = 0; lx < kBlockWidth; lx++) {
 			if ((risingPads & ((uint64_t)1u << (lx * kDisplayHeight))) && lx != 3) {
 				hs.voiceOctaves ^= (uint8_t)(1u << lx);
+				octChanged = true;
 			}
 		}
 		hs.voiceOctaves |= (uint8_t)(1u << 3);
+		// Re-strike the voicing so you HEAR the stack change immediately (Theory-Board feel).
+		if (octChanged && chordNoteCount > 0) {
+			int16_t v[kMaxVoice];
+			uint8_t vn = buildVoicing(v, kMaxVoice);
+			for (uint8_t i = 0; i < vn; i++) {
+				if (v[i] >= 0 && v[i] <= 127) {
+					enableNote((uint8_t)v[i], velocity);
+				}
+			}
+		}
 	}
 
 	// ISO voice-EDIT: a rising-edge iso press toggles that note IN/OUT of the selected chord's voicing.
@@ -633,7 +645,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	if (risingPal & (uint8_t)(1u << kBtnStack)) {
 		hs.stackPick = !hs.stackPick;
 		hs.voiceOctaves |= (uint8_t)(1u << 3);
-		display->displayPopup(hs.stackPick ? "OCT" : "STAK");
+		display->displayPopup(hs.stackPick ? "PICK" : "STAK"); // "PICK" = octave picker open (distinct from OCT3)
 	}
 	if (risingPal & (uint8_t)(1u << kBtnSpread)) {
 		hs.voiceSpread = (int8_t)((hs.voiceSpread + 1) % 4);

@@ -148,6 +148,9 @@ constexpr int32_t kRow7th = 4;
 struct ProgStep {
 	int8_t degree;
 	int8_t rich;
+	uint8_t oct;   // baked octave-STACK bitmask (bits 0..6 = octaves -3..+3, bit3 = base). 0 = bare (base only).
+	int8_t spread; // baked SPREAD (drop-root) 0..3
+	int8_t inv;    // baked INVERSION 0..3
 };
 struct ProgPreset {
 	const char* name;
@@ -230,6 +233,7 @@ void parseChordPack(FilePointer* fp) {
 				else if (strcmp(t2, "step") == 0) {
 					int32_t deg = 1;
 					int8_t rich = (int8_t)kRow7th;
+					int32_t octup = 0, octdn = 0, spread = 0, inv = 0;
 					char const* t3;
 					while (*(t3 = smDeserializer.readNextTagOrAttributeName())) {
 						if (strcmp(t3, "degree") == 0) {
@@ -239,6 +243,22 @@ void parseChordPack(FilePointer* fp) {
 						else if (strcmp(t3, "rich") == 0) {
 							rich = richRowFromLabel(smDeserializer.readTagOrAttributeValue());
 							smDeserializer.exitTag("rich");
+						}
+						else if (strcmp(t3, "octup") == 0) {
+							octup = smDeserializer.readTagOrAttributeValueInt();
+							smDeserializer.exitTag("octup");
+						}
+						else if (strcmp(t3, "octdn") == 0) {
+							octdn = smDeserializer.readTagOrAttributeValueInt();
+							smDeserializer.exitTag("octdn");
+						}
+						else if (strcmp(t3, "spread") == 0) {
+							spread = smDeserializer.readTagOrAttributeValueInt();
+							smDeserializer.exitTag("spread");
+						}
+						else if (strcmp(t3, "inv") == 0) {
+							inv = smDeserializer.readTagOrAttributeValueInt();
+							smDeserializer.exitTag("inv");
 						}
 						else {
 							smDeserializer.exitTag(t3);
@@ -252,8 +272,31 @@ void parseChordPack(FilePointer* fp) {
 						if (d > 6) {
 							d = 6;
 						}
+						// Build the octave-STACK bitmask: bit3 = base, bits 4..6 = +1..+3 oct, bits 2..0 = -1..-3.
+						uint8_t octMask = (uint8_t)(1u << 3);
+						for (int32_t k = 1; k <= octup && k <= 3; k++) {
+							octMask |= (uint8_t)(1u << (3 + k));
+						}
+						for (int32_t k = 1; k <= octdn && k <= 3; k++) {
+							octMask |= (uint8_t)(1u << (3 - k));
+						}
+						if (spread < 0) {
+							spread = 0;
+						}
+						if (spread > 3) {
+							spread = 3;
+						}
+						if (inv < 0) {
+							inv = 0;
+						}
+						if (inv > 3) {
+							inv = 3;
+						}
 						en.steps[en.count].degree = (int8_t)d;
 						en.steps[en.count].rich = rich;
+						en.steps[en.count].oct = octMask;
+						en.steps[en.count].spread = (int8_t)spread;
+						en.steps[en.count].inv = (int8_t)inv;
 						en.count++;
 					}
 					smDeserializer.exitTag("step");
@@ -915,8 +958,16 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 	}
 	if (risingPal & kPalCtrlClearMask) {
-		clearSelection();
-		display->displayPopup("CLR");
+		if (progPadHeld) {
+			// While walking a progression, CLEAR strips/restores the baked voicings (VOICED <-> BARE).
+			hs.progVoiced = !hs.progVoiced;
+			loadProgStep(); // re-apply the current step with / without its voicing
+			display->displayPopup(hs.progVoiced ? "VOIC" : "BARE");
+		}
+		else {
+			clearSelection();
+			display->displayPopup("CLR");
+		}
 	}
 	palCtrlHeldMask = palCtrlNow;
 
@@ -952,6 +1003,19 @@ void KeyboardLayoutHarmonic::loadProgStep() {
 	chordNoteCount = 0;
 	for (uint8_t i = 0; i < n; i++) {
 		chordNotes[chordNoteCount++] = notes[i];
+	}
+	// Apply the step's BAKED voicing — or strip to a bare chord in BARE mode. Live STACK/SPREAD/INV reshape on
+	// top either way (this just sets the starting point each time a step loads).
+	if (h.progVoiced) {
+		const ProgStep& st = p.steps[h.progStep];
+		h.voiceOctaves = (st.oct != 0) ? st.oct : (uint8_t)(1u << 3); // 0 = base only (built-ins have no voicing)
+		h.voiceSpread = st.spread;
+		h.voiceInversion = st.inv;
+	}
+	else {
+		h.voiceOctaves = (uint8_t)(1u << 3); // bare: base octave only
+		h.voiceSpread = 0;
+		h.voiceInversion = 0;
 	}
 	h.showChord = true;
 	if (h.isoFollowsChord) {

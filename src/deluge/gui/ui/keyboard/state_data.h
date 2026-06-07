@@ -86,6 +86,7 @@ struct KeyboardStateHarmonic {
 	// wheel walks the chords. Holding sustains the current step; release leaves the chord loaded. No grid strip.
 	int8_t progPreset = -1; // loaded preset index (-1 = none dialled yet)
 	int8_t progStep = 0;    // current step in the loaded progression
+	bool progVoiced = true; // VOICED = load each step with its baked-in voicing; BARE = plain chord (CLEAR toggles)
 };
 /// Please note that saving and restoring currently needs to be added manually in instrument_clip.cpp and all layouts
 /// share one struct for storage

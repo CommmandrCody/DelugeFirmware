@@ -823,10 +823,12 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
 				RGB c = hue.adjustFractional(kRichBright[y], 255);
 				if (local == selDeg && y == selRichness) {
-					// Selected chord cell: bright near-white tint of the column colour.
-					c = RGB{.r = (uint8_t)((c.r + 255) >> 1),
-					        .g = (uint8_t)((c.g + 255) >> 1),
-					        .b = (uint8_t)((c.b + 255) >> 1)};
+					// Selected chord cell: bright near-white tint of the column colour. Blend the FULL-brightness
+					// hue (not the row-dimmed one) so the selection pops just as hard on the lusher upper rows
+					// (7/9/11/13) as on the triad — otherwise a dim row makes a picked chord read as "not lit".
+					c = RGB{.r = (uint8_t)((hue.r + 255) >> 1),
+					        .g = (uint8_t)((hue.g + 255) >> 1),
+					        .b = (uint8_t)((hue.b + 255) >> 1)};
 				}
 				else if (haveCalc && local != selDeg && degBright[local] > 0 && (y >= kRowTriad && y <= kRow7th + 1)) {
 					c = RGB::monochrome((uint8_t)((uint32_t)pulse * degBright[local] / 255));

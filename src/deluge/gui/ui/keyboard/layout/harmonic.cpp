@@ -926,17 +926,9 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				RGB out;
 				// RULE: WHITE is reserved for THE CHORD (voiced shape + its lattice). Everything else lives in
 				// the key's COLOUR — the root pops as the brightest expression of that colour, never white.
-				if (showChord && latticeOn && chordNoteCount > 0 && inChordPc(pc)) {
-					// Chord-lattice overlay in the chord's PALETTE colour, but VERY light — a faint glow of
-					// every position the chord makes available, fading upward; never competes with the voicing.
-					uint8_t base = isCorePc(pc) ? 55 : 30;
-					uint8_t fade = (uint8_t)((uint32_t)base * (uint32_t)(kDisplayHeight - y) / kDisplayHeight);
-					if (fade < 6) {
-						fade = 6;
-					}
-					out = chordHue.adjustFractional(fade, 255);
-				}
-				else if (showChord && inChordExact(note)) {
+				// ORDER MATTERS: the bright states (voicing, playing) win over the faint lattice backdrop, so a
+				// note you PLAY still lights up even when the lattice is on (the lattice is only the dim canvas).
+				if (showChord && inChordExact(note)) {
 					// The voicing in the chord's palette colour: primary occurrence full-bright, repeats dimmer.
 					// While SOUNDING (audition/play) every occurrence lights to full — the iso lights up so you
 					// SEE what you hear.
@@ -945,6 +937,16 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (playing) {
 					out = key.adjustFractional(255, 255); // live free-play notes glow in the KEY colour
+				}
+				else if (showChord && latticeOn && chordNoteCount > 0 && inChordPc(pc)) {
+					// Chord-lattice overlay in the chord's PALETTE colour, but VERY light — a faint glow of
+					// every position the chord makes available, fading upward; never competes with the voicing.
+					uint8_t base = isCorePc(pc) ? 55 : 30;
+					uint8_t fade = (uint8_t)((uint32_t)base * (uint32_t)(kDisplayHeight - y) / kDisplayHeight);
+					if (fade < 6) {
+						fade = 6;
+					}
+					out = chordHue.adjustFractional(fade, 255);
 				}
 				else if (hi != 0
 				         && (hi >= 254

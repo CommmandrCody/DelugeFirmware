@@ -174,9 +174,12 @@ const RGB kCtrlHueIso = RGB{.r = 150, .g = 80, .b = 255}; // iso-control = PURPL
 const RGB kHueSee = RGB{.r = 90, .g = 115, .b = 255};   // SEE   band (lens / overlays): bluer purple
 const RGB kHueShape = RGB{.r = 165, .g = 70, .b = 255}; // SHAPE band (voicing engine): mid violet
 const RGB kHueHear = RGB{.r = 215, .g = 65, .b = 235};  // HEAR  band (audition): warmer pink-purple
-constexpr uint8_t kCtrlOn = 235;
-constexpr uint8_t kCtrlOff = 90;
-constexpr uint8_t kCtrlFaint = 45; // brighter zone tint so the control columns clearly read as zones
+// Control columns read as DARK negative space — only what's ENGAGED lights up. This keeps them visually
+// distinct from the colourful palette + the velocity/mod sidebar, and makes "what's on" instantly legible.
+constexpr uint8_t kCtrlOn = 235;   // a toggle that is ON — bright in its control hue
+constexpr uint8_t kCtrlReady = 50; // a momentary/action button (OCT, Audition) — faint ember so it's findable
+constexpr uint8_t kCtrlOff = 10;   // an OFF toggle / clear pad — near-black (the "blank unless toggled" floor)
+constexpr uint8_t kCtrlFaint = 10; // column base — blank
 
 } // namespace
 
@@ -834,7 +837,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 		else if (ci.region == REG_PAL_CTRL) {
 			// Palette-bound controls: Calculator on/off, handedness swap. Reserved CRIMSON zone; clear pads below.
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
-				RGB c = kCtrlHue.adjustFractional(kCtrlFaint, 255); // faint crimson marks the control zone
+				RGB c = kCtrlHue.adjustFractional(kCtrlFaint, 255); // blank by default — only engaged controls light
 				if (y == kBtnCalc) {
 					c = kCtrlHue.adjustFractional(calc ? kCtrlOn : kCtrlOff, 255);
 				}
@@ -842,7 +845,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					c = kCtrlHue.adjustFractional(swapped ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnPalOctUp || y == kBtnPalOctDown) {
-					c = kCtrlHue.adjustFractional(kCtrlOn, 255); // steady-bright palette octave +/- buttons
+					c = kCtrlHue.adjustFractional(kCtrlReady, 255); // momentary octave +/- — faint ember, findable
 				}
 				else if (y == kBtnStack) {
 					c = kCtrlHue.adjustFractional(stackPick ? kCtrlOn : kCtrlOff, 255); // octave-picker mode
@@ -860,7 +863,8 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 			// Iso-bound controls, banded SEE (rows 7-4) → SHAPE (3-1) → HEAR (0), each its own purple shade.
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
 				RGB grp = (y >= 4) ? kHueSee : (y >= 1) ? kHueShape : kHueHear;
-				RGB c = grp.adjustFractional(kCtrlFaint, 255); // faint band tint marks the group
+				RGB c =
+				    grp.adjustFractional(kCtrlFaint, 255); // blank by default; an engaged control glows its band hue
 				if (y == kBtnIsoView) {
 					c = grp.adjustFractional(chromatic ? kCtrlOn : kCtrlOff, 255);
 				}
@@ -881,8 +885,8 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					c = grp.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnAudition) {
-					// AUDITION = the play button for the voicing; steady bright when a chord is loaded.
-					c = grp.adjustFractional(chordNoteCount > 0 ? kCtrlOn : kCtrlOff, 255);
+					// AUDITION = momentary play button; faint ember when a chord is loaded (ready to strike).
+					c = grp.adjustFractional(chordNoteCount > 0 ? kCtrlReady : kCtrlOff, 255);
 				}
 				image[y][x] = c;
 			}

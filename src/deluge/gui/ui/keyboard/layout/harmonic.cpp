@@ -157,7 +157,8 @@ constexpr int32_t kBtnPalOctUp = kDisplayHeight - 3;            // pal-ctrl: PAL
 constexpr int32_t kBtnPalOctDown = kDisplayHeight - 4;          // pal-ctrl: PALETTE octave down
 constexpr int32_t kBtnStack = 3;                                // pal-ctrl: octave STACK / picker
 constexpr int32_t kBtnSpread = 2;                               // pal-ctrl: SPREAD (drop-root open)
-constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << 2) - 1); // rows 0-1 = clear pads
+constexpr int32_t kBtnInversion = 1;                            // pal-ctrl: INVERSION (cycle 0..3)
+constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << 1) - 1); // row 0 = clear pad
 
 // Reserved control-zone colours — a "control family" (PINK + PURPLE) used NOWHERE else in Chroma. The two
 // centre columns get DIFFERENT hues so they're instantly distinguishable: palette-control = PINK,
@@ -214,6 +215,20 @@ uint8_t KeyboardLayoutHarmonic::buildVoicing(int16_t* out, uint8_t maxOut) {
 	uint8_t n = 0;
 	for (uint8_t i = 0; i < chordNoteCount && n < kMaxChordKeyboardSize; i++) {
 		tmp[n++] = chordNotes[i];
+	}
+	for (uint8_t i = 1; i < n; i++) {
+		int16_t v = tmp[i];
+		int32_t j = (int32_t)i - 1;
+		while (j >= 0 && tmp[j] > v) {
+			tmp[j + 1] = tmp[j];
+			j--;
+		}
+		tmp[j + 1] = v;
+	}
+	// INVERSION: rotate — move the lowest `inv` notes up an octave, then re-sort so the chord re-roots.
+	int8_t inv = getState().harmonic.voiceInversion;
+	for (int8_t k = 0; k < inv && k < (int8_t)n; k++) {
+		tmp[k] = (int16_t)(tmp[k] + 12);
 	}
 	for (uint8_t i = 1; i < n; i++) {
 		int16_t v = tmp[i];
@@ -653,6 +668,21 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		sprintf(sbuf, "SPR%d", (int)hs.voiceSpread);
 		display->displayPopup(sbuf);
 	}
+	if (risingPal & (uint8_t)(1u << kBtnInversion)) {
+		hs.voiceInversion = (int8_t)((hs.voiceInversion + 1) % 4); // root → 1st → 2nd → 3rd → root
+		char ibuf[8];
+		sprintf(ibuf, "INV%d", (int)hs.voiceInversion);
+		display->displayPopup(ibuf);
+		if (chordNoteCount > 0) { // re-strike so you HEAR the inversion immediately
+			int16_t v[kMaxVoice];
+			uint8_t vn = buildVoicing(v, kMaxVoice);
+			for (uint8_t i = 0; i < vn; i++) {
+				if (v[i] >= 0 && v[i] <= 127) {
+					enableNote((uint8_t)v[i], velocity);
+				}
+			}
+		}
+	}
 	if (risingPal & kPalCtrlClearMask) {
 		clearSelection();
 		display->displayPopup("CLR");
@@ -700,6 +730,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	bool stackPick = getState().harmonic.stackPick;
 	uint8_t voiceOctaves = getState().harmonic.voiceOctaves;
 	int8_t voiceSpread = getState().harmonic.voiceSpread;
+	int8_t voiceInversion = getState().harmonic.voiceInversion;
 	int32_t isoStart = isoStartCol(swapped);
 	// The highlighted chord on the iso wears its PALETTE colour (the selected degree's hue) — bright primary,
 	// faded repeats. Falls back to white when there's no degree (e.g. a voicing built from scratch in EDIT).
@@ -805,6 +836,9 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (y == kBtnSpread) {
 					c = kCtrlHue.adjustFractional(voiceSpread ? (uint8_t)(60 + voiceSpread * 58) : kCtrlOff, 255);
+				}
+				else if (y == kBtnInversion) {
+					c = kCtrlHue.adjustFractional(voiceInversion ? (uint8_t)(60 + voiceInversion * 58) : kCtrlOff, 255);
 				}
 				image[y][x] = c;
 			}

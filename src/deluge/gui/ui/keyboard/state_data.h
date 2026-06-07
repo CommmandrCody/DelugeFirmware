@@ -82,6 +82,11 @@ struct KeyboardStateHarmonic {
 	int8_t voiceSpread = 0;      // SPREAD: 0..3 lowest notes dropped an octave to open the voicing (drop-root)
 	int8_t voiceInversion = 0;   // INVERSION: rotate the chord — move the lowest N notes up an octave
 	bool isoFollowsChord = true; // SNAP: on pick, jump iso to the chord's octave; off = leave iso parked (riff high)
+	// PROGRESSION WALKER (MVP): bottom palette row becomes a temporary strip — first a preset picker, then the
+	// loaded progression's step strip. Outside progMode the bottom row stays the ROOT/bass anchor.
+	bool progMode = false;  // PROG on/off (purple row 2)
+	int8_t progPreset = -1; // loaded preset index (-1 = none yet → bottom row shows the picker)
+	int8_t progStep = 0;    // current step in the loaded progression
 };
 /// Please note that saving and restoring currently needs to be added manually in instrument_clip.cpp and all layouts
 /// share one struct for storage

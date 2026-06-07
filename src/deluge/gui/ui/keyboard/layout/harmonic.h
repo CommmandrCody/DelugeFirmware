@@ -70,6 +70,7 @@ private:
 	static constexpr uint8_t kMaxVoice = 16; // capacity for a stacked voicing
 	void recomputeSuggestions(uint8_t keyRoot, const uint8_t* iv, uint8_t sc, uint8_t homeRootPc);
 	void drawName(const char* roman, const char* abs);
+	void loadProgStep(); // PROG: latch the current preset's current step as the selected Harmonic Object
 
 	uint16_t heldCols = 0; // explorer columns currently held (light up as feedback)
 
@@ -90,9 +91,10 @@ private:
 	uint8_t degBright[7] = {}; // per-degree brightness (0-255) = strength as a next move; 0 when no Calculator
 	int8_t topDeg = -1;        // the single strongest next degree; -1 = none
 
-	uint8_t palCtrlHeldMask = 0; // palette-control column rows held last frame (rising-edge detect)
-	uint8_t isoCtrlHeldMask = 0; // iso-control column rows held last frame (rising-edge detect)
-	uint64_t isoHeldMask = 0;    // iso pads held last frame (bit = localX*8+y) — rising-edge for voice edit
+	uint8_t palCtrlHeldMask = 0;   // palette-control column rows held last frame (rising-edge detect)
+	uint8_t isoCtrlHeldMask = 0;   // iso-control column rows held last frame (rising-edge detect)
+	uint64_t isoHeldMask = 0;      // iso pads held last frame (bit = localX*8+y) — rising-edge for voice edit
+	uint8_t progStripHeldMask = 0; // bottom-row PROG strip pads held last frame (rising-edge detect)
 };
 
 }; // namespace deluge::gui::ui::keyboard::layout

@@ -707,6 +707,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 					m |= (uint16_t)(1u << (((chordNotes[i] % 12) + 12) % 12));
 				}
 				getState().harmonic.prevChordPcMask = m;
+				getState().harmonic.prevSelDeg = selDeg;
 			}
 			// Remember the EXACT voiced notes so the iso panel lights this one voicing.
 			chordNoteCount = 0;
@@ -1026,6 +1027,7 @@ void KeyboardLayoutHarmonic::loadProgStep() {
 			m |= (uint16_t)(1u << (((chordNotes[i] % 12) + 12) % 12));
 		}
 		h.prevChordPcMask = m;
+		h.prevSelDeg = selDeg;
 	}
 	chordNoteCount = 0;
 	for (uint8_t i = 0; i < n; i++) {
@@ -1123,6 +1125,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	bool latticeOn = getState().harmonic.latticeOn;
 	bool diffOn = getState().harmonic.diffOn;
 	uint16_t prevPcMask = getState().harmonic.prevChordPcMask;
+	int8_t prevSelDeg = getState().harmonic.prevSelDeg;
 	bool isoFollowsChord = getState().harmonic.isoFollowsChord;
 	bool editVoicing = getState().harmonic.editVoicing;
 	bool stackPick = getState().harmonic.stackPick;
@@ -1329,10 +1332,11 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 						}
 					}
 					else if (inPrev && !inChordPc(pc)) {
-						// LEAVING tone -- what moves OUT: a faint ghost, breathing OPPOSITE the arrivers
-						// (it fades as they brighten -- you see the voice cross over).
+						// LEAVING tone -- what moves OUT, wearing the PREVIOUS chord's colour: a ghost breathing
+						// OPPOSITE the arrivers, so the old chord's hue fades as the new chord's hue comes in.
+						RGB prevHue = (prevSelDeg >= 0 && prevSelDeg < 7) ? kDegreeHue[prevSelDeg] : key;
 						uint8_t anti = (uint8_t)(285 - pulse); // pulse runs 30..255; anti runs 255..30
-						out = key.adjustFractional((uint8_t)(anti / 6), 255);
+						out = prevHue.adjustFractional((uint8_t)(anti / 4), 255);
 					}
 					else if (within == 0) {
 						out = key.adjustFractional(150, 255); // keep the tonic anchor lit

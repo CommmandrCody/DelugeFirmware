@@ -77,6 +77,7 @@ struct KeyboardStateHarmonic {
 	bool latticeOn = false;    // true = light the FULL chord lattice (every repeat) with an upward fade
 	bool diffOn = false; // DIFF/voice-leading view: prev->current motion (common hold, arriving breathe, leaving ghost)
 	uint16_t prevChordPcMask = 0; // pitch-class set of the PREVIOUS chord — drives the DIFF / voice-leading view
+	int8_t prevSelDeg = -1;       // degree of the PREVIOUS chord — so DIFF ghosts wear that chord's palette colour
 	bool spreadRows = false;      // true = bottom 2 iso rows become the spread/voicing strip; false = full iso
 	bool editVoicing = false;     // true = iso taps TOGGLE notes in/out of the selected chord's voicing
 	uint8_t voiceOctaves = 0x08;  // octave STACK bitmask: bits 0..6 = octave offsets -3..+3; bit3 (base) always on

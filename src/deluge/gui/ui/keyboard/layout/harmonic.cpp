@@ -328,11 +328,6 @@ void ensureProgsLoaded() {
 	}
 	gProgsScanned = true; // set up-front: a failed / partial scan must never retry-loop
 	gNumProgs = 0;
-	// Slot 0 is the live REC buffer — dial down to it to capture chords you pick into a progression.
-	strncpy(gProgs[gNumProgs].name, "REC", sizeof(gProgs[0].name) - 1);
-	gProgs[gNumProgs].name[sizeof(gProgs[0].name) - 1] = 0;
-	gProgs[gNumProgs].count = 0;
-	gNumProgs++;
 	for (int32_t i = 0; i < kNumPresets && gNumProgs < kMaxProgressions; i++) {
 		ProgEntry& e = gProgs[gNumProgs++];
 		strncpy(e.name, kPresets[i].name, sizeof(e.name) - 1);
@@ -373,115 +368,6 @@ void ensureProgsLoaded() {
 	for (int32_t i = 0; i < nPacks; i++) {
 		parseChordPack(&packs[i]);
 	}
-}
-
-constexpr int32_t kRecSlot = 0; // dial index 0 = the live REC buffer
-
-// Append a captured chord (degree + richness + its voicing) to the REC buffer. Caps at kMaxProgSteps.
-void appendToRec(int8_t deg, int8_t rich, uint8_t oct, int8_t spread, int8_t inv) {
-	if (!gProgsScanned || gNumProgs < 1) {
-		return;
-	}
-	ProgEntry& r = gProgs[kRecSlot];
-	if (r.count >= kMaxProgSteps) {
-		return; // full — clear it (CLEAR while holding PROG on the REC slot) to record again
-	}
-	r.steps[r.count].degree = deg;
-	r.steps[r.count].rich = rich;
-	r.steps[r.count].oct = oct;
-	r.steps[r.count].spread = spread;
-	r.steps[r.count].inv = inv;
-	r.count++;
-}
-
-// Inverse of richRowFromLabel — a ladder row back to its chordpack label.
-const char* richLabelFromRow(int8_t row) {
-	switch (row) {
-	case 0:
-		return "root";
-	case 1:
-		return "5";
-	case 2:
-		return "triad";
-	case 3:
-		return "6";
-	case 5:
-		return "9";
-	case 6:
-		return "11";
-	case 7:
-		return "13";
-	default:
-		return "7";
-	}
-}
-
-// Write the REC buffer to CHORDS/<name>.chordpack. Auto-names by shape (degrees, 1-based, e.g. "1451").
-// Re-scans afterward so the new pack joins the dial. Returns the name (or nullptr on nothing-to-save / error).
-const char* saveRecToPack() {
-	if (!gProgsScanned || gNumProgs < 1) {
-		return nullptr;
-	}
-	ProgEntry& r = gProgs[kRecSlot];
-	if (r.count == 0) {
-		return nullptr;
-	}
-	char name[8];
-	int32_t p = 0;
-	for (int32_t i = 0; i < r.count && p < (int32_t)sizeof(name) - 1; i++) {
-		name[p++] = (char)('1' + (r.steps[i].degree % 7));
-	}
-	name[p] = 0;
-	static char savedName[8];
-	strncpy(savedName, name, sizeof(savedName));
-	char path[48];
-	sprintf(path, "CHORDS/%s.chordpack", name);
-	FatFS::mkdir("CHORDS"); // no-op if it already exists
-	if (StorageManager::createXMLFile(path, smSerializer, true) != Error::NONE) {
-		return nullptr;
-	}
-	smSerializer.writeOpeningTagBeginning("chordpack");
-	smSerializer.writeAttribute("name", name);
-	smSerializer.writeOpeningTagEnd();
-	smSerializer.writeOpeningTagBeginning("progression");
-	smSerializer.writeAttribute("name", name);
-	smSerializer.writeOpeningTagEnd();
-	for (uint8_t i = 0; i < r.count; i++) {
-		const ProgStep& st = r.steps[i];
-		int32_t octup = 0, octdn = 0;
-		for (int32_t k = 1; k <= 3; k++) {
-			if (st.oct & (uint8_t)(1u << (3 + k))) {
-				octup = k;
-			}
-			if (st.oct & (uint8_t)(1u << (3 - k))) {
-				octdn = k;
-			}
-		}
-		smSerializer.writeOpeningTagBeginning("step");
-		smSerializer.writeAttribute("degree", (int32_t)(st.degree + 1));
-		smSerializer.writeAttribute("rich", richLabelFromRow(st.rich));
-		if (octup > 0) {
-			smSerializer.writeAttribute("octup", octup);
-		}
-		if (octdn > 0) {
-			smSerializer.writeAttribute("octdn", octdn);
-		}
-		if (st.spread > 0) {
-			smSerializer.writeAttribute("spread", (int32_t)st.spread);
-		}
-		if (st.inv > 0) {
-			smSerializer.writeAttribute("inv", (int32_t)st.inv);
-		}
-		smSerializer.writeOpeningTagEnd();
-		smSerializer.writeClosingTag("step");
-	}
-	smSerializer.writeClosingTag("progression");
-	smSerializer.writeClosingTag("chordpack");
-	smSerializer.closeFileAfterWriting();
-	// Re-scan so the saved pack appears in the dial (this also resets the REC buffer).
-	gProgsScanned = false;
-	ensureProgsLoaded();
-	return savedName;
 }
 
 // ── Control columns ────────────────────────────────────────────────────────────────────────────────────
@@ -834,17 +720,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			for (uint8_t i = 0; i < vnPlay; i++) {
 				enableNote((uint8_t)voicedPlay[i], velocity);
 			}
-			// REC capture: when the live REC slot is the active progression, a NEW press (rising edge) appends
-			// this chord WITH its current voicing to the recording. Dial to "REC" to arm; pick chords to build it.
-			if (getState().harmonic.progPreset == kRecSlot && !(pickHeldMask & (uint16_t)(1u << ci.local))) {
-				KeyboardStateHarmonic& h = getState().harmonic;
-				int8_t richRow =
-				    (int8_t)((pressed.y < 0) ? 0 : (pressed.y >= kDisplayHeight ? kDisplayHeight - 1 : pressed.y));
-				appendToRec((int8_t)deg, richRow, h.voiceOctaves, h.voiceSpread, h.voiceInversion);
-				char rb[8];
-				sprintf(rb, "REC%d", (int)gProgs[kRecSlot].count);
-				display->displayPopup(rb);
-			}
 			heldCols |= (uint16_t)(1u << ci.local);
 			leftPicked = true;
 			getState().harmonic.showChord = true; // picking a chord always shows it (no silent hidden state)
@@ -1001,7 +876,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	if (progNow && !progPadHeld) {
 		ensureProgsLoaded(); // lazy scan of CHORDS/*.chordpack on first use
 		if (hs.progPreset < 0 || hs.progPreset >= gNumProgs) {
-			hs.progPreset = (gNumProgs > 1) ? 1 : 0; // start on the first real progression; dial down to REC
+			hs.progPreset = 0;
 			hs.progStep = 0;
 		}
 		loadProgStep();
@@ -1103,21 +978,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 	}
 	if (risingPal & kPalCtrlClearMask) {
-		if (progPadHeld && hs.progPreset == kRecSlot) {
-			// HOLD PROG + CLEAR on the REC slot wipes the WHOLE recording to start fresh.
-			gProgs[kRecSlot].count = 0;
-			hs.progStep = 0;
-			chordNoteCount = 0;
-			display->displayPopup("REC0");
-		}
-		else if (!progPadHeld && hs.progPreset == kRecSlot && gProgsScanned && gProgs[kRecSlot].count > 0) {
-			// Tap CLEAR while recording = UNDO the last captured chord (tap again to back up further).
-			gProgs[kRecSlot].count--;
-			char rb[8];
-			sprintf(rb, "REC%d", (int)gProgs[kRecSlot].count);
-			display->displayPopup(rb);
-		}
-		else if (progPadHeld) {
+		if (progPadHeld) {
 			// While walking a progression, CLEAR strips/restores the baked voicings (VOICED <-> BARE).
 			hs.progVoiced = !hs.progVoiced;
 			loadProgStep(); // re-apply the current step with / without its voicing
@@ -1129,7 +990,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 	}
 	palCtrlHeldMask = palCtrlNow;
-	pickHeldMask = heldCols; // rising-edge baseline for REC capture next frame
 
 	ColumnControlsKeyboard::evaluatePads(presses);
 }
@@ -1235,13 +1095,6 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 void KeyboardLayoutHarmonic::handleHorizontalEncoder(int32_t offset, bool shiftEnabled,
                                                      PressedPad presses[kMaxNumKeyboardPadPresses],
                                                      bool encoderPressed) {
-	// PROG hold + on the REC slot + PUSH-and-turn the horizontal wheel = SAVE the recording to a .chordpack
-	// (auto-named by shape). The push (encoderPressed) distinguishes it from a normal walk-turn.
-	if (progPadHeld && encoderPressed && getState().harmonic.progPreset == kRecSlot) {
-		const char* nm = saveRecToPack();
-		display->displayPopup(nm != nullptr ? nm : "REC0");
-		return;
-	}
 	// PROG hold: the horizontal wheel WALKS the loaded progression's chords (wraps, so a vamp loops).
 	if (progPadHeld && getState().harmonic.progPreset >= 0 && getState().harmonic.progPreset < gNumProgs) {
 		KeyboardStateHarmonic& s = getState().harmonic;

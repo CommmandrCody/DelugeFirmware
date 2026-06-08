@@ -95,7 +95,6 @@ private:
 	uint8_t isoCtrlHeldMask = 0; // iso-control column rows held last frame (rising-edge detect)
 	uint64_t isoHeldMask = 0;    // iso pads held last frame (bit = localX*8+y) — rising-edge for voice edit
 	bool progPadHeld = false;    // PROG (purple row 2) held last frame — gates the encoder dial + step sustain
-	uint16_t pickHeldMask = 0;   // palette columns held last frame — rising-edge detect for REC capture
 };
 
 }; // namespace deluge::gui::ui::keyboard::layout

@@ -28,7 +28,7 @@ constexpr uint8_t kMaxPendingChordNotes = 16;
 /// Deliberately source-agnostic: it holds resolved notes, NOT a chord index/voicing, so any
 /// chord-producing mode (Chord Library, Chord, future chord memory / packs / favorites) can
 /// capture into it from its currently-sounding notes. Placement consumes this and does not care
-/// where the notes came from. See docs/HARMONIC_COMPOSITION_ARCHITECTURE.md.
+/// where the notes came from. See the Harmonic Object model (one harmonic truth, many views).
 struct PendingChord {
 	int16_t notes[kMaxPendingChordNotes] = {};
 	uint8_t count = 0;

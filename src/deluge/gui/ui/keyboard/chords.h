@@ -196,7 +196,7 @@ private:
 /// This is the value object that flows through the harmonic-composition system. Chord selection
 /// produces it; audition (keyboard) and commit (clip write) both consume it. It carries intent
 /// (root + interval offsets + velocity), never resolved absolute-note data, so it stays small and
-/// stable across views. See docs/HARMONIC_COMPOSITION_ARCHITECTURE.md.
+/// stable across views. See the Harmonic Object model (one harmonic truth, many views).
 struct ChordSelection {
 	int32_t rootNote = 0; // absolute MIDI base note (e.g. 60 = C4)
 	Voicing voicing{};    // chosen voicing (interval offsets from the root)

@@ -16,6 +16,7 @@
  */
 
 #include "gui/ui/keyboard/layout/harmonic.h"
+#include "extern.h"
 #include "fatfs/fatfs.hpp"
 #include "gui/colour/colour.h"
 #include "gui/ui/keyboard/chords.h"
@@ -326,6 +327,9 @@ void ensureProgsLoaded() {
 	if (gProgsScanned) {
 		return;
 	}
+	if (sdRoutineLock) {
+		return; // never touch the SD card from inside the audio/card routine — retry on the next (safe) call
+	}
 	gProgsScanned = true; // set up-front: a failed / partial scan must never retry-loop
 	gNumProgs = 0;
 	for (int32_t i = 0; i < kNumPresets && gNumProgs < kMaxProgressions; i++) {
@@ -582,6 +586,8 @@ uint8_t KeyboardLayoutHarmonic::buildChordAtDegree(uint8_t deg, int32_t y, const
 	}
 	// Chromatic add (the BRIGHT major-6th): always a real major 6th above the root, borrowed if the scale
 	// only has the flat 6 — so the "6" rung is a bright minor-6/major-6, not a dark b6.
+	// NOTE: every write is guarded by `count < maxNotes`; callers must pass maxNotes <= sizeof(notesOut) (the
+	// ladder's widest row is the 13th with count==kMaxChordKeyboardSize, so the buffer is exactly full there).
 	if (rich.add >= 0 && count > 0 && count < maxNotes) {
 		int32_t midi = (int32_t)notesOut[0] + rich.add;
 		if (midi > 127) {

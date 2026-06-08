@@ -700,6 +700,14 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			uint8_t n =
 			    buildChordAtDegree(deg, pressed.y, iv, sc, keyRoot, notes, kMaxChordKeyboardSize, &rootPc, roman, abs);
 			drawName(roman, abs);
+			// Remember the chord we're LEAVING (its pitch classes) for the DIFF / voice-leading view.
+			{
+				uint16_t m = 0;
+				for (uint8_t i = 0; i < chordNoteCount; i++) {
+					m |= (uint16_t)(1u << (((chordNotes[i] % 12) + 12) % 12));
+				}
+				getState().harmonic.prevChordPcMask = m;
+			}
 			// Remember the EXACT voiced notes so the iso panel lights this one voicing.
 			chordNoteCount = 0;
 			for (uint8_t i = 0; i < n; i++) {
@@ -838,11 +846,22 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		display->displayPopup(hs.stickyChord ? "HOLD" : "FREE");
 	}
 	if (risingIso & (uint8_t)(1u << kBtnLattice)) {
-		hs.latticeOn = !hs.latticeOn;
-		if (hs.latticeOn) {
-			hs.showChord = true; // lattice needs the chord shown — turn it on so it can't silently do nothing
+		// The overlay pad cycles: ONE (off) -> LATT (full lattice) -> DIFF (voice-leading) -> ONE.
+		if (!hs.latticeOn && !hs.diffOn) {
+			hs.latticeOn = true;
+			hs.showChord = true; // an overlay needs the chord shown so it can't silently do nothing
+			display->displayPopup("LATT");
 		}
-		display->displayPopup(hs.latticeOn ? "LATT" : "ONE");
+		else if (hs.latticeOn) {
+			hs.latticeOn = false;
+			hs.diffOn = true;
+			hs.showChord = true;
+			display->displayPopup("DIFF");
+		}
+		else {
+			hs.diffOn = false;
+			display->displayPopup("ONE");
+		}
 	}
 	if (risingIso & (uint8_t)(1u << kBtnSnap)) {
 		hs.isoFollowsChord = !hs.isoFollowsChord;
@@ -1000,6 +1019,14 @@ void KeyboardLayoutHarmonic::loadProgStep() {
 	char roman[32], abs[32];
 	uint8_t n = buildChordAtDegree(deg, rich, iv, sc, keyRoot, notes, kMaxChordKeyboardSize, &rootPc, roman, abs);
 	drawName(roman, abs);
+	// Remember the chord we're LEAVING (its pitch classes) for the DIFF / voice-leading view.
+	{
+		uint16_t m = 0;
+		for (uint8_t i = 0; i < chordNoteCount; i++) {
+			m |= (uint16_t)(1u << (((chordNotes[i] % 12) + 12) % 12));
+		}
+		h.prevChordPcMask = m;
+	}
 	chordNoteCount = 0;
 	for (uint8_t i = 0; i < n; i++) {
 		chordNotes[chordNoteCount++] = notes[i];
@@ -1094,6 +1121,8 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	bool calc = getState().harmonic.calculatorOn;
 	bool swapped = getState().harmonic.swapped;
 	bool latticeOn = getState().harmonic.latticeOn;
+	bool diffOn = getState().harmonic.diffOn;
+	uint16_t prevPcMask = getState().harmonic.prevChordPcMask;
 	bool isoFollowsChord = getState().harmonic.isoFollowsChord;
 	bool editVoicing = getState().harmonic.editVoicing;
 	bool stackPick = getState().harmonic.stackPick;
@@ -1285,7 +1314,37 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				// the key's COLOUR — the root pops as the brightest expression of that colour, never white.
 				// ORDER MATTERS: the bright states (voicing, playing) win over the faint lattice backdrop, so a
 				// note you PLAY still lights up even when the lattice is on (the lattice is only the dim canvas).
-				if (showChord && inChordExact(note)) {
+				if (diffOn && showChord && chordNoteCount > 0) {
+					// VOICE-LEADING view: show the motion from the previous chord to this one.
+					bool inPrev = (prevPcMask & (uint16_t)(1u << pc)) != 0;
+					if (inChordExact(note)) {
+						if (inPrev) {
+							// COMMON tone -- the voice that HOLDS through the change: steady, bright anchor.
+							out = chordHue.adjustFractional(primary[y][x] ? 235 : 150, 255);
+						}
+						else {
+							// ARRIVING tone -- what moves IN: breathes bright to draw the eye.
+							uint8_t ab = (uint8_t)((uint32_t)pulse * (primary[y][x] ? 255 : 200) / 255);
+							out = chordHue.adjustFractional(ab, 255);
+						}
+					}
+					else if (inPrev && !inChordPc(pc)) {
+						// LEAVING tone -- what moves OUT: a faint ghost, breathing OPPOSITE the arrivers
+						// (it fades as they brighten -- you see the voice cross over).
+						uint8_t anti = (uint8_t)(285 - pulse); // pulse runs 30..255; anti runs 255..30
+						out = key.adjustFractional((uint8_t)(anti / 6), 255);
+					}
+					else if (within == 0) {
+						out = key.adjustFractional(150, 255); // keep the tonic anchor lit
+					}
+					else if (!chromatic || inScale) {
+						out = key.adjustFractional(12, 255); // faint scale backdrop
+					}
+					else {
+						out = RGB{};
+					}
+				}
+				else if (showChord && inChordExact(note)) {
 					// The voicing in the chord's palette colour: primary occurrence full-bright, repeats dimmer.
 					// While SOUNDING (audition/play) every occurrence lights to full — the iso lights up so you
 					// SEE what you hear.

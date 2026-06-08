@@ -66,22 +66,24 @@ struct KeyboardStateChord {
 // Harmonic layout: degree columns × richness rows. Horizontal scroll moves through scale degrees;
 // octaveBase sets the register of the tonic (MIDI tonic = octaveBase*12 + key root pitch class).
 struct KeyboardStateHarmonic {
-	int32_t scrollSteps = 0;     // horizontal scroll, in scale-degree steps (0 = tonic at column 0)
-	int32_t octaveBase = 3;      // PALETTE octave: register the chords are built in (pal-ctrl OCT+/- buttons)
-	int32_t isoOctave = 3;       // ISO octave SHOWN: the iso scrolls independently (vertical encoder)
-	bool isoChromatic = false;   // right panel: false = in-key (matches In-Key kbd), true = standard chromatic iso
-	bool stickyChord = false;    // true = selected chord shape persists through iso free-play; false = clears
-	bool calculatorOn = true;    // true = show next-chord brain suggestions on the left
-	bool showChord = true;       // true = light the selected chord's shape on the iso; false = clean grid
-	bool swapped = false;        // handedness: false = palette LEFT / iso RIGHT; true = mirror the two blocks
-	bool latticeOn = false;      // true = light the FULL chord lattice (every repeat) with an upward fade
-	bool spreadRows = false;     // true = bottom 2 iso rows become the spread/voicing strip; false = full iso
-	bool editVoicing = false;    // true = iso taps TOGGLE notes in/out of the selected chord's voicing
-	uint8_t voiceOctaves = 0x08; // octave STACK bitmask: bits 0..6 = octave offsets -3..+3; bit3 (base) always on
-	bool stackPick = false;      // true = iso bottom row is the octave-PICKER strip (toggle which octaves)
-	int8_t voiceSpread = 0;      // SPREAD: 0..3 lowest notes dropped an octave to open the voicing (drop-root)
-	int8_t voiceInversion = 0;   // INVERSION: rotate the chord — move the lowest N notes up an octave
-	bool isoFollowsChord = true; // SNAP: on pick, jump iso to the chord's octave; off = leave iso parked (riff high)
+	int32_t scrollSteps = 0;   // horizontal scroll, in scale-degree steps (0 = tonic at column 0)
+	int32_t octaveBase = 3;    // PALETTE octave: register the chords are built in (pal-ctrl OCT+/- buttons)
+	int32_t isoOctave = 3;     // ISO octave SHOWN: the iso scrolls independently (vertical encoder)
+	bool isoChromatic = false; // right panel: false = in-key (matches In-Key kbd), true = standard chromatic iso
+	bool stickyChord = false;  // true = selected chord shape persists through iso free-play; false = clears
+	bool calculatorOn = true;  // true = show next-chord brain suggestions on the left
+	bool showChord = true;     // true = light the selected chord's shape on the iso; false = clean grid
+	bool swapped = false;      // handedness: false = palette LEFT / iso RIGHT; true = mirror the two blocks
+	bool latticeOn = false;    // true = light the FULL chord lattice (every repeat) with an upward fade
+	bool diffOn = false; // DIFF/voice-leading view: prev->current motion (common hold, arriving breathe, leaving ghost)
+	uint16_t prevChordPcMask = 0; // pitch-class set of the PREVIOUS chord — drives the DIFF / voice-leading view
+	bool spreadRows = false;      // true = bottom 2 iso rows become the spread/voicing strip; false = full iso
+	bool editVoicing = false;     // true = iso taps TOGGLE notes in/out of the selected chord's voicing
+	uint8_t voiceOctaves = 0x08;  // octave STACK bitmask: bits 0..6 = octave offsets -3..+3; bit3 (base) always on
+	bool stackPick = false;       // true = iso bottom row is the octave-PICKER strip (toggle which octaves)
+	int8_t voiceSpread = 0;       // SPREAD: 0..3 lowest notes dropped an octave to open the voicing (drop-root)
+	int8_t voiceInversion = 0;    // INVERSION: rotate the chord — move the lowest N notes up an octave
+	bool isoFollowsChord = true;  // SNAP: on pick, jump iso to the chord's octave; off = leave iso parked (riff high)
 	// PROGRESSION WALKER (MVP): HOLD purple row 2, then dial — vertical wheel picks which progression, horizontal
 	// wheel walks the chords. Holding sustains the current step; release leaves the chord loaded. No grid strip.
 	int8_t progPreset = -1; // loaded preset index (-1 = none dialled yet)

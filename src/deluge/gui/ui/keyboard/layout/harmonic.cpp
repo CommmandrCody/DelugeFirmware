@@ -328,6 +328,11 @@ void ensureProgsLoaded() {
 	}
 	gProgsScanned = true; // set up-front: a failed / partial scan must never retry-loop
 	gNumProgs = 0;
+	// Slot 0 is the live REC buffer — dial down to it to capture chords you pick into a progression.
+	strncpy(gProgs[gNumProgs].name, "REC", sizeof(gProgs[0].name) - 1);
+	gProgs[gNumProgs].name[sizeof(gProgs[0].name) - 1] = 0;
+	gProgs[gNumProgs].count = 0;
+	gNumProgs++;
 	for (int32_t i = 0; i < kNumPresets && gNumProgs < kMaxProgressions; i++) {
 		ProgEntry& e = gProgs[gNumProgs++];
 		strncpy(e.name, kPresets[i].name, sizeof(e.name) - 1);
@@ -368,6 +373,25 @@ void ensureProgsLoaded() {
 	for (int32_t i = 0; i < nPacks; i++) {
 		parseChordPack(&packs[i]);
 	}
+}
+
+constexpr int32_t kRecSlot = 0; // dial index 0 = the live REC buffer
+
+// Append a captured chord (degree + richness + its voicing) to the REC buffer. Caps at kMaxProgSteps.
+void appendToRec(int8_t deg, int8_t rich, uint8_t oct, int8_t spread, int8_t inv) {
+	if (!gProgsScanned || gNumProgs < 1) {
+		return;
+	}
+	ProgEntry& r = gProgs[kRecSlot];
+	if (r.count >= kMaxProgSteps) {
+		return; // full — clear it (CLEAR while holding PROG on the REC slot) to record again
+	}
+	r.steps[r.count].degree = deg;
+	r.steps[r.count].rich = rich;
+	r.steps[r.count].oct = oct;
+	r.steps[r.count].spread = spread;
+	r.steps[r.count].inv = inv;
+	r.count++;
 }
 
 // ── Control columns ────────────────────────────────────────────────────────────────────────────────────
@@ -720,6 +744,17 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			for (uint8_t i = 0; i < vnPlay; i++) {
 				enableNote((uint8_t)voicedPlay[i], velocity);
 			}
+			// REC capture: when the live REC slot is the active progression, a NEW press (rising edge) appends
+			// this chord WITH its current voicing to the recording. Dial to "REC" to arm; pick chords to build it.
+			if (getState().harmonic.progPreset == kRecSlot && !(pickHeldMask & (uint16_t)(1u << ci.local))) {
+				KeyboardStateHarmonic& h = getState().harmonic;
+				int8_t richRow =
+				    (int8_t)((pressed.y < 0) ? 0 : (pressed.y >= kDisplayHeight ? kDisplayHeight - 1 : pressed.y));
+				appendToRec((int8_t)deg, richRow, h.voiceOctaves, h.voiceSpread, h.voiceInversion);
+				char rb[8];
+				sprintf(rb, "REC%d", (int)gProgs[kRecSlot].count);
+				display->displayPopup(rb);
+			}
 			heldCols |= (uint16_t)(1u << ci.local);
 			leftPicked = true;
 			getState().harmonic.showChord = true; // picking a chord always shows it (no silent hidden state)
@@ -876,7 +911,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	if (progNow && !progPadHeld) {
 		ensureProgsLoaded(); // lazy scan of CHORDS/*.chordpack on first use
 		if (hs.progPreset < 0 || hs.progPreset >= gNumProgs) {
-			hs.progPreset = 0;
+			hs.progPreset = (gNumProgs > 1) ? 1 : 0; // start on the first real progression; dial down to REC
 			hs.progStep = 0;
 		}
 		loadProgStep();
@@ -978,7 +1013,14 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 	}
 	if (risingPal & kPalCtrlClearMask) {
-		if (progPadHeld) {
+		if (progPadHeld && hs.progPreset == kRecSlot) {
+			// On the REC slot, CLEAR wipes the recording so you can capture a fresh progression.
+			gProgs[kRecSlot].count = 0;
+			hs.progStep = 0;
+			chordNoteCount = 0;
+			display->displayPopup("REC0");
+		}
+		else if (progPadHeld) {
 			// While walking a progression, CLEAR strips/restores the baked voicings (VOICED <-> BARE).
 			hs.progVoiced = !hs.progVoiced;
 			loadProgStep(); // re-apply the current step with / without its voicing
@@ -990,6 +1032,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 	}
 	palCtrlHeldMask = palCtrlNow;
+	pickHeldMask = heldCols; // rising-edge baseline for REC capture next frame
 
 	ColumnControlsKeyboard::evaluatePads(presses);
 }

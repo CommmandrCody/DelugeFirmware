@@ -37,13 +37,9 @@ public:
 	void readFromFile(Deserializer& reader);
 
 private:
+	// Which slot is currently held (lights bright in renderColumn). The store/recall/highlight/naming
+	// logic lives in ChordMemService (shared with the future center bank).
 	uint8_t activeChordMem = 0xFF;
-	// Persistent grid-highlight of a recalled chord: write its notes into the keyboard's
-	// highlightedNotes[] so the chord shape stays lit on the iso/in-key grid after release,
-	// letting you see the harmony while playing a melody over it.
-	uint8_t highlightSlot = 0xFF;
-	void setHighlight(int32_t slot);
-	void clearHighlight();
 };
 
 } // namespace deluge::gui::ui::keyboard::controls

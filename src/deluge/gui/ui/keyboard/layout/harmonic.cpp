@@ -19,7 +19,10 @@
 #include "extern.h"
 #include "fatfs/fatfs.hpp"
 #include "gui/colour/colour.h"
+#include "gui/ui/keyboard/chord_mem_service.h"
 #include "gui/ui/keyboard/chords.h"
+#include "gui/ui/keyboard/column_controls/chord_mem.h"
+#include "gui/ui/keyboard/layout/column_control_state.h"
 #include "hid/button.h"
 #include "hid/buttons.h"
 #include "hid/display/display.h"
@@ -755,14 +758,66 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	if (!learnHeld) {
 		learnHeldLo = 0;
 		learnHeldHi = 0;
+		learnSbHeld = 0;
 	}
 	uint64_t learnCurLo = 0, learnCurHi = 0; // pads named this frame
+	uint16_t learnSbCur = 0;                 // sidebar pads named this frame
 	uint64_t isoNowMask = 0; // iso pads pressed this frame (bit = localX*8+y) — for voice-edit rising edge
 	bool isoPlayed = false;
 	bool leftPicked = false;
 	for (int32_t idx = kMaxNumKeyboardPadPresses - 1; idx >= 0; --idx) {
 		PressedPad pressed = presses[idx];
-		if (!pressed.active || pressed.x >= kDisplayWidth) {
+		if (!pressed.active) {
+			continue;
+		}
+		// LEARN over the SIDEBAR: name velocity/mod, or — for a chord-bank column — emit the STORED chord's
+		// notes so the Companion can name it ("the Deluge tells me what I banked by ear"). Rising-edge, silent.
+		if (learnHeld && pressed.x >= kDisplayWidth && pressed.x < kDisplayWidth + kSideBarWidth && pressed.y >= 0
+		    && pressed.y < kDisplayHeight) {
+			uint16_t sbBit = (uint16_t)1u << ((pressed.x - kDisplayWidth) * kDisplayHeight + pressed.y);
+			bool rising = !(learnSbHeld & sbBit);
+			learnSbCur |= sbBit;
+			if (rising) {
+				ColumnControlState& cc = getState().columnControl;
+				ColumnControlFunction func = (pressed.x == kDisplayWidth) ? cc.leftColFunc : cc.rightColFunc;
+				char ctx[64];
+				ctx[0] = '\0';
+				uint8_t notes[controls::kMaxNotesChordMem];
+				uint8_t n = 0;
+				if (func == CHORD_MEM) {
+					n = cc.chordMemColumn.peekChord(pressed.y, notes, controls::kMaxNotesChordMem);
+				}
+				else if (func == SONG_CHORD_MEM) {
+					n = ChordMemService::peek(pressed.y, notes, controls::kMaxNotesChordMem);
+				}
+				if (func == CHORD_MEM || func == SONG_CHORD_MEM) {
+					if (n > 0) {
+						int p = snprintf(ctx, sizeof ctx, "notes:");
+						for (uint8_t i = 0; i < n && p < (int)sizeof ctx - 5; i++) {
+							p += snprintf(ctx + p, sizeof ctx - (size_t)p, "%s%d", i ? "," : "", (int)notes[i]);
+						}
+						display->displayPopup("BANK");
+					}
+					else {
+						snprintf(ctx, sizeof ctx, "control:BANK"); // empty slot
+						display->displayPopup("EMPTY");
+					}
+				}
+				else if (func == VELOCITY) {
+					snprintf(ctx, sizeof ctx, "control:VELOCITY");
+					display->displayPopup("VELOCITY");
+				}
+				else if (func == MOD) {
+					snprintf(ctx, sizeof ctx, "control:MOD");
+					display->displayPopup("MOD");
+				}
+				if (ctx[0] != '\0') {
+					HIDSysex::sendLearnContext(4 /*SIDEBAR*/, (uint8_t)pressed.x, (uint8_t)pressed.y, ctx);
+				}
+			}
+			continue;
+		}
+		if (pressed.x >= kDisplayWidth) {
 			continue;
 		}
 		ColInfo ci = colInfoFor(pressed.x, swapped);
@@ -914,6 +969,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	if (learnHeld) {
 		learnHeldLo = learnCurLo;
 		learnHeldHi = learnCurHi;
+		learnSbHeld = learnSbCur;
 		palCtrlHeldMask = 0;
 		isoCtrlHeldMask = 0;
 		isoHeldMask = 0;

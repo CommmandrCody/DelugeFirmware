@@ -45,6 +45,9 @@ void clearSlot(int32_t slot);
 /// Number of notes stored in a slot.
 uint8_t noteCount(int32_t slot);
 
+/// Read a slot's notes without sounding them (for LEARN / inspection). Returns the note count.
+uint8_t peek(int32_t slot, uint8_t* out, uint8_t maxOut);
+
 /// Persist a recalled chord's shape on the grid (writes into the keyboard's highlightedNotes[]).
 void setHighlight(int32_t slot);
 /// Clear the currently-lit recalled-chord shape.

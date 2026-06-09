@@ -101,6 +101,7 @@ private:
 	// pad pops its name once, not every frame (which would thrash the display and starve audio).
 	uint64_t learnHeldLo = 0; // pad ids 0..63 named last frame
 	uint64_t learnHeldHi = 0; // pad ids 64..127 named last frame
+	uint16_t learnSbHeld = 0; // sidebar pads named last frame (bit = (x-kDisplayWidth)*kDisplayHeight + y)
 };
 
 }; // namespace deluge::gui::ui::keyboard::layout

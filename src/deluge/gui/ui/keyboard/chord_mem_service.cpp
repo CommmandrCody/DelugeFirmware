@@ -38,6 +38,18 @@ uint8_t noteCount(int32_t slot) {
 	return currentSong->chordMemNoteCount[slot];
 }
 
+// Read a slot's notes without sounding them (for LEARN / inspection). Returns the note count.
+uint8_t peek(int32_t slot, uint8_t* out, uint8_t maxOut) {
+	uint8_t n = currentSong->chordMemNoteCount[slot];
+	if (n > maxOut) {
+		n = maxOut;
+	}
+	for (uint8_t i = 0; i < n && i < MAX_NOTES_CHORD_MEM; i++) {
+		out[i] = currentSong->chordMem[slot][i];
+	}
+	return n;
+}
+
 // Clear the currently-highlighted chord's notes from the grid highlight array.
 void clearHighlight() {
 	if (highlightSlot == 0xFF) {

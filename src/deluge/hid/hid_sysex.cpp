@@ -17,7 +17,12 @@ int32_t midiDisplayUntil = 0;
 uint8_t* oledDeltaImage = nullptr;
 bool oledDeltaForce = true;
 
+// Chroma: the last cable that handshaked with us over HID SysEx. LEARN context events go out on this. The
+// host registers it by sending any HID request (e.g. the 7-seg request the screen mirror already uses).
+static MIDICable* lastHidCable = nullptr;
+
 void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
+	lastHidCable = &cable;
 	if (len < 3) {
 		return;
 	}
@@ -153,6 +158,31 @@ void HIDSysex::send7SegData(MIDICable& cable) {
 		                                    //		device->sendSysex(reply, packed_data_size + 7);
 		cable.sendSysex(reply, packed_data_size + 10);
 	}
+}
+
+// Chroma: F0 00 21 7B 01 4C <region> <x> <y> <n> <contextId ASCII...> F7  (see chroma-schema SCHEMA.md 2.1).
+// contextId is 7-bit ASCII so it rides SysEx unescaped. No-op until a host has handshaked over HID SysEx.
+void HIDSysex::sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char* contextId) {
+	if (lastHidCable == nullptr || contextId == nullptr) {
+		return;
+	}
+	uint8_t msg[11 + 127];
+	msg[0] = 0xf0;
+	msg[1] = 0x00;
+	msg[2] = 0x21;
+	msg[3] = 0x7b;
+	msg[4] = 0x01;
+	msg[5] = SysEx::SysexCommands::LearnContext; // 0x4C
+	msg[6] = region & 0x7f;
+	msg[7] = x & 0x7f;
+	msg[8] = y & 0x7f;
+	uint8_t n = 0;
+	for (const char* c = contextId; *c && n < 127; c++) {
+		msg[10 + n++] = (uint8_t)(*c) & 0x7f; // mask to 7-bit; contextIds are ASCII by contract
+	}
+	msg[9] = n;
+	msg[10 + n] = 0xf7;
+	lastHidCable->sendSysex(msg, 11 + n);
 }
 
 void HIDSysex::sendOLEDDataDelta(MIDICable& cable, bool force) {

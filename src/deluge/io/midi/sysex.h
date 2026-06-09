@@ -48,12 +48,14 @@ const uint8_t SYSEX_UNIVERSAL_IDENTITY = 0x06;
 const uint8_t SYSEX_END = 0xF7;
 
 enum SysexCommands : uint8_t {
-	Ping,       // reply with pong
-	Popup,      // display info in popup
-	HID,        // HID access
-	Debug,      // Debugging
-	Json,       // Json Request
-	JsonReply,  // Json Response
+	Ping,      // reply with pong
+	Popup,     // display info in popup
+	HID,       // HID access
+	Debug,     // Debugging
+	Json,      // Json Request
+	JsonReply, // Json Response
+	LearnContext =
+	    0x4C,   // Chroma: outbound LEARN context event (host renders the docs) — see chroma-schema SCHEMA.md 2.1
 	Pong = 0x7F // Pong reply
 };
 

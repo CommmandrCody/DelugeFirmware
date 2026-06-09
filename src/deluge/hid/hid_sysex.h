@@ -10,4 +10,7 @@ void sendOLEDDataDelta(MIDICable& cable, bool force);
 void send7SegData(MIDICable& cable);
 void sendDisplayIfChanged();
 void readBlock(MIDICable& cable);
+// Chroma: emit a LEARN context event to the host (Companion renders the docs). Sent on the last cable that
+// talked to us over HID SysEx; a no-op until a host has handshaked. See chroma-schema SCHEMA.md 2.1.
+void sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char* contextId);
 } // namespace HIDSysex

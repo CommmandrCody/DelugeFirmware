@@ -23,6 +23,7 @@
 #include "hid/button.h"
 #include "hid/buttons.h"
 #include "hid/display/display.h"
+#include "hid/hid_sysex.h"
 #include "model/settings/runtime_feature_settings.h"
 #include "processing/engines/audio_engine.h"
 #include "storage/storage_manager.h"
@@ -444,6 +445,49 @@ const char* controlPadName(Region region, int32_t y) {
 	}
 }
 
+// Short, stable token for a control pad's contextId (control:<TOKEN>) — what the host LEARN event carries.
+// Distinct from controlPadName (the human label shown on the device). See chroma-schema SCHEMA.md 2.1.
+const char* controlPadId(Region region, int32_t y) {
+	if (region == REG_PAL_CTRL) {
+		switch (y) {
+		case kBtnCalc:
+			return "CALC";
+		case kBtnSwap:
+			return "SWAP";
+		case kBtnPalOctUp:
+			return "OCTUP";
+		case kBtnPalOctDown:
+			return "OCTDN";
+		case kBtnStack:
+			return "STACK";
+		case kBtnSpread:
+			return "SPREAD";
+		case kBtnInversion:
+			return "INV";
+		default:
+			return "CLEAR";
+		}
+	}
+	switch (y) {
+	case kBtnIsoView:
+		return "VIEW";
+	case kBtnShowChord:
+		return "SHOW";
+	case kBtnSticky:
+		return "STICKY";
+	case kBtnLattice:
+		return "OVERLAY";
+	case kBtnSnap:
+		return "SNAP";
+	case kBtnProg:
+		return "PROG";
+	case kBtnEdit:
+		return "EDIT";
+	default:
+		return "AUDITION";
+	}
+}
+
 // Reserved control-zone colours — a "control family" (CRIMSON + PURPLE) used NOWHERE else in Chroma. The two
 // centre columns get DIFFERENT hues so they're instantly distinguishable: palette-control = CRIMSON,
 // iso-control = PURPLE. On = bright, off = dim, whole column faintly tinted so each reads as its own zone.
@@ -732,11 +776,17 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 				bool rising = !(prev & bit);
 				cur |= bit;
 				if (rising) {
+					// Name it on the device, AND emit a context event to the host so the Companion can show the
+					// full card (see chroma-schema SCHEMA.md 2.1). contextId is the stable key into the graph.
+					char ctx[48];
+					ctx[0] = '\0';
 					if (ci.region == REG_PAL_CTRL) {
 						display->displayPopup(controlPadName(REG_PAL_CTRL, pressed.y));
+						snprintf(ctx, sizeof ctx, "control:%s", controlPadId(REG_PAL_CTRL, pressed.y));
 					}
 					else if (ci.region == REG_ISO_CTRL) {
 						display->displayPopup(controlPadName(REG_ISO_CTRL, pressed.y));
+						snprintf(ctx, sizeof ctx, "control:%s", controlPadId(REG_ISO_CTRL, pressed.y));
 					}
 					else if (ci.region == REG_PAL && ci.local < numCols) {
 						int16_t nbuf[kMaxChordKeyboardSize];
@@ -747,6 +797,19 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 						char buf[40];
 						snprintf(buf, sizeof buf, "%s  %s", roman, abs);
 						display->displayPopup(buf);
+						// contextId = clean degree roman (triad row) + richness label of the row tapped.
+						int16_t nb2[kMaxChordKeyboardSize];
+						uint8_t rpc2 = 0;
+						char roman2[32], abs2[32];
+						buildChordAtDegree((uint8_t)ci.local, 2, iv, sc, keyRoot, nb2, kMaxChordKeyboardSize, &rpc2,
+						                   roman2, abs2);
+						if (roman2[0] == '\0') {
+							snprintf(roman2, sizeof roman2, "deg%d", (int)ci.local + 1);
+						}
+						int32_t yc =
+						    (pressed.y < 0) ? 0 : (pressed.y >= kDisplayHeight ? kDisplayHeight - 1 : pressed.y);
+						const char* richLbl = (yc == 0) ? "root" : (yc == 2) ? "triad" : kLadder[yc].suffix;
+						snprintf(ctx, sizeof ctx, "harmonicObject:%s:%s", roman2, richLbl);
 					}
 					else if (ci.region == REG_ISO && ci.local >= 0 && ci.local < kBlockWidth) {
 						int32_t note = getState().harmonic.isoChromatic ? isoNoteChromatic(ci.local, pressed.y)
@@ -756,7 +819,12 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 							snprintf(buf, sizeof buf, "%s%d", noteNameInKey((uint8_t)(note % 12), false),
 							         (int)(note / 12 - 1));
 							display->displayPopup(buf);
+							snprintf(ctx, sizeof ctx, "isoNote:%s%d", noteNameInKey((uint8_t)(note % 12), false),
+							         (int)(note / 12 - 1));
 						}
+					}
+					if (ctx[0] != '\0') {
+						HIDSysex::sendLearnContext((uint8_t)ci.region, (uint8_t)pressed.x, (uint8_t)pressed.y, ctx);
 					}
 				}
 			}

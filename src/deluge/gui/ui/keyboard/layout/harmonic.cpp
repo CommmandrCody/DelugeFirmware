@@ -755,6 +755,9 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		for (uint8_t d = 0; d < 7; d++) {
 			degBright[d] = 0;
 		}
+		// Also drop the shared chord-memory "shape" highlight (the 255 sentinels) so it doesn't linger on the
+		// iso / in-key / piano layouts after you clear in Chroma.
+		keyboardScreen.clearChordShapeHighlight();
 	};
 
 	// OCTAVE PICKER: in stack-pick mode, rising bottom-row iso pads toggle which octaves are in the stack

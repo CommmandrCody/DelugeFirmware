@@ -1359,7 +1359,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 						out = key.adjustFractional(150, 255); // keep the tonic anchor lit
 					}
 					else if (!chromatic || inScale) {
-						out = key.adjustFractional(12, 255); // faint scale backdrop
+						out = key.adjustFractional(8, 255); // faint scale backdrop
 					}
 					else {
 						out = RGB{};
@@ -1376,12 +1376,13 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					out = key.adjustFractional(255, 255); // live free-play notes glow in the KEY colour
 				}
 				else if (showChord && latticeOn && chordNoteCount > 0 && inChordPc(pc)) {
-					// Chord-lattice overlay in the chord's PALETTE colour, but VERY light — a faint glow of
-					// every position the chord makes available, fading upward; never competes with the voicing.
-					uint8_t base = isCorePc(pc) ? 55 : 30;
+					// Chord-lattice overlay in the chord's PALETTE colour — a glow of every position the chord
+					// makes available, fading upward. Kept below the voicing (110+) but clearly ABOVE the scale
+					// backdrop (8) so it reads as the lattice, not as the dim grid.
+					uint8_t base = isCorePc(pc) ? 95 : 62;
 					uint8_t fade = (uint8_t)((uint32_t)base * (uint32_t)(kDisplayHeight - y) / kDisplayHeight);
-					if (fade < 6) {
-						fade = 6;
+					if (fade < 20) {
+						fade = 20; // floor must clear the scale backdrop so the lattice is always visible
 					}
 					out = chordHue.adjustFractional(fade, 255);
 				}
@@ -1396,7 +1397,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					out = key.adjustFractional(150, 255);
 				}
 				else if (!chromatic || inScale) {
-					out = key.adjustFractional(12, 255); // faint scale backdrop (dim, to let the root pop)
+					out = key.adjustFractional(8, 255); // faint scale backdrop (dim, to let the root pop)
 				}
 				else {
 					out = RGB{}; // chromatic off-scale: dark

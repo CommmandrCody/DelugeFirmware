@@ -20,6 +20,8 @@
 #include "fatfs/fatfs.hpp"
 #include "gui/colour/colour.h"
 #include "gui/ui/keyboard/chords.h"
+#include "hid/button.h"
+#include "hid/buttons.h"
 #include "hid/display/display.h"
 #include "model/settings/runtime_feature_settings.h"
 #include "processing/engines/audio_engine.h"
@@ -399,6 +401,49 @@ constexpr int32_t kBtnSpread = 2;                               // pal-ctrl: SPR
 constexpr int32_t kBtnInversion = 1;                            // pal-ctrl: INVERSION (cycle 0..3)
 constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << 1) - 1); // row 0 = clear pad
 
+// LEARN-mode help: hold the LEARN button and tap a control pad to read its function (it won't activate).
+// Names scroll on the 7-seg, show whole on OLED — so you don't have to memorise the control columns.
+const char* controlPadName(Region region, int32_t y) {
+	if (region == REG_PAL_CTRL) { // CRIMSON — the chord
+		switch (y) {
+		case kBtnCalc:
+			return "CALCULATOR";
+		case kBtnSwap:
+			return "SWAP SIDES";
+		case kBtnPalOctUp:
+			return "PALETTE OCTAVE UP";
+		case kBtnPalOctDown:
+			return "PALETTE OCTAVE DOWN";
+		case kBtnStack:
+			return "OCTAVE STACK PICKER";
+		case kBtnSpread:
+			return "SPREAD (DROP-ROOT)";
+		case kBtnInversion:
+			return "INVERSION";
+		default:
+			return "CLEAR";
+		}
+	}
+	switch (y) { // PURPLE — the surface
+	case kBtnIsoView:
+		return "VIEW: IN-KEY / CHROMATIC";
+	case kBtnShowChord:
+		return "SHOW CHORD SHAPE";
+	case kBtnSticky:
+		return "STICKY (HOLD CHORD)";
+	case kBtnLattice:
+		return "OVERLAY: ONE / LATTICE / DIFF";
+	case kBtnSnap:
+		return "SNAP ISO TO CHORD";
+	case kBtnProg:
+		return "PROGRESSION (HOLD + DIAL)";
+	case kBtnEdit:
+		return "EDIT NOTES";
+	default:
+		return "AUDITION (HOLD TO HEAR)";
+	}
+}
+
 // Reserved control-zone colours — a "control family" (CRIMSON + PURPLE) used NOWHERE else in Chroma. The two
 // centre columns get DIFFERENT hues so they're instantly distinguishable: palette-control = CRIMSON,
 // iso-control = PURPLE. On = bright, off = dim, whole column faintly tinted so each reads as its own zone.
@@ -657,6 +702,8 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 
 	uint8_t palCtrlNow = 0;
 	uint8_t isoCtrlNow = 0;
+	// LEARN held = "what's this pad?" mode: tapping a control pad shows its name instead of firing it.
+	bool learnHeld = Buttons::isButtonPressed(deluge::hid::button::LEARN);
 	uint64_t isoNowMask = 0; // iso pads pressed this frame (bit = localX*8+y) — for voice-edit rising edge
 	bool isoPlayed = false;
 	bool leftPicked = false;
@@ -668,13 +715,23 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		ColInfo ci = colInfoFor(pressed.x, swapped);
 		if (ci.region == REG_PAL_CTRL) {
 			if (pressed.y >= 0 && pressed.y < kDisplayHeight) {
-				palCtrlNow |= (uint8_t)(1u << pressed.y);
+				if (learnHeld) {
+					display->displayPopup(controlPadName(REG_PAL_CTRL, pressed.y)); // LEARN: name it, don't fire
+				}
+				else {
+					palCtrlNow |= (uint8_t)(1u << pressed.y);
+				}
 			}
 			continue;
 		}
 		if (ci.region == REG_ISO_CTRL) {
 			if (pressed.y >= 0 && pressed.y < kDisplayHeight) {
-				isoCtrlNow |= (uint8_t)(1u << pressed.y);
+				if (learnHeld) {
+					display->displayPopup(controlPadName(REG_ISO_CTRL, pressed.y));
+				}
+				else {
+					isoCtrlNow |= (uint8_t)(1u << pressed.y);
+				}
 			}
 			continue;
 		}

@@ -91,11 +91,10 @@ private:
 	uint8_t degBright[7] = {}; // per-degree brightness (0-255) = strength as a next move; 0 when no Calculator
 	int8_t topDeg = -1;        // the single strongest next degree; -1 = none
 
-	uint8_t palCtrlHeldMask = 0;   // palette-control column rows held last frame (rising-edge detect)
-	uint8_t isoCtrlHeldMask = 0;   // iso-control column rows held last frame (rising-edge detect)
-	uint64_t isoHeldMask = 0;      // iso pads held last frame (bit = localX*8+y) — rising-edge for voice edit
-	bool progPadHeld = false;      // PROG (purple row 2) held last frame — gates the encoder dial + step sustain
-	bool sidebarDefaulted = false; // one-time: default the right sidebar column to the chord-memory bank
+	uint8_t palCtrlHeldMask = 0; // palette-control column rows held last frame (rising-edge detect)
+	uint8_t isoCtrlHeldMask = 0; // iso-control column rows held last frame (rising-edge detect)
+	uint64_t isoHeldMask = 0;    // iso pads held last frame (bit = localX*8+y) — rising-edge for voice edit
+	bool progPadHeld = false;    // PROG (purple row 2) held last frame — gates the encoder dial + step sustain
 };
 
 }; // namespace deluge::gui::ui::keyboard::layout

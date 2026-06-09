@@ -1122,17 +1122,9 @@ void KeyboardLayoutHarmonic::handleHorizontalEncoder(int32_t offset, bool shiftE
 }
 
 void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidth]) {
-	// One-time: default the RIGHT sidebar column to the chord-memory BANK so it's there when you enter Chroma
-	// (store voiced chords on its slots, recall them, saved with the song). Only if the user hasn't customised
-	// it (still the factory MOD) — so switching it away sticks. Velocity stays on the left column.
-	if (!sidebarDefaulted) {
-		sidebarDefaulted = true;
-		ColumnControlState& cc = getState().columnControl;
-		if (cc.rightColFunc == ColumnControlFunction::MOD) {
-			cc.rightColFunc = ColumnControlFunction::CHORD_MEM;
-			cc.rightCol = cc.getColumnForFunc(ColumnControlFunction::CHORD_MEM);
-		}
-	}
+	// Sidebar stays at the familiar factory default (velocity / mod). The chord BANK is opt-in: hold a sidebar
+	// column + turn the vertical encoder to switch it to CHORD_MEM. (Removed the auto-default — it pulled the
+	// still-maturing bank into the first-run experience and surfaced a clip-duplication bug; see PR notes.)
 	uint8_t iv[12];
 	uint8_t sc = getScaleIntervals(iv);
 	uint8_t keyRoot = (uint8_t)getRootNote();

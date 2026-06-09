@@ -95,6 +95,12 @@ private:
 	uint8_t isoCtrlHeldMask = 0; // iso-control column rows held last frame (rising-edge detect)
 	uint64_t isoHeldMask = 0;    // iso pads held last frame (bit = localX*8+y) — rising-edge for voice edit
 	bool progPadHeld = false;    // PROG (purple row 2) held last frame — gates the encoder dial + step sustain
+
+	// LEARN inspect mode: while LEARN is held the whole surface goes SILENT and each pad just names itself.
+	// These track which pads were already named last frame (pad id = x*kDisplayHeight + y, 0..127) so a held
+	// pad pops its name once, not every frame (which would thrash the display and starve audio).
+	uint64_t learnHeldLo = 0; // pad ids 0..63 named last frame
+	uint64_t learnHeldHi = 0; // pad ids 64..127 named last frame
 };
 
 }; // namespace deluge::gui::ui::keyboard::layout

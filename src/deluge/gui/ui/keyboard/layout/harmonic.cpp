@@ -702,8 +702,17 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 
 	uint8_t palCtrlNow = 0;
 	uint8_t isoCtrlNow = 0;
-	// LEARN held = "what's this pad?" mode: tapping a control pad shows its name instead of firing it.
+	// LEARN held = "what's this pad?" mode for the WHOLE surface: every pad (control, palette chord, iso note)
+	// names itself on the display and NOTHING sounds or changes — pure inspect. (Cody: "it's not just for the
+	// Deluge to learn, it's for YOU to learn.") Notes are off because currentNotesState was reset above and we
+	// return before any enableNote. Naming fires on the rising edge only (learnHeld* masks), so a held pad pops
+	// once instead of every frame — repeated popups would thrash the display and crackle the audio.
 	bool learnHeld = Buttons::isButtonPressed(deluge::hid::button::LEARN);
+	if (!learnHeld) {
+		learnHeldLo = 0;
+		learnHeldHi = 0;
+	}
+	uint64_t learnCurLo = 0, learnCurHi = 0; // pads named this frame
 	uint64_t isoNowMask = 0; // iso pads pressed this frame (bit = localX*8+y) — for voice-edit rising edge
 	bool isoPlayed = false;
 	bool leftPicked = false;
@@ -713,25 +722,55 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			continue;
 		}
 		ColInfo ci = colInfoFor(pressed.x, swapped);
+		if (learnHeld) {
+			// Inspect mode: name whatever this pad is, once per press, and fire nothing.
+			if (pressed.y >= 0 && pressed.y < kDisplayHeight) {
+				int32_t padId = pressed.x * kDisplayHeight + pressed.y; // 0..127
+				uint64_t bit = (uint64_t)1u << (padId & 63);
+				uint64_t& cur = (padId < 64) ? learnCurLo : learnCurHi;
+				uint64_t& prev = (padId < 64) ? learnHeldLo : learnHeldHi;
+				bool rising = !(prev & bit);
+				cur |= bit;
+				if (rising) {
+					if (ci.region == REG_PAL_CTRL) {
+						display->displayPopup(controlPadName(REG_PAL_CTRL, pressed.y));
+					}
+					else if (ci.region == REG_ISO_CTRL) {
+						display->displayPopup(controlPadName(REG_ISO_CTRL, pressed.y));
+					}
+					else if (ci.region == REG_PAL && ci.local < numCols) {
+						int16_t nbuf[kMaxChordKeyboardSize];
+						uint8_t rpc = 0;
+						char roman[32], abs[32];
+						buildChordAtDegree((uint8_t)ci.local, pressed.y, iv, sc, keyRoot, nbuf, kMaxChordKeyboardSize,
+						                   &rpc, roman, abs);
+						char buf[40];
+						snprintf(buf, sizeof buf, "%s  %s", roman, abs);
+						display->displayPopup(buf);
+					}
+					else if (ci.region == REG_ISO && ci.local >= 0 && ci.local < kBlockWidth) {
+						int32_t note = getState().harmonic.isoChromatic ? isoNoteChromatic(ci.local, pressed.y)
+						                                                : isoNoteAt(ci.local, pressed.y);
+						if (note >= 0 && note <= 127) {
+							char buf[8];
+							snprintf(buf, sizeof buf, "%s%d", noteNameInKey((uint8_t)(note % 12), false),
+							         (int)(note / 12 - 1));
+							display->displayPopup(buf);
+						}
+					}
+				}
+			}
+			continue;
+		}
 		if (ci.region == REG_PAL_CTRL) {
 			if (pressed.y >= 0 && pressed.y < kDisplayHeight) {
-				if (learnHeld) {
-					display->displayPopup(controlPadName(REG_PAL_CTRL, pressed.y)); // LEARN: name it, don't fire
-				}
-				else {
-					palCtrlNow |= (uint8_t)(1u << pressed.y);
-				}
+				palCtrlNow |= (uint8_t)(1u << pressed.y);
 			}
 			continue;
 		}
 		if (ci.region == REG_ISO_CTRL) {
 			if (pressed.y >= 0 && pressed.y < kDisplayHeight) {
-				if (learnHeld) {
-					display->displayPopup(controlPadName(REG_ISO_CTRL, pressed.y));
-				}
-				else {
-					isoCtrlNow |= (uint8_t)(1u << pressed.y);
-				}
+				isoCtrlNow |= (uint8_t)(1u << pressed.y);
 			}
 			continue;
 		}
@@ -799,6 +838,20 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			    (int8_t)((pressed.y < 0) ? 0 : (pressed.y >= kDisplayHeight ? kDisplayHeight - 1 : pressed.y));
 			recomputeSuggestions(keyRoot, iv, sc, rootPc);
 		}
+	}
+
+	// LEARN inspect mode ends here: commit which pads were named, wipe the rising-edge trackers so releasing
+	// LEARN doesn't fire a phantom control press, and return BEFORE any control/PROG/note processing — the
+	// surface stays silent and only the name popups happened.
+	if (learnHeld) {
+		learnHeldLo = learnCurLo;
+		learnHeldHi = learnCurHi;
+		palCtrlHeldMask = 0;
+		isoCtrlHeldMask = 0;
+		isoHeldMask = 0;
+		progPadHeld = false;
+		heldCols = 0;
+		return;
 	}
 
 	KeyboardStateHarmonic& hs = getState().harmonic;

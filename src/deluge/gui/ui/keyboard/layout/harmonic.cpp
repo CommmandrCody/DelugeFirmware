@@ -1619,8 +1619,10 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (showChord && bassSpotMidi >= 0 && note == bassSpotMidi) {
 					// BASS SPOTLIGHT: the chord's bass (root, an octave below the voicing) — the low note to
-					// play. Lit bright in the chord's hue as its foundation; a clean octave under the shape.
-					out = chordHue.adjustFractional(255, 255);
+					// play. Its OWN reserved colour, a warm amber/gold (NOT the chord hue), so it reads clearly
+					// as "the bass" in the language. A clean octave under the shape. (Same colour the coming
+					// diatonic bass row will wear.)
+					out = RGB{.r = 255, .g = 170, .b = 20}.adjustFractional(255, 255);
 				}
 				else if (showChord && latticeOn && chordNoteCount > 0 && inChordPc(pc)) {
 					// Chord-lattice overlay in the chord's PALETTE colour — a glow of every position the chord

@@ -141,6 +141,9 @@ void HIDSysex::request7SegDisplay(MIDICable& cable, uint8_t* data, int32_t len) 
 	if (data[2] == 0) { // was 4
 		send7SegData(cable);
 	}
+	else if (data[2] == 1) { // Chroma: request the real text behind the segments
+		send7SegText(cable);
+	}
 }
 
 void HIDSysex::send7SegData(MIDICable& cable) {
@@ -158,6 +161,25 @@ void HIDSysex::send7SegData(MIDICable& cable) {
 		                                    //		device->sendSysex(reply, packed_data_size + 7);
 		cable.sendSysex(reply, packed_data_size + 10);
 	}
+}
+
+// Chroma: reply with the actual text on the 7-seg as 7-bit ASCII, so the host shows "BASS" instead of
+// reverse-engineering ambiguous segments (S/5 and Z/2 share a pattern). The display kept the literal
+// string when it was set, so there's nothing to guess.
+//   reply: F0 00 21 7B 01 02 42 <n> <ascii x n> F7
+void HIDSysex::send7SegText(MIDICable& cable) {
+	if (!display->have7SEG()) {
+		return;
+	}
+	std::string_view text = display->getLastTextForHost();
+	uint8_t reply[8 + 64 + 1] = {0xf0, 0x00, 0x21, 0x7b, 0x01, 0x02, 0x42, 0x00};
+	uint8_t n = 0;
+	for (size_t i = 0; i < text.size() && n < 64; i++) {
+		reply[8 + n++] = (uint8_t)text[i] & 0x7f; // 7-bit ASCII rides SysEx unescaped
+	}
+	reply[7] = n; // count
+	reply[8 + n] = 0xf7;
+	cable.sendSysex(reply, 9 + n);
 }
 
 // Chroma: F0 00 21 7B 01 4C <region> <x> <y> <n> <contextId ASCII...> F7  (see chroma-schema SCHEMA.md 2.1).

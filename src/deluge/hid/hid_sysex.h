@@ -8,6 +8,8 @@ void sysexReceived(MIDICable& cable, uint8_t* data, int32_t len);
 void sendOLEDData(MIDICable& cable, bool rle);
 void sendOLEDDataDelta(MIDICable& cable, bool force);
 void send7SegData(MIDICable& cable);
+// Chroma: reply with the real text behind the 7-seg segments as ASCII (so the host mirrors "BASS", not "BA55").
+void send7SegText(MIDICable& cable);
 void sendDisplayIfChanged();
 void readBlock(MIDICable& cable);
 // Chroma: emit a LEARN context event to the host (Companion renders the docs). Sent on the last cable that

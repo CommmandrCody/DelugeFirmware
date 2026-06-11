@@ -61,6 +61,7 @@ public:
 	void displayLoadingAnimation(bool delayed = false, bool transparent = false);
 	bool isLayerCurrentlyOnTop(NumericLayer* layer) override;
 	std::array<uint8_t, kNumericDisplayLength> getLast() override { return lastDisplay_; }
+	std::string_view getLastTextForHost() override { return lastTextForHost_; }
 
 	bool hasPopup() override { return this->popupActive; }
 	bool hasPopupOfType(PopupType type) override { return this->popupActive && type == this->popupType; }
@@ -107,6 +108,7 @@ private:
 	void transitionToNewLayer(NumericLayer* newLayer);
 	void setTextVeryBasicA1(std::string_view text);
 	std::array<uint8_t, kNumericDisplayLength> lastDisplay_ = {0};
+	char lastTextForHost_[32] = {0}; // Chroma: the literal text last shown, for the host text mirror
 	bool use_lowercase = false;
 };
 } // namespace deluge::hid::display

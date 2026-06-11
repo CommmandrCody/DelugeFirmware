@@ -1392,6 +1392,19 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	// The actual VOICING (base chord expanded through SPREAD + STACK) — this is what's shown + played.
 	int16_t voiced[kMaxVoice];
 	uint8_t voicedN = buildVoicing(voiced, kMaxVoice);
+	// BASS SPOTLIGHT: the chord's bass note — one octave below the voicing's lowest note. It lives at its TRUE
+	// register, so it scrolls with the iso like the main keyboard (and may sit below the current view — that's
+	// positional integrity, you scroll down to it). -1 = no chord loaded.
+	int32_t bassSpotMidi = -1;
+	if (voicedN > 0) {
+		int16_t lo = voiced[0];
+		for (uint8_t i = 1; i < voicedN; i++) {
+			if (voiced[i] < lo) {
+				lo = voiced[i];
+			}
+		}
+		bassSpotMidi = (int32_t)lo - 12;
+	}
 	// Match a pad's note against the EXACT voiced notes (not pitch classes).
 	auto inChordExact = [&](int32_t note) {
 		for (uint8_t i = 0; i < voicedN; i++) {
@@ -1603,6 +1616,11 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (playing) {
 					out = key.adjustFractional(255, 255); // live free-play notes glow in the KEY colour
+				}
+				else if (showChord && bassSpotMidi >= 0 && note == bassSpotMidi) {
+					// BASS SPOTLIGHT: the chord's bass (root, an octave below the voicing) — the low note to
+					// play. Lit bright in the chord's hue as its foundation; a clean octave under the shape.
+					out = chordHue.adjustFractional(255, 255);
 				}
 				else if (showChord && latticeOn && chordNoteCount > 0 && inChordPc(pc)) {
 					// Chord-lattice overlay in the chord's PALETTE colour — a glow of every position the chord

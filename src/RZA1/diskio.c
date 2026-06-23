@@ -353,7 +353,14 @@ static DWORD fatPack(uint32_t s2)
 /* Bump the clock so it sits just after a packed FAT datetime seen on the card. */
 void fatClockSeedFromPacked(DWORD packed)
 {
-    uint32_t year   = 1980u + ((packed >> 25) & 0x7Fu);
+    uint32_t year = 1980u + ((packed >> 25) & 0x7Fu);
+    /* Defensive: never seed the clock from an implausible far-future date (corrupt entry, or a date a prior bug
+     * stamped near the FAT year ceiling). Seeding there locks every later save up at ~2106, which renders as a
+     * 1970-ish garbage date on host OSes. Ignore anything from year 2100 on. */
+    if (year >= 2100u)
+    {
+        return;
+    }
     uint32_t month  = (packed >> 21) & 0x0Fu;
     uint32_t day    = (packed >> 16) & 0x1Fu;
     uint32_t hour   = (packed >> 11) & 0x1Fu;

@@ -55,8 +55,9 @@ enum SysexCommands : uint8_t {
 	Json,      // Json Request
 	JsonReply, // Json Response
 	LearnContext =
-	    0x4C,   // Chroma: outbound LEARN context event (host renders the docs) — see chroma-schema SCHEMA.md 2.1
-	Pong = 0x7F // Pong reply
+	    0x4C,          // Chroma: outbound LEARN context event (host renders the docs) — see chroma-schema SCHEMA.md 2.1
+	ChordState = 0x43, // Chroma: outbound chord-state push on every NORMAL palette pick (key + voiced notes + ctx)
+	Pong = 0x7F        // Pong reply
 };
 
 } // namespace SysEx

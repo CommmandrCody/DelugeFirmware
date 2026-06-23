@@ -238,6 +238,19 @@ void SevenSegment::innerSetText(std::string_view newText, bool alignRight, std::
 
 NumericLayerScrollingText* SevenSegment::setScrollingText(std::string_view newText, int32_t startAtTextPos,
                                                           int32_t initialDelay, int count, uint8_t fixedDot) {
+	// Chroma: capture the FULL scrolling string for the host text mirror (patch names, long labels).
+	// Without this, scrolled text never reached the Companion — only the static setText path did.
+	{
+		size_t n = newText.size();
+		if (n > sizeof(lastTextForHost_) - 1) {
+			n = sizeof(lastTextForHost_) - 1;
+		}
+		if (n > 0) {
+			memcpy(lastTextForHost_, newText.data(), n);
+		}
+		lastTextForHost_[n] = '\0';
+	}
+
 	// Paul: Render time could be lower putting this into internal
 	void* layerSpace = GeneralMemoryAllocator::get().allocLowSpeed(sizeof(NumericLayerScrollingText));
 	if (!layerSpace) {

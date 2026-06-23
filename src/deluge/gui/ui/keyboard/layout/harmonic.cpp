@@ -747,6 +747,18 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	bool swapped = getState().harmonic.swapped;
 	heldCols = 0;
 
+	// Live held-pad feedback: rebuild from the current press state every call (the array is the full set of
+	// active presses, not a delta), so renderPads can glow exactly the pads under a finger. Display region only.
+	for (int32_t y = 0; y < kDisplayHeight; y++) {
+		heldPadRows[y] = 0;
+	}
+	for (int32_t idx = 0; idx < kMaxNumKeyboardPadPresses; idx++) {
+		const PressedPad& pp = presses[idx];
+		if (pp.active && pp.x >= 0 && pp.x < kDisplayWidth && pp.y >= 0 && pp.y < kDisplayHeight) {
+			heldPadRows[pp.y] |= (uint16_t)(1u << pp.x);
+		}
+	}
+
 	uint8_t palCtrlNow = 0;
 	uint8_t isoCtrlNow = 0;
 	// LEARN held = "what's this pad?" mode for the WHOLE surface: every pad (control, palette chord, iso note)
@@ -944,6 +956,15 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			uint8_t vnPlay = buildVoicing(voicedPlay, kMaxVoice);
 			for (uint8_t i = 0; i < vnPlay; i++) {
 				enableNote((uint8_t)voicedPlay[i], velocity);
+			}
+			// Chroma: push the chord-state to the host on this NORMAL pick (the host renders the real chord from
+			// key + voiced notes + contextId). Same contextId grammar as LEARN. Not reached while LEARN is held.
+			{
+				int32_t yc = (pressed.y < 0) ? 0 : (pressed.y >= kDisplayHeight ? kDisplayHeight - 1 : pressed.y);
+				const char* richLbl = (yc == 0) ? "root" : (yc == 2) ? "triad" : kLadder[yc].suffix;
+				char ctxState[40];
+				snprintf(ctxState, sizeof ctxState, "harmonicObject:%s:%s", roman[0] ? roman : "deg", richLbl);
+				HIDSysex::sendChordState((uint8_t)keyRoot, voicedPlay, vnPlay, ctxState);
 			}
 			heldCols |= (uint16_t)(1u << ci.local);
 			leftPicked = true;
@@ -1657,6 +1678,24 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 		else {
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
 				image[y][x] = RGB{};
+			}
+		}
+	}
+
+	// LIVE HELD-PAD GLOW: paint a white overlay on every display pad under a finger right now, so the user (and
+	// the Companion mirror, which reads this same buffer) sees exactly what's pressed. Drawn last so it sits on
+	// top of the chord shape. Blended ~80% toward white — clearly "pressed" but keeps a hint of the pad's hue.
+	for (int32_t y = 0; y < kDisplayHeight; y++) {
+		uint16_t row = heldPadRows[y];
+		if (row == 0) {
+			continue;
+		}
+		for (int32_t x = 0; x < kDisplayWidth; x++) {
+			if (row & (uint16_t)(1u << x)) {
+				RGB b = image[y][x];
+				image[y][x] = RGB{.r = (uint8_t)(b.r + (((255 - b.r) * 205) >> 8)),
+				                  .g = (uint8_t)(b.g + (((255 - b.g) * 205) >> 8)),
+				                  .b = (uint8_t)(b.b + (((255 - b.b) * 205) >> 8))};
 			}
 		}
 	}

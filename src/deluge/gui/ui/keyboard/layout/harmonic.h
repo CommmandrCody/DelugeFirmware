@@ -102,6 +102,11 @@ private:
 	uint64_t learnHeldLo = 0; // pad ids 0..63 named last frame
 	uint64_t learnHeldHi = 0; // pad ids 64..127 named last frame
 	uint16_t learnSbHeld = 0; // sidebar pads named last frame (bit = (x-kDisplayWidth)*kDisplayHeight + y)
+
+	// Live held-pad feedback: which display-area pads (x in 0..kDisplayWidth) are physically under a finger
+	// right now, per row (bit = x). renderPads paints a white overlay on these so the user (and the Companion
+	// mirror) sees exactly which pads are pressed. Display-only — never touches audio/timing.
+	uint16_t heldPadRows[kDisplayHeight] = {};
 };
 
 }; // namespace deluge::gui::ui::keyboard::layout

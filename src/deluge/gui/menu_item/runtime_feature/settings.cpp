@@ -51,6 +51,8 @@ SettingToggle menuAlternativeTapTempoBehaviour(RuntimeFeatureSettingType::Altern
 SettingToggle menuHorizontalMenus(RuntimeFeatureSettingType::HorizontalMenus);
 SettingToggle menuTrimFromStartOfAudioClip(RuntimeFeatureSettingType::TrimFromStartOfAudioClip);
 SettingToggle menuShowBatteryLevel(RuntimeFeatureSettingType::ShowBatteryLevel);
+SettingToggle menuRepairSongDates(RuntimeFeatureSettingType::RepairSongDates);
+SettingToggle menuRetrospectiveCapture(RuntimeFeatureSettingType::RetrospectiveCapture);
 
 std::array<MenuItem*, RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettings> subMenuEntries{
     &menuDrumRandomizer,
@@ -71,12 +73,14 @@ std::array<MenuItem*, RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettin
     &menuEnableLaunchEventPlayhead,
     &menuDisplayChordLayout,
     &menuChordBrush,
+    &menuRetrospectiveCapture,
     &menuAlternativePlaybackStartBehaviour,
     &menuEnableGridViewLoopPads,
     &menuAlternativeTapTempoBehaviour,
     &menuHorizontalMenus,
     &menuTrimFromStartOfAudioClip,
-    &menuShowBatteryLevel};
+    &menuShowBatteryLevel,
+    &menuRepairSongDates};
 
 Settings::Settings(l10n::String name, l10n::String title) : menu_item::Submenu(name, title, subMenuEntries) {
 }

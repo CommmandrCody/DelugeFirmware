@@ -108,7 +108,7 @@ private:
 	void transitionToNewLayer(NumericLayer* newLayer);
 	void setTextVeryBasicA1(std::string_view text);
 	std::array<uint8_t, kNumericDisplayLength> lastDisplay_ = {0};
-	char lastTextForHost_[32] = {0}; // Chroma: the literal text last shown, for the host text mirror
+	char lastTextForHost_[64] = {0}; // Chroma: the literal text last shown, for the host text mirror
 	bool use_lowercase = false;
 };
 } // namespace deluge::hid::display

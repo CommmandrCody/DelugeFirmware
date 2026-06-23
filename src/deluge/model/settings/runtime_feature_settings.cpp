@@ -180,6 +180,18 @@ void RuntimeFeatureSettings::init() {
 	                  STRING_FOR_COMMUNITY_FEATURE_KEYBOARD_NOTE_PREVIEW, "keyboardNotePreview",
 	                  RuntimeFeatureStateToggle::On);
 
+	// RetrospectiveCapture — background-buffer notes played in a keyboard layout (even when not
+	// recording); SHIFT+RECORD dumps them into the clip. "Never lose a noodled idea."
+	SetupOnOffSetting(settings[RuntimeFeatureSettingType::RetrospectiveCapture],
+	                  STRING_FOR_COMMUNITY_FEATURE_RETROSPECTIVE_CAPTURE, "retrospectiveCapture",
+	                  RuntimeFeatureStateToggle::On);
+
+	// RepairSongDates — when on, the card-mount scan re-stamps any song whose date overshot to the FAT year
+	// ceiling (the recency-seed trap) back to a sane year, preserving order. Opt-in; off does nothing.
+	SetupOnOffSetting(settings[RuntimeFeatureSettingType::RepairSongDates],
+	                  STRING_FOR_COMMUNITY_FEATURE_REPAIR_SONG_DATES, "repairSongDates",
+	                  RuntimeFeatureStateToggle::Off);
+
 	// AlternativePlaybackStartBehaviour
 	SetupOnOffSetting(settings[RuntimeFeatureSettingType::AlternativePlaybackStartBehaviour],
 	                  STRING_FOR_COMMUNITY_FEATURE_ALTERNATIVE_PLAYBACK_START_BEHAVIOUR,

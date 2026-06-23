@@ -524,6 +524,10 @@ cardError:
 	// While we're at it, save MIDI devices if there's anything new to save.
 	MIDIDeviceManager::writeDevicesToFile();
 
+	// Work is now safe in a named slot — drop the recovery file + dirty flag. This is the event that
+	// keeps "RECOVER exists ⟺ unsaved work" true (there's no clean-shutdown signal, so Save is it).
+	StorageManager::clearRecoveryFile();
+
 	close();
 	return true;
 }

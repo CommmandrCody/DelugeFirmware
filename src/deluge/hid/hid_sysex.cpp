@@ -4,6 +4,7 @@
 #include "gui/ui_timer_manager.h"
 #include "hid/display/oled.h"
 #include "hid/display/seven_segment.h"
+#include "hid/led/pad_leds.h"
 #include "io/midi/midi_device.h"
 #include "io/midi/midi_engine.h"
 #include "io/midi/sysex.h"
@@ -38,6 +39,10 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 
 	case 2:
 		readBlock(cable);
+		break;
+
+	case 3:
+		sendPadGrid(cable); // Chroma: mirror the live pad-LED grid
 		break;
 
 	default:
@@ -205,6 +210,68 @@ void HIDSysex::sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char
 	msg[9] = n;
 	msg[10 + n] = 0xf7;
 	lastHidCable->sendSysex(msg, 11 + n);
+}
+
+// Chroma: F0 00 21 7B 01 43 <keyRoot> <nNotes> <note...> <nCtx> <ctx ASCII> F7.
+// Pushed on every NORMAL palette pick. Carries the runtime truth (voiced MIDI notes) + the graph key, so the
+// host renders the real chord regardless of what the 7-seg shows. No-op until a host handshakes.
+void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	uint8_t msg[200];
+	uint8_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = SysEx::SysexCommands::ChordState; // 0x43
+	msg[i++] = keyRoot & 0x7f;
+	uint8_t cnt = (numNotes > 24) ? 24 : numNotes;
+	msg[i++] = cnt;
+	for (uint8_t k = 0; k < cnt; k++) {
+		msg[i++] = (uint8_t)(notes[k]) & 0x7f;
+	}
+	uint8_t nc = 0;
+	if (contextId != nullptr) {
+		for (const char* c = contextId; *c && nc < 120; c++) {
+			nc++;
+		}
+	}
+	msg[i++] = nc;
+	for (uint8_t k = 0; k < nc; k++) {
+		msg[i++] = (uint8_t)(contextId[k]) & 0x7f;
+	}
+	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
+}
+
+// Chroma: F0 00 21 7B 01 02 50 <packed 8x18 RGB, 8-bit->7-bit> F7. Mirrors the live pad-LED grid the user
+// sees — exact colours, and it reflects ANY control change because the host just renders the lit pads.
+// Reads PadLEDs::image (the buffer that drives the physical LEDs, always valid, incl. on 7-seg units).
+void HIDSysex::sendPadGrid(MIDICable& cable) {
+	const int32_t W = kDisplayWidth + kSideBarWidth; // 18
+	const int32_t H = kDisplayHeight;                // 8
+	uint8_t raw[8 * 18 * 3];
+	int32_t p = 0;
+	for (int32_t y = 0; y < H; y++) {
+		for (int32_t x = 0; x < W; x++) {
+			RGB c = PadLEDs::image[y][x];
+			raw[p++] = c.r;
+			raw[p++] = c.g;
+			raw[p++] = c.b;
+		}
+	}
+	uint8_t reply_hdr[7] = {0xF0, 0x00, 0x21, 0x7B, 0x01, 0x02, 0x50};
+	uint8_t* reply = midiEngine.sysex_fmt_buffer;
+	memcpy(reply, reply_hdr, 7);
+	int32_t packed = pack_8bit_to_7bit(reply + 7, 600, raw, p);
+	if (packed < 0) {
+		return;
+	}
+	reply[7 + packed] = 0xf7;
+	cable.sendSysex(reply, packed + 8);
 }
 
 void HIDSysex::sendOLEDDataDelta(MIDICable& cable, bool force) {

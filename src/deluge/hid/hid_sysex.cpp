@@ -215,7 +215,8 @@ void HIDSysex::sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char
 // Chroma: F0 00 21 7B 01 43 <keyRoot> <nNotes> <note...> <nCtx> <ctx ASCII> F7.
 // Pushed on every NORMAL palette pick. Carries the runtime truth (voiced MIDI notes) + the graph key, so the
 // host renders the real chord regardless of what the 7-seg shows. No-op until a host handshakes.
-void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId) {
+void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId,
+                              int8_t spread, int8_t inversion) {
 	if (lastHidCable == nullptr) {
 		return;
 	}
@@ -243,6 +244,11 @@ void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t num
 	for (uint8_t k = 0; k < nc; k++) {
 		msg[i++] = (uint8_t)(contextId[k]) & 0x7f;
 	}
+	// Chroma complete-sync: extensible voicing-params block after the contextId (old hosts ignore the
+	// tail). Format: [count][p0][p1]... positional: 0=spread, 1=inversion. Add more by bumping count.
+	msg[i++] = 2; // extras count
+	msg[i++] = (uint8_t)spread & 0x7f;
+	msg[i++] = (uint8_t)inversion & 0x7f;
 	msg[i++] = 0xf7;
 	lastHidCable->sendSysex(msg, i);
 }

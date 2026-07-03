@@ -68,6 +68,11 @@ private:
 	// Expand the base chord (chordNotes) into the played/shown VOICING per the SPREAD + STACK controls.
 	uint8_t buildVoicing(int16_t* out, uint8_t maxOut);
 	static constexpr uint8_t kMaxVoice = 16; // capacity for a stacked voicing
+	// Chroma: re-broadcast the currently-selected chord's state to the host (CT dashboard) after ANY
+	// voicing change, so the dash tracks every change live instead of only on a fresh palette pick.
+	void pushChordState();
+	char curCtx_[40] = {};   // contextId of the last picked chord (degree + richness), reused on re-broadcast
+	uint8_t curKeyRoot_ = 0; // key root of the last picked chord
 	void recomputeSuggestions(uint8_t keyRoot, const uint8_t* iv, uint8_t sc, uint8_t homeRootPc);
 	void drawName(const char* roman, const char* abs);
 	void loadProgStep(); // PROG: latch the current preset's current step as the selected Harmonic Object

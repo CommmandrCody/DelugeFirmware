@@ -611,6 +611,18 @@ uint8_t KeyboardLayoutHarmonic::buildVoicing(int16_t* out, uint8_t maxOut) {
 	return cnt;
 }
 
+// Chroma: re-broadcast the currently-selected chord (same key + context) with its freshly-rebuilt
+// voicing, so the host dashboard tracks SPRD/INV/STACK changes live, not only on a fresh palette pick.
+void KeyboardLayoutHarmonic::pushChordState() {
+	if (chordNoteCount == 0) {
+		return; // nothing selected — nothing to broadcast
+	}
+	int16_t voiced[kMaxVoice];
+	uint8_t vn = buildVoicing(voiced, kMaxVoice);
+	HIDSysex::sendChordState(curKeyRoot_, voiced, vn, curCtx_, getState().harmonic.voiceSpread,
+	                         getState().harmonic.voiceInversion);
+}
+
 void KeyboardLayoutHarmonic::recomputeSuggestions(uint8_t keyRoot, const uint8_t* iv, uint8_t sc, uint8_t homeRootPc) {
 	numSuggestions = 0;
 	topDeg = -1;
@@ -964,7 +976,12 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 				const char* richLbl = (yc == 0) ? "root" : (yc == 2) ? "triad" : kLadder[yc].suffix;
 				char ctxState[40];
 				snprintf(ctxState, sizeof ctxState, "harmonicObject:%s:%s", roman[0] ? roman : "deg", richLbl);
-				HIDSysex::sendChordState((uint8_t)keyRoot, voicedPlay, vnPlay, ctxState);
+				// Remember this chord's key + context so voicing changes (SPRD/INV/STACK) can re-broadcast it.
+				curKeyRoot_ = (uint8_t)keyRoot;
+				strncpy(curCtx_, ctxState, sizeof(curCtx_) - 1);
+				curCtx_[sizeof(curCtx_) - 1] = '\0';
+				HIDSysex::sendChordState((uint8_t)keyRoot, voicedPlay, vnPlay, ctxState,
+				                         getState().harmonic.voiceSpread, getState().harmonic.voiceInversion);
 			}
 			heldCols |= (uint16_t)(1u << ci.local);
 			leftPicked = true;
@@ -1219,12 +1236,14 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		hs.stackPick = !hs.stackPick;
 		hs.voiceOctaves |= (uint8_t)(1u << 3);
 		display->displayPopup(hs.stackPick ? "PICK" : "STAK"); // "PICK" = octave picker open (distinct from OCT3)
+		pushChordState();                                      // dashboard tracks the change live
 	}
 	if (risingPal & (uint8_t)(1u << kBtnSpread)) {
 		hs.voiceSpread = (int8_t)((hs.voiceSpread + 1) % 4);
 		char sbuf[8];
 		sprintf(sbuf, "SPR%d", (int)hs.voiceSpread);
 		display->displayPopup(sbuf);
+		pushChordState(); // dashboard tracks the change live
 	}
 	if (risingPal & (uint8_t)(1u << kBtnInversion)) {
 		hs.voiceInversion = (int8_t)((hs.voiceInversion + 1) % 4); // root → 1st → 2nd → 3rd → root
@@ -1240,6 +1259,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 				}
 			}
 		}
+		pushChordState(); // dashboard tracks the change live
 	}
 	if (risingPal & kPalCtrlClearMask) {
 		if (progPadHeld) {

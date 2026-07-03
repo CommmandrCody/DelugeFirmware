@@ -253,6 +253,39 @@ void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t num
 	lastHidCable->sendSysex(msg, i);
 }
 
+// Chroma WRITE direction (0x44): a one-slot inbox for an inbound voicing-mod. The MIDI-receive context stashes it;
+// the Harmonic layout drains it on the UI/graphics thread (KeyboardLayoutHarmonic::renderPads), where re-voicing
+// and the 0x43 re-broadcast already run safely. Last-write-wins; a single bool flag, no lock needed — both producer
+// and consumer run in the Deluge's cooperative main loop. Worst case is a dropped/late mod, never a crash. This path
+// deliberately never touches audio; the mod is HEARD next time the chord is played (buildVoicing reads the new state).
+static volatile bool gChordModPending = false;
+static uint8_t gChordModType = 0;
+static uint8_t gChordModValue = 0;
+
+void HIDSysex::receiveChordApply(uint8_t modType, uint8_t value) {
+	gChordModType = modType & 0x7f;
+	gChordModValue = value & 0x7f;
+	gChordModPending = true; // set fields before the flag so the consumer never reads a half-written mod
+}
+
+bool HIDSysex::hasChordMod() {
+	return gChordModPending;
+}
+
+bool HIDSysex::takeChordMod(uint8_t* modType, uint8_t* value) {
+	if (!gChordModPending) {
+		return false;
+	}
+	if (modType != nullptr) {
+		*modType = gChordModType;
+	}
+	if (value != nullptr) {
+		*value = gChordModValue;
+	}
+	gChordModPending = false;
+	return true;
+}
+
 // Chroma: F0 00 21 7B 01 02 50 <packed 8x18 RGB, 8-bit->7-bit> F7. Mirrors the live pad-LED grid the user
 // sees — exact colours, and it reflects ANY control change because the host just renders the lit pads.
 // Reads PadLEDs::image (the buffer that drives the physical LEDs, always valid, incl. on 7-seg units).

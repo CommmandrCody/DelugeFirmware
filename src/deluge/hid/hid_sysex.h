@@ -19,6 +19,13 @@ void sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char* contextI
 // notes + ctx), immune to the note-name overwrite that defeats the text mirror. No-op until a host handshakes.
 void sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId, int8_t spread = 0,
                     int8_t inversion = 0);
+// Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
+// its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
+// it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run
+// safely). This receive path NEVER sounds notes — state + re-broadcast only. modType 0=spread, 1=inversion.
+void receiveChordApply(uint8_t modType, uint8_t value);
+bool hasChordMod();                                  // UI poll: is a voicing-mod waiting to be applied?
+bool takeChordMod(uint8_t* modType, uint8_t* value); // UI drain: pop the pending mod (returns false if none)
 // Chroma: mirror the actual pad-LED grid (8 rows x 18 cols RGB) the user sees, so the host shows EXACTLY
 // the device surface and reflects every control change. Reads the live LED buffer; polled by the host.
 void sendPadGrid(MIDICable& cable);

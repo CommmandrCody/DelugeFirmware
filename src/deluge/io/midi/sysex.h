@@ -57,6 +57,7 @@ enum SysexCommands : uint8_t {
 	LearnContext =
 	    0x4C,          // Chroma: outbound LEARN context event (host renders the docs) — see chroma-schema SCHEMA.md 2.1
 	ChordState = 0x43, // Chroma: outbound chord-state push on every NORMAL palette pick (key + voiced notes + ctx)
+	ChordApply = 0x44, // Chroma: INBOUND voicing-mod apply (host -> Deluge). Write direction; see hid_sysex.cpp.
 	Pong = 0x7F        // Pong reply
 };
 

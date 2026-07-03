@@ -623,6 +623,32 @@ void KeyboardLayoutHarmonic::pushChordState() {
 	                         getState().harmonic.voiceInversion);
 }
 
+// Re-render continuously while the Calculator is suggesting (pulsing) or an inbound voicing-mod is queued
+// (so renderPads gets a UI-thread tick to drain it). See requestsChordApply flow in hid_sysex.cpp.
+bool KeyboardLayoutHarmonic::requestsContinuousRender() {
+	return numSuggestions > 0 || HIDSysex::hasChordMod();
+}
+
+// Chroma WRITE direction: apply a host voicing-mod (0x44) to the currently held chord. Mirrors what the
+// SPRD / INV controls do (set the voicing state, then pushChordState so the CT/HUD track it), but WITHOUT
+// sounding — this runs on the render tick, and the mod is heard the next time the chord is played (buildVoicing
+// reads the new state). The Deluge stays the source of truth: it re-broadcasts its own voicing via 0x43.
+void KeyboardLayoutHarmonic::applyInboundMod(uint8_t modType, uint8_t value) {
+	KeyboardStateHarmonic& hs = getState().harmonic;
+	int8_t v = (int8_t)(value > 3 ? 3 : value); // firmware voicing range is 0..3; host over-range clamps here
+	switch (modType) {
+	case 0: // spread
+		hs.voiceSpread = v;
+		break;
+	case 1: // inversion
+		hs.voiceInversion = v;
+		break;
+	default:
+		return; // unknown mod type — ignore safely (forward-compatible with richer hosts)
+	}
+	pushChordState(); // re-voice + re-broadcast; no-op if nothing is selected
+}
+
 void KeyboardLayoutHarmonic::recomputeSuggestions(uint8_t keyRoot, const uint8_t* iv, uint8_t sc, uint8_t homeRootPc) {
 	numSuggestions = 0;
 	topDeg = -1;
@@ -1397,6 +1423,14 @@ void KeyboardLayoutHarmonic::handleHorizontalEncoder(int32_t offset, bool shiftE
 }
 
 void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidth]) {
+	// Chroma WRITE direction: drain any inbound voicing-mods (0x44) the host sent. This is the UI-thread tick
+	// requestsContinuousRender() asked for, so it's safe to touch voicing state + re-broadcast 0x43 here.
+	{
+		uint8_t modType, modValue;
+		while (HIDSysex::takeChordMod(&modType, &modValue)) {
+			applyInboundMod(modType, modValue);
+		}
+	}
 	// Sidebar stays at the familiar factory default (velocity / mod). The chord BANK is opt-in: hold a sidebar
 	// column + turn the vertical encoder to switch it to CHORD_MEM. (Removed the auto-default — it pulled the
 	// still-maturing bank into the first-run experience and surfaced a clip-duplication bug; see PR notes.)

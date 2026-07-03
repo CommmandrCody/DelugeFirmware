@@ -48,8 +48,9 @@ public:
 	bool supportsInstrument() override { return true; }
 	bool supportsKit() override { return false; }
 	RequiredScaleMode requiredScaleMode() override { return RequiredScaleMode::Enabled; }
-	// Keep re-rendering while the Calculator has suggestions, so the white next-chord pulse breathes.
-	bool requestsContinuousRender() override { return numSuggestions > 0; }
+	// Keep re-rendering while the Calculator has suggestions (the next-chord pulse breathes) OR while an inbound
+	// Chroma voicing-mod (0x44) is waiting, so renderPads gets a UI-thread tick to drain and apply it.
+	bool requestsContinuousRender() override;
 
 protected:
 	bool allowSidebarType(ColumnControlFunction sidebarType) override;
@@ -71,6 +72,10 @@ private:
 	// Chroma: re-broadcast the currently-selected chord's state to the host (CT dashboard) after ANY
 	// voicing change, so the dash tracks every change live instead of only on a fresh palette pick.
 	void pushChordState();
+	// Chroma WRITE direction (0x44): apply an inbound voicing-mod from a host (CT/Companion) to the held chord,
+	// then re-broadcast via pushChordState so every surface stays in sync. Drained on the UI thread in renderPads.
+	// State + broadcast only (never sounds here); modType 0=spread, 1=inversion, value clamped to 0..3.
+	void applyInboundMod(uint8_t modType, uint8_t value);
 	char curCtx_[40] = {};   // contextId of the last picked chord (degree + richness), reused on re-broadcast
 	uint8_t curKeyRoot_ = 0; // key root of the last picked chord
 	void recomputeSuggestions(uint8_t keyRoot, const uint8_t* iv, uint8_t sc, uint8_t homeRootPc);

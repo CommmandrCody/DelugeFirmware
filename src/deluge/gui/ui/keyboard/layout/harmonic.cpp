@@ -620,7 +620,7 @@ void KeyboardLayoutHarmonic::pushChordState() {
 	int16_t voiced[kMaxVoice];
 	uint8_t vn = buildVoicing(voiced, kMaxVoice);
 	HIDSysex::sendChordState(curKeyRoot_, voiced, vn, curCtx_, getState().harmonic.voiceSpread,
-	                         getState().harmonic.voiceInversion);
+	                         getState().harmonic.voiceInversion, (uint8_t)currentSong->getCurrentScale());
 }
 
 // Re-render continuously while the Calculator is suggesting (pulsing) or an inbound voicing-mod is queued
@@ -635,13 +635,38 @@ bool KeyboardLayoutHarmonic::requestsContinuousRender() {
 // reads the new state). The Deluge stays the source of truth: it re-broadcasts its own voicing via 0x43.
 void KeyboardLayoutHarmonic::applyInboundMod(uint8_t modType, uint8_t value) {
 	KeyboardStateHarmonic& hs = getState().harmonic;
-	int8_t v = (int8_t)(value > 3 ? 3 : value); // firmware voicing range is 0..3; host over-range clamps here
+	int8_t v = (int8_t)(value > 3 ? 3 : value); // voicing range is 0..3 (spread/inversion only)
 	switch (modType) {
 	case 0: // spread
 		hs.voiceSpread = v;
 		break;
 	case 1: // inversion
 		hs.voiceInversion = v;
+		break;
+	case 2: { // key: adopt a host-led modulation (the CT wheel confirmed with SAVE). Change the song's
+		// key root to the target pitch class, keeping the current octave — the same operation the SCALE
+		// button performs. The Deluge stays the source of truth: it then re-broadcasts 0x43 below so the
+		// CT/Companion re-sync to the new key.
+		int32_t oldRoot = currentSong->key.rootNote;
+		int32_t oldPc = ((oldRoot % 12) + 12) % 12;
+		int32_t newRoot = oldRoot - oldPc + (int32_t)(value % 12);
+		if (newRoot != oldRoot) {
+			currentSong->setRootNote(newRoot, nullptr);
+		}
+		break;
+	}
+	case 3: { // scale/mode: adopt a host-led modulation. The CT's mode index (0..6 = major..locrian) maps
+		// 1:1 onto the preset Scale enum, so it applies directly. Change the song scale, then re-broadcast.
+		if (value < NUM_PRESET_SCALES) {
+			currentSong->setScale((Scale)value);
+		}
+		break;
+	}
+	case 4: // octave: the CT's register knob shifts the harmonic layout's base octave (bounded 1..8).
+		if (value >= 1 && value <= 8) {
+			hs.octaveBase = (int8_t)value;
+			hs.isoOctave = hs.octaveBase; // keep the iso panel anchored to the new base, like the OCT +/- controls
+		}
 		break;
 	default:
 		return; // unknown mod type — ignore safely (forward-compatible with richer hosts)
@@ -1007,7 +1032,8 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 				strncpy(curCtx_, ctxState, sizeof(curCtx_) - 1);
 				curCtx_[sizeof(curCtx_) - 1] = '\0';
 				HIDSysex::sendChordState((uint8_t)keyRoot, voicedPlay, vnPlay, ctxState,
-				                         getState().harmonic.voiceSpread, getState().harmonic.voiceInversion);
+				                         getState().harmonic.voiceSpread, getState().harmonic.voiceInversion,
+				                         (uint8_t)currentSong->getCurrentScale());
 			}
 			heldCols |= (uint16_t)(1u << ci.local);
 			leftPicked = true;

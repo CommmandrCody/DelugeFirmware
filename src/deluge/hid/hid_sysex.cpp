@@ -9,6 +9,7 @@
 #include "io/midi/midi_engine.h"
 #include "io/midi/sysex.h"
 #include "memory/general_memory_allocator.h"
+#include "model/song/song.h" // Chroma: resync — read the live key/scale to push on handshake
 #include "processing/engines/audio_engine.h"
 #include "util/pack.h"
 #include <cstring>
@@ -25,6 +26,13 @@ static MIDICable* lastHidCable = nullptr;
 void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 	lastHidCable = &cable;
 	if (len < 3) {
+		// Chroma RESYNC: the bare handshake (the bridge sends it on connect + every ~5s). Push the CURRENT
+		// global key+scale (no notes) so the CT snaps into sync immediately and can't sit stale. Harmless if
+		// there's no song yet.
+		if (currentSong != nullptr) {
+			sendChordState((uint8_t)(((currentSong->key.rootNote % 12) + 12) % 12), nullptr, 0, "", 0, 0,
+			               (uint8_t)currentSong->getCurrentScale());
+		}
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -216,7 +224,7 @@ void HIDSysex::sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char
 // Pushed on every NORMAL palette pick. Carries the runtime truth (voiced MIDI notes) + the graph key, so the
 // host renders the real chord regardless of what the 7-seg shows. No-op until a host handshakes.
 void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId,
-                              int8_t spread, int8_t inversion) {
+                              int8_t spread, int8_t inversion, uint8_t scale) {
 	if (lastHidCable == nullptr) {
 		return;
 	}
@@ -246,9 +254,10 @@ void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t num
 	}
 	// Chroma complete-sync: extensible voicing-params block after the contextId (old hosts ignore the
 	// tail). Format: [count][p0][p1]... positional: 0=spread, 1=inversion. Add more by bumping count.
-	msg[i++] = 2; // extras count
+	msg[i++] = 3; // extras count. positional: 0=spread, 1=inversion, 2=scale/mode index
 	msg[i++] = (uint8_t)spread & 0x7f;
 	msg[i++] = (uint8_t)inversion & 0x7f;
+	msg[i++] = scale & 0x7f;
 	msg[i++] = 0xf7;
 	lastHidCable->sendSysex(msg, i);
 }

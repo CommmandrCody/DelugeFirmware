@@ -5,7 +5,7 @@ set(CMAKE_TOOLCHAIN_FILE ${CMAKE_CURRENT_LIST_DIR}/scripts/cmake/CMakeToolchainD
 
 project(Deluge
     LANGUAGES CXX C ASM
-    VERSION 1.3.30
+    VERSION 1.3.38
 )
 include(FetchContent)
 include(ProcessorCount)
@@ -65,7 +65,7 @@ endif(ENABLE_VERSIONED_OUTPUT)
 option(ENABLE_RTT "Enable RTT output" ON)
 
 # SYSEX Load option
-option(ENABLE_SYSEX_LOAD "Enable loading firmware over midi sysex" OFF)
+option(ENABLE_SYSEX_LOAD "Enable loading firmware over midi sysex" ON)
 
 # MATRIX DRIVER pad logging
 option(ENABLE_MATRIX_DEBUG "Enable logging of pad events" OFF)

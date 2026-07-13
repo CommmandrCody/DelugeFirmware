@@ -18,7 +18,7 @@ void sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char* contextI
 // Chroma: outbound chord-state push on every NORMAL palette pick — host renders the chord (key + voiced
 // notes + ctx), immune to the note-name overwrite that defeats the text mirror. No-op until a host handshakes.
 void sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId, int8_t spread = 0,
-                    int8_t inversion = 0);
+                    int8_t inversion = 0, uint8_t scale = 0);
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

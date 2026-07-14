@@ -67,7 +67,7 @@ void KeyboardLayoutIsomorphic::nameHeldChordOnDisplay() {
 	}
 	char nm[48];
 	uint8_t keyRoot = (uint8_t)getRootNote();
-	if (nameChordFromNotes(notes, n, nm, keyPrefersFlats(keyRoot, getScaleNotes()))) {
+	if (nameChordFromNotes(notes, n, nm, effectivePreferFlats(keyRoot, getScaleNotes()))) {
 		if (display->haveOLED()) {
 			display->popupTextTemporary(nm);
 		}

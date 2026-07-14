@@ -242,7 +242,8 @@ void KeyboardLayoutChordLibrary::renderPads(RGB image[][kDisplayWidth + kSideBar
 
 void KeyboardLayoutChordLibrary::drawChordName(int16_t noteCode, const char* chordName, const char* voicingName) {
 	// Spell the root with flats or sharps to match the song's key (e.g. "Db" in F minor, not "C#").
-	const char* noteName = noteNameInKey(((noteCode % 12) + 12) % 12, keyPrefersFlats(getRootNote(), getScaleNotes()));
+	const char* noteName =
+	    noteNameInKey(((noteCode % 12) + 12) % 12, effectivePreferFlats(getRootNote(), getScaleNotes()));
 
 	char fullChordName[300];
 

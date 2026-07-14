@@ -49,6 +49,15 @@ const char* noteNameInKey(uint8_t pitchClass, bool preferFlats);
 // True if the key spells with flats (F/Bb/Eb/Ab/Db major + their relative minors), from the scale.
 bool keyPrefersFlats(uint8_t keyRootPc, NoteSet scale);
 
+// Chroma spelling "lean": a device-wide override of the accidental style, so every surface (Deluge screen,
+// CT, iPad) spells identically. AUTO defers to the key (keyPrefersFlats); FLATS/SHARPS force it. It's a
+// SYNCED param — broadcast in 0x43 and settable from any surface via 0x44 — the Deluge holds the value,
+// anyone can toggle it, everyone follows. (chroma_one_spelling_across_surfaces)
+enum class ChromaSpelling : uint8_t { AUTO = 0, FLATS = 1, SHARPS = 2 };
+extern ChromaSpelling gChromaSpelling;
+// The accidental style to actually use: the forced lean, or the key's own preference on AUTO.
+bool effectivePreferFlats(uint8_t keyRootPc, NoteSet scale);
+
 // Try to name a chord from absolute note codes (e.g. "Db M7"), matching against the chord table and
 // trying each note as the root so inversions still resolve. `preferFlats` picks the accidental style
 // to match the key. Returns true and fills `out` on a match.

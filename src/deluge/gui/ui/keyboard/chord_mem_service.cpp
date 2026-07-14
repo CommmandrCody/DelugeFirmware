@@ -92,7 +92,7 @@ bool recall(int32_t slot, KeyboardLayout* layout) {
 		// Name the recalled chord and show it (so the slot teaches you what it is), spelled with flats or
 		// sharps to match the song's key.
 		char chordName[48];
-		bool preferFlats = keyPrefersFlats(currentSong->key.rootNote % kOctaveSize, currentSong->key.modeNotes);
+		bool preferFlats = effectivePreferFlats(currentSong->key.rootNote % kOctaveSize, currentSong->key.modeNotes);
 		if (nameChordFromNotes(currentSong->chordMem[slot], count, chordName, preferFlats)) {
 			if (display->haveOLED()) {
 				display->popupTextTemporary(chordName);

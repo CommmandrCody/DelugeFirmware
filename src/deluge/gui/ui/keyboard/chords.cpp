@@ -348,6 +348,20 @@ bool keyPrefersFlats(uint8_t keyRootPc, NoteSet scale) {
 	}
 }
 
+// Device-wide spelling lean (synced across surfaces). Defaults to AUTO = follow the key.
+ChromaSpelling gChromaSpelling = ChromaSpelling::AUTO;
+
+bool effectivePreferFlats(uint8_t keyRootPc, NoteSet scale) {
+	switch (gChromaSpelling) {
+	case ChromaSpelling::FLATS:
+		return true;
+	case ChromaSpelling::SHARPS:
+		return false;
+	default:
+		return keyPrefersFlats(keyRootPc, scale); // AUTO: the key decides
+	}
+}
+
 bool nameChordFromNotes(const uint8_t* notes, int32_t count, char* out, bool preferFlats) {
 	if (count < 2) {
 		return false;
@@ -513,7 +527,7 @@ bool describeChordInKey(const uint8_t* notes, int32_t count, uint8_t keyRootPc, 
 		return false;
 	}
 	static ChordList chordList;
-	bool flats = keyPrefersFlats(keyRootPc, scale);
+	bool flats = effectivePreferFlats(keyRootPc, scale);
 
 	uint8_t bass = notes[0];
 	NoteSet present;

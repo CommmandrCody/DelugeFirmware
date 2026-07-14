@@ -1,5 +1,6 @@
 #include "hid/hid_sysex.h"
 #include "gui/l10n/l10n.h"
+#include "gui/ui/keyboard/chords.h" // Chroma: the synced spelling lean (gChromaSpelling) packed into 0x43
 #include "gui/ui/ui.h"
 #include "gui/ui_timer_manager.h"
 #include "hid/display/oled.h"
@@ -254,10 +255,11 @@ void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t num
 	}
 	// Chroma complete-sync: extensible voicing-params block after the contextId (old hosts ignore the
 	// tail). Format: [count][p0][p1]... positional: 0=spread, 1=inversion. Add more by bumping count.
-	msg[i++] = 3; // extras count. positional: 0=spread, 1=inversion, 2=scale/mode index
+	msg[i++] = 4; // extras count. positional: 0=spread, 1=inversion, 2=scale/mode index, 3=spelling lean
 	msg[i++] = (uint8_t)spread & 0x7f;
 	msg[i++] = (uint8_t)inversion & 0x7f;
 	msg[i++] = scale & 0x7f;
+	msg[i++] = (uint8_t)deluge::gui::ui::keyboard::gChromaSpelling & 0x7f; // 0=Auto,1=Flats,2=Sharps (synced spelling)
 	msg[i++] = 0xf7;
 	lastHidCable->sendSysex(msg, i);
 }

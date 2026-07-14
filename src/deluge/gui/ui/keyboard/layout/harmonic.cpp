@@ -668,6 +668,13 @@ void KeyboardLayoutHarmonic::applyInboundMod(uint8_t modType, uint8_t value) {
 			hs.isoOctave = hs.octaveBase; // keep the iso panel anchored to the new base, like the OCT +/- controls
 		}
 		break;
+	case 5: // spelling lean: any surface sets the device-wide flats/sharps override; the Deluge adopts it and
+		// re-broadcasts, so every surface (incl. the Deluge's own screen) respells identically.
+		// 0=Auto,1=Flats,2=Sharps.
+		if (value <= 2) {
+			gChromaSpelling = (ChromaSpelling)value;
+		}
+		break;
 	default:
 		return; // unknown mod type — ignore safely (forward-compatible with richer hosts)
 	}
@@ -751,7 +758,7 @@ uint8_t KeyboardLayoutHarmonic::buildChordAtDegree(uint8_t deg, int32_t y, const
 		notesOut[count++] = (int16_t)midi;
 	}
 
-	bool flats = keyPrefersFlats(keyRoot, getScaleNotes());
+	bool flats = effectivePreferFlats(keyRoot, getScaleNotes());
 	if (absOut) {
 		sprintf(absOut, "%s%s", noteNameInKey(rootPc, flats), rich.suffix);
 	}
@@ -1153,7 +1160,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 				}
 			}
 			char nm[48];
-			if (nameChordFromNotes(nu, nc, nm, keyPrefersFlats(keyRoot, getScaleNotes()))) {
+			if (nameChordFromNotes(nu, nc, nm, effectivePreferFlats(keyRoot, getScaleNotes()))) {
 				drawName(nullptr, nm);
 			}
 		}

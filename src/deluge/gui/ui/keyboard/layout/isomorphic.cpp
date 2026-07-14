@@ -18,6 +18,7 @@
 #include "gui/ui/keyboard/layout/isomorphic.h"
 #include "gui/ui/audio_recorder.h"
 #include "gui/ui/browser/sample_browser.h"
+#include "gui/ui/keyboard/chords.h"
 #include "gui/ui/sound_editor.h"
 #include "hid/display/display.h"
 #include "model/scale/note_set.h"
@@ -38,6 +39,42 @@ void KeyboardLayoutIsomorphic::evaluatePads(PressedPad presses[kMaxNumKeyboardPa
 
 	// Should be called last so currentNotesState can be read
 	ColumnControlsKeyboard::evaluatePads(presses);
+
+	// Chroma: name the chord you're holding, on the display — so the iso grid tells you what you played.
+	nameHeldChordOnDisplay();
+}
+
+// Gather the held notes, and when the pitch-class SET changes to a real chord (3+ notes), name it from
+// the notes (the firmware's own nameChordFromNotes) and show it — OLED popup or 7-seg scroll, like the
+// harmonic layout. Cheap: a template match on a few notes, only on change, display region only.
+void KeyboardLayoutIsomorphic::nameHeldChordOnDisplay() {
+	uint8_t notes[16];
+	uint8_t n = 0;
+	uint16_t pcMask = 0;
+	for (uint8_t i = 0; i < currentNotesState.count && n < 16; i++) {
+		int16_t note = currentNotesState.notes[i].note;
+		if (note >= 0 && note <= 127) {
+			notes[n++] = (uint8_t)note;
+			pcMask |= (uint16_t)(1u << (note % 12));
+		}
+	}
+	if (pcMask == lastChordPcMask_) {
+		return; // same set of pitch classes as last time — nothing to redraw
+	}
+	lastChordPcMask_ = pcMask;
+	if (n < 3) {
+		return; // a single note or dyad isn't a chord — don't name it (keeps melodic playing quiet)
+	}
+	char nm[48];
+	uint8_t keyRoot = (uint8_t)getRootNote();
+	if (nameChordFromNotes(notes, n, nm, keyPrefersFlats(keyRoot, getScaleNotes()))) {
+		if (display->haveOLED()) {
+			display->popupTextTemporary(nm);
+		}
+		else {
+			display->setScrollingText(nm, 0);
+		}
+	}
 }
 
 void KeyboardLayoutIsomorphic::handleVerticalEncoder(int32_t offset) {

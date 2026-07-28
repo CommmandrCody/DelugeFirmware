@@ -583,6 +583,46 @@ uint8_t KeyboardLayoutHarmonic::buildVoicing(int16_t* out, uint8_t maxOut) {
 			tmp[k] = (int16_t)(tmp[k] - 12);
 		}
 	}
+	// VOICING DIAL (Orchid-style): walk the whole voicing one note at a time. Each +step lifts the current
+	// LOWEST note an octave; each -step drops the current HIGHEST — re-sorting between, so the chord cascades
+	// through inversions and opens across the range. Applied to the core voicing here, before STACK replicates
+	// it. Sticky across chord picks, so it reads as a persistent "voicing character" you dial in and leave.
+	int8_t walk = getState().harmonic.voicingWalk;
+	if (walk != 0 && n > 1) {
+		for (uint8_t i = 1; i < n; i++) { // ensure sorted (SPREAD above doesn't re-sort)
+			int16_t v = tmp[i];
+			int32_t j = (int32_t)i - 1;
+			while (j >= 0 && tmp[j] > v) {
+				tmp[j + 1] = tmp[j];
+				j--;
+			}
+			tmp[j + 1] = v;
+		}
+		int8_t steps = walk;
+		while (steps != 0) {
+			if (steps > 0) {
+				if (tmp[0] + 12 <= 127) {
+					tmp[0] = (int16_t)(tmp[0] + 12); // lowest up an octave
+				}
+				steps--;
+			}
+			else {
+				if (tmp[n - 1] - 12 >= 0) {
+					tmp[n - 1] = (int16_t)(tmp[n - 1] - 12); // highest down an octave
+				}
+				steps++;
+			}
+			for (uint8_t i = 1; i < n; i++) { // re-sort after the single move
+				int16_t v = tmp[i];
+				int32_t j = (int32_t)i - 1;
+				while (j >= 0 && tmp[j] > v) {
+					tmp[j + 1] = tmp[j];
+					j--;
+				}
+				tmp[j + 1] = v;
+			}
+		}
+	}
 	// STACK: copy the chord into each SELECTED octave (bits 0..6 = offsets -3..+3; bit3 = base). Dedup + clamp.
 	uint8_t octaves = getState().harmonic.voiceOctaves;
 	uint8_t cnt = 0;
@@ -1334,6 +1374,15 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	}
 	palCtrlHeldMask = palCtrlNow;
 
+	// Spring-loaded voicing: the instant the last chord pad is released (heldCols falls to 0), the voicing dial
+	// springs back to HOME so the next chord starts from your set voice (or the plain default if none was set).
+	// Sweep it while you hold, let go and it settles home — no button needed. (Press resets without releasing;
+	// Shift+press sets the current voice as home.)
+	if (prevHeldCols != 0 && heldCols == 0 && hs.voicingWalk != hs.voicingHome) {
+		hs.voicingWalk = hs.voicingHome;
+	}
+	prevHeldCols = heldCols;
+
 	ColumnControlsKeyboard::evaluatePads(presses);
 }
 
@@ -1398,6 +1447,29 @@ void KeyboardLayoutHarmonic::loadProgStep() {
 	recomputeSuggestions(keyRoot, iv, sc, rootPc);
 }
 
+// Spring-loaded voicing, vertical-encoder PRESS-DOWN: just arm. We don't spring yet — we wait for release, so we
+// can tell a clean click (spring to home) apart from a press-and-turn (dial the home, handled in the encoder).
+bool KeyboardLayoutHarmonic::voicingPressBegin() {
+	voicingTurnedWhilePressed = false;
+	return true; // consume the press so a plain click doesn't fall through to other actions
+}
+
+// RELEASE: if you didn't turn while pressed, it was a clean click — spring the voicing back to home. If you did
+// press-and-turn, the home was already dialed, so leave it. (Releasing the CHORD also springs home; see evaluatePads.)
+bool KeyboardLayoutHarmonic::voicingPressEnd() {
+	if (!voicingTurnedWhilePressed) {
+		KeyboardStateHarmonic& s = getState().harmonic;
+		if (s.voicingWalk != s.voicingHome) {
+			s.voicingWalk = s.voicingHome;
+			char buf[8];
+			sprintf(buf, "VOI%d", (int)s.voicingWalk);
+			display->displayPopup(buf);
+			pushChordState();
+		}
+	}
+	return true;
+}
+
 void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 	// PROG hold: the vertical wheel BROWSES the progression library (which progression). Resets to step 1.
 	if (progPadHeld) {
@@ -1417,6 +1489,47 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 		s.progStep = 0;
 		loadProgStep();
 		display->displayPopup(gProgs[p].name);
+		return;
+	}
+	// VOICING DIAL: while a chord pad is HELD, the vertical wheel walks the voicing one note at a time
+	// (Orchid-style) instead of scrolling the iso. The chord is ringing, so you HEAR each step — hold the
+	// pad, turn the wheel, sweep the voicing. heldCols is refreshed every evaluatePads, so it's set exactly
+	// while a palette pad is under a finger. The held pad re-sounds through buildVoicing on the next evaluate
+	// (keyboard_screen re-runs it after this call while auditioning), so no note-triggering is needed here.
+	if (heldCols != 0) {
+		KeyboardStateHarmonic& s = getState().harmonic;
+		// PRESS + TURN: hold the encoder in and turn to dial the HOME the voicing springs back to. The home
+		// tracks the walk as you turn, so you hear it settle where you leave it. A plain turn (encoder not
+		// pressed) just sweeps the voicing away from home as before.
+		if (Buttons::isButtonPressed(deluge::hid::button::Y_ENC)) {
+			voicingTurnedWhilePressed = true; // so releasing the click won't spring it away
+			int32_t h = (int32_t)s.voicingWalk + offset;
+			if (h < -8) {
+				h = -8;
+			}
+			if (h > 8) {
+				h = 8;
+			}
+			s.voicingWalk = (int8_t)h;
+			s.voicingHome = s.voicingWalk; // home follows — this is now the spring-back voice
+			char buf[8];
+			sprintf(buf, "HOM%d", (int)s.voicingHome);
+			display->displayPopup(buf);
+			pushChordState();
+			return;
+		}
+		int32_t w = (int32_t)s.voicingWalk + offset;
+		if (w < -8) {
+			w = -8;
+		}
+		if (w > 8) {
+			w = 8;
+		}
+		s.voicingWalk = (int8_t)w;
+		char buf[8];
+		sprintf(buf, "VOI%d", (int)s.voicingWalk);
+		display->displayPopup(buf);
+		pushChordState(); // dashboard tracks the voicing walk live
 		return;
 	}
 	if (verticalEncoderHandledByColumns(offset)) {
@@ -1450,6 +1563,39 @@ void KeyboardLayoutHarmonic::handleHorizontalEncoder(int32_t offset, bool shiftE
 			s.progStep = (int8_t)st;
 			loadProgStep();
 		}
+		return;
+	}
+	// STACK (perform): while a chord pad is HELD, the horizontal wheel blooms the voicing — each step adds or
+	// removes an octave layer outward from the base, thickening the chord. Re-sounds live (the chord is ringing).
+	if (heldCols != 0) {
+		KeyboardStateHarmonic& s = getState().harmonic;
+		static const uint8_t order[6] = {2, 4, 1, 5, 0, 6}; // grow outward: -1, +1, -2, +2, -3, +3 octaves
+		if (offset > 0) {
+			for (int32_t k = 0; k < 6; k++) {
+				if (!(s.voiceOctaves & (uint8_t)(1u << order[k]))) {
+					s.voiceOctaves |= (uint8_t)(1u << order[k]);
+					break;
+				}
+			}
+		}
+		else {
+			for (int32_t k = 5; k >= 0; k--) {
+				if (s.voiceOctaves & (uint8_t)(1u << order[k])) {
+					s.voiceOctaves &= (uint8_t)~(1u << order[k]);
+					break;
+				}
+			}
+		}
+		uint8_t layers = 0;
+		for (int32_t k = 0; k < 6; k++) {
+			if (s.voiceOctaves & (uint8_t)(1u << order[k])) {
+				layers++;
+			}
+		}
+		char buf[8];
+		sprintf(buf, "STK%d", (int)layers);
+		display->displayPopup(buf);
+		pushChordState();
 		return;
 	}
 	horizontalEncoderHandledByColumns(offset, shiftEnabled);

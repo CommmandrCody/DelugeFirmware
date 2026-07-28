@@ -84,7 +84,9 @@ struct KeyboardStateHarmonic {
 	bool stackPick = false;       // true = iso bottom row is the octave-PICKER strip (toggle which octaves)
 	int8_t voiceSpread = 0;       // SPREAD: 0..3 lowest notes dropped an octave to open the voicing (drop-root)
 	int8_t voiceInversion = 0;    // INVERSION: rotate the chord — move the lowest N notes up an octave
-	bool isoFollowsChord = true;  // SNAP: on pick, jump iso to the chord's octave; off = leave iso parked (riff high)
+	int8_t voicingWalk = 0; // VOICING DIAL: walk the voicing ±N one-note-at-a-time; springs to voicingHome on release
+	int8_t voicingHome = 0; // the voicing the dial springs back to (hold the encoder in and turn to dial it)
+	bool isoFollowsChord = true; // SNAP: on pick, jump iso to the chord's octave; off = leave iso parked (riff high)
 	// PROGRESSION WALKER (MVP): HOLD purple row 2, then dial — vertical wheel picks which progression, horizontal
 	// wheel walks the chords. Holding sustains the current step; release leaves the chord loaded. No grid strip.
 	int8_t progPreset = -1; // loaded preset index (-1 = none dialled yet)

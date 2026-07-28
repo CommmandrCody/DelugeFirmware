@@ -38,6 +38,8 @@ public:
 
 	void evaluatePads(PressedPad presses[kMaxNumKeyboardPadPresses]) override;
 	void handleVerticalEncoder(int32_t offset) override;
+	bool voicingPressBegin() override; // vertical-encoder press-down: arm the spring-loaded voicing
+	bool voicingPressEnd() override;   // release: a clean click springs to home; press+turn dialed the home
 	void handleHorizontalEncoder(int32_t offset, bool shiftEnabled, PressedPad presses[kMaxNumKeyboardPadPresses],
 	                             bool encoderPressed = false) override;
 	void precalculate() override {}
@@ -82,7 +84,9 @@ private:
 	void drawName(const char* roman, const char* abs);
 	void loadProgStep(); // PROG: latch the current preset's current step as the selected Harmonic Object
 
-	uint16_t heldCols = 0; // explorer columns currently held (light up as feedback)
+	uint16_t heldCols = 0;                  // explorer columns currently held (light up as feedback)
+	uint16_t prevHeldCols = 0;              // held columns last frame — falling edge = chord released (springs voicing)
+	bool voicingTurnedWhilePressed = false; // press+turn happened this hold → release must NOT spring to home
 
 	// The EXACT voiced notes of the selected chord (absolute MIDI), so the iso panel shows the real
 	// shape once in the octave you picked — not every-octave pitch classes (that was an overlapping mess).

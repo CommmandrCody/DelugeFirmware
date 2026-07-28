@@ -553,6 +553,22 @@ ActionResult KeyboardScreen::buttonAction(deluge::hid::Button b, bool on, bool i
 		return ActionResult::REMIND_ME_OUTSIDE_CARD_ROUTINE;
 	}
 
+	// Spring-loaded voicing (perform): a clean click of the vertical encoder springs the voicing back to home;
+	// holding it in and turning dials the home (see handleVerticalEncoder). We split press-down vs release so we
+	// can tell those apart. Only consumes when the layout handled it (harmonic); otherwise Y_ENC falls through.
+	if (b == Y_ENC) {
+		KeyboardLayout* layout = layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout];
+		bool handled = on ? layout->voicingPressBegin() : layout->voicingPressEnd();
+		if (handled) {
+			if (!on && isUIModeWithinRange(padActionUIModes)) {
+				evaluateActiveNotes();
+				updateActiveNotes();
+			}
+			requestRendering();
+			return ActionResult::DEALT_WITH;
+		}
+	}
+
 	// Scale mode button
 	if (b == SCALE_MODE) {
 		if ((getCurrentOutputType() == OutputType::KIT)) {

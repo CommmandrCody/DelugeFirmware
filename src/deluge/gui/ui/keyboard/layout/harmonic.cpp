@@ -1046,7 +1046,16 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			char roman[32], abs[32];
 			uint8_t n =
 			    buildChordAtDegree(deg, pressed.y, iv, sc, keyRoot, notes, kMaxChordKeyboardSize, &rootPc, roman, abs);
-			drawName(roman, abs);
+			// Name the pick ONCE (or when the richness row changes under a held finger). evaluatePads runs every
+			// frame while the pad is held; re-calling drawName each frame restarts the scroll so the roman never
+			// reaches the 7-seg. namedDeg/namedRich reset to -1 on release (below), so a re-press re-shows it.
+			int8_t thisRich =
+			    (int8_t)((pressed.y < 0) ? 0 : (pressed.y >= kDisplayHeight ? kDisplayHeight - 1 : pressed.y));
+			if (deg != namedDeg || thisRich != namedRich) {
+				drawName(roman, abs);
+				namedDeg = (int8_t)deg;
+				namedRich = thisRich;
+			}
 			// Remember the chord we're LEAVING (its pitch classes) for the DIFF / voice-leading view.
 			{
 				uint16_t m = 0;
@@ -1380,6 +1389,10 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	// Shift+press sets the current voice as home.)
 	if (prevHeldCols != 0 && heldCols == 0 && hs.voicingWalk != hs.voicingHome) {
 		hs.voicingWalk = hs.voicingHome;
+	}
+	if (heldCols == 0) {
+		namedDeg = -1; // released — let the next pick (even the same chord) scroll its name again
+		namedRich = -1;
 	}
 	prevHeldCols = heldCols;
 

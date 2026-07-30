@@ -97,6 +97,11 @@ private:
 	// shape on the iso panel, and stays put after you release so you can study the shape.
 	int8_t selDeg = -1;      // selected degree column 0-6 (-1 = none)
 	int8_t selRichness = -1; // selected richness row 0-(kDisplayHeight-1)
+	// The pick we've already scrolled the name for. evaluatePads runs every frame while a pad is held, so
+	// drawName must fire ONCE per pick (else setScrollingText restarts the scroll every frame and the roman
+	// at the tail never appears on the 7-seg). Reset to -1 on release so re-picking the same chord re-shows it.
+	int8_t namedDeg = -1;
+	int8_t namedRich = -1;
 
 	// Calculator: ranks the diatonic next chords. Each suggested degree's triad + 7th flash, brightness = how
 	// strong a move it is. Richness beyond the core is the user's choice.

@@ -600,8 +600,10 @@ void KeyboardLayoutHarmonic::applyArpFlavor() {
 	// Gate + rhythm live in the unpatched param set (synced to the arp on each noteOn), so set them there.
 	UnpatchedParamSet* up = clip->paramManager.getUnpatchedParamSet();
 	if (up != nullptr) {
-		up->params[params::UNPATCHED_ARP_GATE].setCurrentValueBasicForSetup(arpMenuToParam(f.gateMenu));
-		up->params[params::UNPATCHED_ARP_RHYTHM].setCurrentValueBasicForSetup(arpMenuToParam(f.rhythmMenu));
+		up->params[deluge::modulation::params::UNPATCHED_ARP_GATE].setCurrentValueBasicForSetup(
+		    arpMenuToParam(f.gateMenu));
+		up->params[deluge::modulation::params::UNPATCHED_ARP_RHYTHM].setCurrentValueBasicForSetup(
+		    arpMenuToParam(f.rhythmMenu));
 	}
 	display->displayPopup(f.name);
 }

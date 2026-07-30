@@ -19,6 +19,7 @@
 #include "extern.h"
 #include "fatfs/fatfs.hpp"
 #include "gui/colour/colour.h"
+#include "gui/menu_item/value_scaling.h" // Chroma: arp-flavor gate/rhythm are unpatched params — encode via this
 #include "gui/ui/keyboard/chord_mem_service.h"
 #include "gui/ui/keyboard/chords.h"
 #include "gui/ui/keyboard/column_controls/chord_mem.h"
@@ -28,6 +29,7 @@
 #include "hid/display/display.h"
 #include "hid/hid_sysex.h"
 #include "model/settings/runtime_feature_settings.h"
+#include "modulation/params/param.h" // Chroma: params::UNPATCHED_ARP_GATE / UNPATCHED_ARP_RHYTHM
 #include "processing/engines/audio_engine.h"
 #include "storage/storage_manager.h"
 #include <stdio.h>
@@ -554,18 +556,30 @@ struct ArpFlavor {
 	ArpNoteMode noteMode;
 	ArpOctaveMode octaveMode;
 	uint8_t numOctaves;
+	uint8_t stepRepeats; // each step played N times (ratchet-ish thickening)
+	uint8_t gateMenu;    // note length 0..50 (higher = longer / less gated)
+	uint8_t rhythmMenu;  // arp rhythm pattern index 0..kMaxPresetArpRhythm (0 = straight; 2="00-", 3="0-0", 4="0-00")
 };
+// A characterful palette: gate (legato vs plucky), rhythm gates (gallop/offbeat), octave range, and step repeats
+// give each flavor its OWN feel — not just a different note order. Names <=4 chars for the 7-seg.
 static const ArpFlavor kArpFlavors[] = {
-    {"UP", ArpNoteMode::UP, ArpOctaveMode::UP, 1},
-    {"DOWN", ArpNoteMode::DOWN, ArpOctaveMode::UP, 1},
-    {"UPDN", ArpNoteMode::UP_DOWN, ArpOctaveMode::UP, 1},
-    {"UP-2", ArpNoteMode::UP, ArpOctaveMode::UP, 2},
-    {"UD-2", ArpNoteMode::UP_DOWN, ArpOctaveMode::UP_DOWN, 2},
-    {"UP-3", ArpNoteMode::UP, ArpOctaveMode::UP, 3},
-    {"RAND", ArpNoteMode::RANDOM, ArpOctaveMode::UP, 1},
-    {"WALK", ArpNoteMode::WALK1, ArpOctaveMode::UP, 1},
+    {"UP", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 42, 0},             // smooth legato rise
+    {"PLUK", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 16, 0},           // tight plucky staccato
+    {"GALP", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 34, 2},           // gallop rhythm "00-"
+    {"SWNG", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 34, 3},           // offbeat "0-0"
+    {"OCT2", ArpNoteMode::UP, ArpOctaveMode::UP, 2, 1, 42, 0},           // 2-octave legato sweep
+    {"UPDN", ArpNoteMode::UP_DOWN, ArpOctaveMode::UP_DOWN, 2, 1, 40, 0}, // up/down over 2 octaves
+    {"RTCH", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 2, 46, 0},           // ratchet: each step x2, long gate
+    {"SEQ", ArpNoteMode::AS_PLAYED, ArpOctaveMode::UP, 2, 1, 30, 4},     // as-played + "0-00" pattern
+    {"RAND", ArpNoteMode::RANDOM, ArpOctaveMode::RANDOM, 2, 1, 34, 0},   // random over 2 octaves
+    {"WALK", ArpNoteMode::WALK1, ArpOctaveMode::UP, 1, 1, 40, 0},        // drunken walk
 };
 static constexpr int32_t kNumArpFlavors = sizeof(kArpFlavors) / sizeof(kArpFlavors[0]);
+
+// Encode a 0..50 menu value into the signed param value an unpatched param stores (verified: menu 0 = -2^31).
+static int32_t arpMenuToParam(uint8_t menuValue) {
+	return (int32_t)(computeFinalValueForUnsignedMenuItem((int32_t)menuValue) - 2147483648u);
+}
 
 void KeyboardLayoutHarmonic::applyArpFlavor() {
 	if (arpFlavor < 0) {
@@ -575,12 +589,20 @@ void KeyboardLayoutHarmonic::applyArpFlavor() {
 		arpFlavor = (int8_t)(kNumArpFlavors - 1);
 	}
 	const ArpFlavor& f = kArpFlavors[arpFlavor];
-	ArpeggiatorSettings& arp = getCurrentInstrumentClip()->arpSettings;
+	InstrumentClip* clip = getCurrentInstrumentClip();
+	ArpeggiatorSettings& arp = clip->arpSettings;
 	arp.mode = ArpMode::ARP;
 	arp.noteMode = f.noteMode;
 	arp.octaveMode = f.octaveMode;
 	arp.numOctaves = f.numOctaves;
+	arp.numStepRepeats = f.stepRepeats;
 	arp.updatePresetFromCurrentSettings(); // reflect the settings back into the preset (CUSTOM if no named match)
+	// Gate + rhythm live in the unpatched param set (synced to the arp on each noteOn), so set them there.
+	UnpatchedParamSet* up = clip->paramManager.getUnpatchedParamSet();
+	if (up != nullptr) {
+		up->params[params::UNPATCHED_ARP_GATE].setCurrentValueBasicForSetup(arpMenuToParam(f.gateMenu));
+		up->params[params::UNPATCHED_ARP_RHYTHM].setCurrentValueBasicForSetup(arpMenuToParam(f.rhythmMenu));
+	}
 	display->displayPopup(f.name);
 }
 

@@ -1396,6 +1396,20 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	}
 	prevHeldCols = heldCols;
 
+	// LATCH (HOLD): sustain the selected chord hands-free. When HOLD is on and no palette pad is held this frame,
+	// re-sound the current voicing so it stays in the NotesState — keyboard_screen sees no drop, so no note-off,
+	// and the chord rings on for playing melodies over or (later) driving performance modes. The pick block sounds
+	// it while a pad is held; edit-voicing has its own drone. Toggle HOLD off or hit CLR and it vanishes next frame.
+	if (hs.stickyChord && !hs.editVoicing && heldCols == 0 && chordNoteCount > 0) {
+		int16_t voiced[kMaxVoice];
+		uint8_t vn = buildVoicing(voiced, kMaxVoice);
+		for (uint8_t i = 0; i < vn; i++) {
+			if (voiced[i] >= 0 && voiced[i] <= 127) {
+				enableNote((uint8_t)voiced[i], velocity);
+			}
+		}
+	}
+
 	ColumnControlsKeyboard::evaluatePads(presses);
 }
 

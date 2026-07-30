@@ -558,21 +558,35 @@ struct ArpFlavor {
 	uint8_t numOctaves;
 	uint8_t stepRepeats; // each step played N times (ratchet-ish thickening)
 	uint8_t gateMenu;    // note length 0..50 (higher = longer / less gated)
-	uint8_t rhythmMenu;  // arp rhythm pattern index 0..kMaxPresetArpRhythm (0 = straight; 2="00-", 3="0-0", 4="0-00")
+	uint8_t rhythmMenu;  // arp rhythm pattern index (0 = straight; 2="00-", 3="0-0", 4="0-00", 8="00-0", 9="0----")
+	uint8_t spreadVel;   // SLOP: velocity humanize 0..50
+	uint8_t spreadGate;  // SLOP: gate/timing humanize 0..50
+	uint8_t ratchet;     // rolling ratchet amount 0..50
 };
-// A characterful palette: gate (legato vs plucky), rhythm gates (gallop/offbeat), octave range, and step repeats
-// give each flavor its OWN feel — not just a different note order. Names <=4 chars for the 7-seg.
+// Approximates the Orchid's performance modes on the Deluge's own arp engine: ARP (note order + octaves),
+// PATTERN (rhythm gates), SLOP (velocity/gate humanize), RATCHET (rolls). Every flavor sets ALL fields so a
+// switch fully resets character. Names <=4 chars for the 7-seg. (Strum/Harp = one-shot staggered rolls, which the
+// looping arp can't do — those wait for the note-timing engine.)
 static const ArpFlavor kArpFlavors[] = {
-    {"UP", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 42, 0},             // smooth legato rise
-    {"PLUK", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 16, 0},           // tight plucky staccato
-    {"GALP", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 34, 2},           // gallop rhythm "00-"
-    {"SWNG", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 34, 3},           // offbeat "0-0"
-    {"OCT2", ArpNoteMode::UP, ArpOctaveMode::UP, 2, 1, 42, 0},           // 2-octave legato sweep
-    {"UPDN", ArpNoteMode::UP_DOWN, ArpOctaveMode::UP_DOWN, 2, 1, 40, 0}, // up/down over 2 octaves
-    {"RTCH", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 2, 46, 0},           // ratchet: each step x2, long gate
-    {"SEQ", ArpNoteMode::AS_PLAYED, ArpOctaveMode::UP, 2, 1, 30, 4},     // as-played + "0-00" pattern
-    {"RAND", ArpNoteMode::RANDOM, ArpOctaveMode::RANDOM, 2, 1, 34, 0},   // random over 2 octaves
-    {"WALK", ArpNoteMode::WALK1, ArpOctaveMode::UP, 1, 1, 40, 0},        // drunken walk
+    {"UP", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 42, 0, 0, 0, 0},
+    {"DOWN", ArpNoteMode::DOWN, ArpOctaveMode::UP, 1, 1, 42, 0, 0, 0, 0},
+    {"UPDN", ArpNoteMode::UP_DOWN, ArpOctaveMode::UP_DOWN, 2, 1, 40, 0, 0, 0, 0},
+    {"OCT2", ArpNoteMode::UP, ArpOctaveMode::UP, 2, 1, 42, 0, 0, 0, 0},
+    {"OCT3", ArpNoteMode::UP, ArpOctaveMode::UP, 3, 1, 42, 0, 0, 0, 0},
+    {"PLAY", ArpNoteMode::AS_PLAYED, ArpOctaveMode::UP, 1, 1, 40, 0, 0, 0, 0},
+    {"PLUK", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 16, 0, 0, 0, 0},
+    {"LEGA", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 48, 0, 0, 0, 0},
+    {"GALP", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 34, 2, 0, 0, 0},
+    {"SWNG", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 34, 3, 0, 0, 0},
+    {"DOT", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 32, 4, 0, 0, 0},
+    {"SYNC", ArpNoteMode::UP, ArpOctaveMode::UP, 2, 1, 32, 8, 0, 0, 0},
+    {"SPRS", ArpNoteMode::UP, ArpOctaveMode::UP, 2, 1, 40, 9, 0, 0, 0},
+    {"RTCH", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 2, 44, 0, 0, 0, 0},
+    {"ROLL", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 40, 0, 0, 0, 32},
+    {"SLOP", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 38, 0, 26, 22, 0},
+    {"DRNK", ArpNoteMode::WALK1, ArpOctaveMode::UP, 2, 1, 38, 3, 30, 26, 0},
+    {"WALK", ArpNoteMode::WALK1, ArpOctaveMode::UP, 1, 1, 40, 0, 0, 0, 0},
+    {"RAND", ArpNoteMode::RANDOM, ArpOctaveMode::RANDOM, 2, 1, 34, 0, 12, 0, 0},
 };
 static constexpr int32_t kNumArpFlavors = sizeof(kArpFlavors) / sizeof(kArpFlavors[0]);
 
@@ -597,13 +611,16 @@ void KeyboardLayoutHarmonic::applyArpFlavor() {
 	arp.numOctaves = f.numOctaves;
 	arp.numStepRepeats = f.stepRepeats;
 	arp.updatePresetFromCurrentSettings(); // reflect the settings back into the preset (CUSTOM if no named match)
-	// Gate + rhythm live in the unpatched param set (synced to the arp on each noteOn), so set them there.
+	// Gate, rhythm, slop (spread) and ratchet all live in the unpatched param set (synced to the arp each noteOn),
+	// so set them there. Setting every one on each switch means a flavor fully overrides the previous character.
+	namespace mp = deluge::modulation::params;
 	UnpatchedParamSet* up = clip->paramManager.getUnpatchedParamSet();
 	if (up != nullptr) {
-		up->params[deluge::modulation::params::UNPATCHED_ARP_GATE].setCurrentValueBasicForSetup(
-		    arpMenuToParam(f.gateMenu));
-		up->params[deluge::modulation::params::UNPATCHED_ARP_RHYTHM].setCurrentValueBasicForSetup(
-		    arpMenuToParam(f.rhythmMenu));
+		up->params[mp::UNPATCHED_ARP_GATE].setCurrentValueBasicForSetup(arpMenuToParam(f.gateMenu));
+		up->params[mp::UNPATCHED_ARP_RHYTHM].setCurrentValueBasicForSetup(arpMenuToParam(f.rhythmMenu));
+		up->params[mp::UNPATCHED_SPREAD_VELOCITY].setCurrentValueBasicForSetup(arpMenuToParam(f.spreadVel));
+		up->params[mp::UNPATCHED_ARP_SPREAD_GATE].setCurrentValueBasicForSetup(arpMenuToParam(f.spreadGate));
+		up->params[mp::UNPATCHED_ARP_RATCHET_AMOUNT].setCurrentValueBasicForSetup(arpMenuToParam(f.ratchet));
 	}
 	display->displayPopup(f.name);
 }

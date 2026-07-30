@@ -546,6 +546,44 @@ int32_t KeyboardLayoutHarmonic::isoNoteChromatic(int32_t localX, int32_t y) {
 	return (getState().harmonic.isoOctave - 1) * 12 + getRootNote() + localX + y * getState().isomorphic.rowInterval;
 }
 
+// ARP FLAVORS — a curated palette of arp characters, cycled live with the horizontal wheel. Note order +
+// octave range only (all direct, safe fields); rhythm patterns (the deeper Orchid-pattern feel) come next once
+// the scaled rhythm param is verified. Names fit the 7-seg (<=4 chars).
+struct ArpFlavor {
+	const char* name;
+	ArpNoteMode noteMode;
+	ArpOctaveMode octaveMode;
+	uint8_t numOctaves;
+};
+static const ArpFlavor kArpFlavors[] = {
+    {"UP", ArpNoteMode::UP, ArpOctaveMode::UP, 1},
+    {"DOWN", ArpNoteMode::DOWN, ArpOctaveMode::UP, 1},
+    {"UPDN", ArpNoteMode::UP_DOWN, ArpOctaveMode::UP, 1},
+    {"UP-2", ArpNoteMode::UP, ArpOctaveMode::UP, 2},
+    {"UD-2", ArpNoteMode::UP_DOWN, ArpOctaveMode::UP_DOWN, 2},
+    {"UP-3", ArpNoteMode::UP, ArpOctaveMode::UP, 3},
+    {"RAND", ArpNoteMode::RANDOM, ArpOctaveMode::UP, 1},
+    {"WALK", ArpNoteMode::WALK1, ArpOctaveMode::UP, 1},
+};
+static constexpr int32_t kNumArpFlavors = sizeof(kArpFlavors) / sizeof(kArpFlavors[0]);
+
+void KeyboardLayoutHarmonic::applyArpFlavor() {
+	if (arpFlavor < 0) {
+		arpFlavor = 0;
+	}
+	if (arpFlavor >= kNumArpFlavors) {
+		arpFlavor = (int8_t)(kNumArpFlavors - 1);
+	}
+	const ArpFlavor& f = kArpFlavors[arpFlavor];
+	ArpeggiatorSettings& arp = getCurrentInstrumentClip()->arpSettings;
+	arp.mode = ArpMode::ARP;
+	arp.noteMode = f.noteMode;
+	arp.octaveMode = f.octaveMode;
+	arp.numOctaves = f.numOctaves;
+	arp.updatePresetFromCurrentSettings(); // reflect the settings back into the preset (CUSTOM if no named match)
+	display->displayPopup(f.name);
+}
+
 uint8_t KeyboardLayoutHarmonic::buildVoicing(int16_t* out, uint8_t maxOut) {
 	// Gather + sort the base chord notes.
 	int16_t tmp[kMaxChordKeyboardSize];
@@ -1243,9 +1281,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			display->displayPopup("HOLD");
 		}
 		else if (!arpOn) {
-			arp.preset = ArpPreset::UP;
-			arp.updateSettingsFromCurrentPreset();
-			display->displayPopup("ARP");
+			applyArpFlavor(); // arp on, using the selected flavor; the horizontal wheel scrubs flavors from here
 		}
 		else {
 			hs.stickyChord = false;
@@ -1643,6 +1679,17 @@ void KeyboardLayoutHarmonic::handleHorizontalEncoder(int32_t offset, bool shiftE
 		display->displayPopup(buf);
 		pushChordState();
 		return;
+	}
+	// ARP FLAVOR: arp on + no chord physically held (latched or idle) → the horizontal wheel scrubs arp flavors
+	// (note order + octave range), named on screen, live. This is where "different arps" lives.
+	{
+		ArpeggiatorSettings& arp = getCurrentInstrumentClip()->arpSettings;
+		if (arp.mode != ArpMode::OFF) {
+			arpFlavor = (int8_t)((((int32_t)arpFlavor + (offset > 0 ? 1 : -1)) % kNumArpFlavors + kNumArpFlavors)
+			                     % kNumArpFlavors);
+			applyArpFlavor();
+			return;
+		}
 	}
 	horizontalEncoderHandledByColumns(offset, shiftEnabled);
 }

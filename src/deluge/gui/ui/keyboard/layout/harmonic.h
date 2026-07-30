@@ -71,6 +71,8 @@ private:
 	// Expand the base chord (chordNotes) into the played/shown VOICING per the SPREAD + STACK controls.
 	uint8_t buildVoicing(int16_t* out, uint8_t maxOut);
 	static constexpr uint8_t kMaxVoice = 16; // capacity for a stacked voicing
+	// Apply the currently-selected arp flavor (note order + octave range) to this clip's arp and pop its name.
+	void applyArpFlavor();
 	// Chroma: re-broadcast the currently-selected chord's state to the host (CT dashboard) after ANY
 	// voicing change, so the dash tracks every change live instead of only on a fresh palette pick.
 	void pushChordState();
@@ -102,6 +104,9 @@ private:
 	// at the tail never appears on the 7-seg). Reset to -1 on release so re-picking the same chord re-shows it.
 	int8_t namedDeg = -1;
 	int8_t namedRich = -1;
+	// Selected arp flavor index (note order + octave range). Cycled by the horizontal wheel when the arp is on
+	// and no chord is physically held; re-applied whenever the arp is toggled on from the HOLD pad.
+	int8_t arpFlavor = 0;
 
 	// Calculator: ranks the diatonic next chords. Each suggested degree's triad + 7th flash, brightness = how
 	// strong a move it is. Richness beyond the core is the user's choice.

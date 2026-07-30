@@ -1232,8 +1232,20 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		display->displayPopup(hs.showChord ? "SHOW" : "HIDE");
 	}
 	if (risingIso & (uint8_t)(1u << kBtnSticky)) {
-		hs.stickyChord = !hs.stickyChord;
-		display->displayPopup(hs.stickyChord ? "HOLD" : "FREE");
+		if (Buttons::isShiftButtonPressed()) {
+			// SHIFT + HOLD: toggle the ARP on this clip — a performance layer over the held (latched) chord. Mirrors
+			// the arp menu exactly (set preset + updateSettingsFromCurrentPreset), so it's the engine's own arp.
+			// LATCH the chord (plain HOLD) + this + PLAY = the chord arpeggiates.
+			ArpeggiatorSettings& arp = getCurrentInstrumentClip()->arpSettings;
+			bool wasOn = (arp.preset != ArpPreset::OFF);
+			arp.preset = wasOn ? ArpPreset::OFF : ArpPreset::UP;
+			arp.updateSettingsFromCurrentPreset();
+			display->displayPopup(wasOn ? "OFF" : "ARP");
+		}
+		else {
+			hs.stickyChord = !hs.stickyChord;
+			display->displayPopup(hs.stickyChord ? "HOLD" : "FREE");
+		}
 	}
 	if (risingIso & (uint8_t)(1u << kBtnLattice)) {
 		// The overlay pad cycles: ONE (off) -> LATT (full lattice) -> DIFF (voice-leading) -> ONE.

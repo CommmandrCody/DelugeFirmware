@@ -1232,19 +1232,26 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		display->displayPopup(hs.showChord ? "SHOW" : "HIDE");
 	}
 	if (risingIso & (uint8_t)(1u << kBtnSticky)) {
-		if (Buttons::isShiftButtonPressed()) {
-			// SHIFT + HOLD: toggle the ARP on this clip — a performance layer over the held (latched) chord. Mirrors
-			// the arp menu exactly (set preset + updateSettingsFromCurrentPreset), so it's the engine's own arp.
-			// LATCH the chord (plain HOLD) + this + PLAY = the chord arpeggiates.
-			ArpeggiatorSettings& arp = getCurrentInstrumentClip()->arpSettings;
-			bool wasOn = (arp.preset != ArpPreset::OFF);
-			arp.preset = wasOn ? ArpPreset::OFF : ArpPreset::UP;
+		// The HOLD pad cycles the hold mode with a single tap: FREE -> HOLD (latch) -> ARP (latch + arpeggiate)
+		// -> FREE. No modifier (SHIFT + pad collides with the Deluge shortcut grid) and no new pad (both control
+		// columns are full). ARP mirrors the arp menu (preset UP + updateSettingsFromCurrentPreset) = the engine's
+		// own arpeggiator; with the chord latched + PLAY it arpeggiates.
+		ArpeggiatorSettings& arp = getCurrentInstrumentClip()->arpSettings;
+		bool arpOn = (arp.preset != ArpPreset::OFF);
+		if (!hs.stickyChord) {
+			hs.stickyChord = true;
+			display->displayPopup("HOLD");
+		}
+		else if (!arpOn) {
+			arp.preset = ArpPreset::UP;
 			arp.updateSettingsFromCurrentPreset();
-			display->displayPopup(wasOn ? "OFF" : "ARP");
+			display->displayPopup("ARP");
 		}
 		else {
-			hs.stickyChord = !hs.stickyChord;
-			display->displayPopup(hs.stickyChord ? "HOLD" : "FREE");
+			hs.stickyChord = false;
+			arp.preset = ArpPreset::OFF;
+			arp.updateSettingsFromCurrentPreset();
+			display->displayPopup("FREE");
 		}
 	}
 	if (risingIso & (uint8_t)(1u << kBtnLattice)) {

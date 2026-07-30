@@ -24,6 +24,9 @@ bool oledDeltaForce = true;
 // host registers it by sending any HID request (e.g. the 7-seg request the screen mirror already uses).
 static MIDICable* lastHidCable = nullptr;
 
+// Chroma: last view slug pushed to the host (0x45 de-dupe). File-scope so the handshake RESYNC can force a re-push.
+static UIType lastSentView = UIType::NONE;
+
 void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 	lastHidCable = &cable;
 	if (len < 3) {
@@ -34,6 +37,9 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 			sendChordState((uint8_t)(((currentSong->key.rootNote % 12) + 12) % 12), nullptr, 0, "", 0, 0,
 			               (uint8_t)currentSong->getCurrentScale());
 		}
+		// Also re-push the current on-screen view so a just-connected Companion's Learn tab syncs at once.
+		lastSentView = UIType::NONE; // clear the de-dupe so the next line always sends
+		sendActiveViewIfChanged();
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -95,6 +101,10 @@ void HIDSysex::requestOLEDDisplay(MIDICable& cable, uint8_t* data, int32_t len) 
 }
 
 void HIDSysex::sendDisplayIfChanged() {
+	// Chroma: piggyback the active-view check on the display poll. This runs on every redraw (a view change always
+	// redraws), it self-gates on lastHidCable + de-dupes, and it sits BEFORE the display-mirror gate below so it
+	// works even for hosts that never requested screen mirroring (the Companion arms lastHidCable on connect).
+	sendActiveViewIfChanged();
 	// NB: timer is only used for throttling, under good conditions sending
 	// is driven by the display subsystem only
 	uiTimerManager.unsetTimer(TimerName::SYSEX_DISPLAY);
@@ -262,6 +272,104 @@ void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t num
 	msg[i++] = (uint8_t)deluge::gui::ui::keyboard::gChromaSpelling & 0x7f; // 0=Auto,1=Flats,2=Sharps (synced spelling)
 	msg[i++] = 0xf7;
 	lastHidCable->sendSysex(msg, i);
+}
+
+// Chroma: F0 00 21 7B 01 45 <n> <viewId ASCII...> F7.
+// A tiny outbound push naming the on-screen view, so the Companion's Learn tab auto-follows what the user is doing.
+// viewId is a short 7-bit ASCII slug ("clip","song","arranger","kit","fx-menu",...). No-op until a host handshakes.
+void HIDSysex::sendActiveView(const char* viewId) {
+	if (lastHidCable == nullptr || viewId == nullptr) {
+		return;
+	}
+	uint8_t msg[8 + 32];
+	msg[0] = 0xf0;
+	msg[1] = 0x00;
+	msg[2] = 0x21;
+	msg[3] = 0x7b;
+	msg[4] = 0x01;
+	msg[5] = SysEx::SysexCommands::ActiveView; // 0x45
+	uint8_t n = 0;
+	for (const char* c = viewId; *c && n < 31; c++) {
+		msg[7 + n++] = (uint8_t)(*c) & 0x7f; // slugs are ASCII by contract
+	}
+	msg[6] = n;
+	msg[7 + n] = 0xf7;
+	lastHidCable->sendSysex(msg, 8 + n);
+}
+
+// Map the on-screen UI to a stable, host-neutral view slug. The Companion owns the slug->hub mapping, so its
+// hub taxonomy can change without a firmware update. Returns nullptr for views with no useful "learn this"
+// target (context menus, transient/unknown) — the caller then leaves the host on whatever view it last showed.
+static const char* viewSlug(UIType t) {
+	switch (t) {
+	case UIType::SESSION:
+		return "session";
+	case UIType::ARRANGER:
+		return "arranger";
+	case UIType::INSTRUMENT_CLIP:
+		return "instrument_clip";
+	case UIType::AUDIO_CLIP:
+		return "audio_clip";
+	case UIType::KEYBOARD_SCREEN:
+		return "keyboard";
+	case UIType::AUTOMATION:
+		return "automation";
+	case UIType::PERFORMANCE:
+		return "performance";
+	case UIType::SOUND_EDITOR:
+		return "sound_editor";
+	case UIType::SAMPLE_BROWSER:
+		return "sample_browser";
+	case UIType::DX_BROWSER:
+		return "dx_browser";
+	case UIType::SAMPLE_MARKER_EDITOR:
+		return "sample_marker";
+	case UIType::SLICER:
+		return "slicer";
+	case UIType::AUDIO_RECORDER:
+		return "audio_recorder";
+	case UIType::LOAD_SONG:
+		return "load_song";
+	case UIType::LOAD_INSTRUMENT_PRESET:
+		return "load_preset";
+	case UIType::LOAD_PATTERN:
+		return "load_pattern";
+	case UIType::LOAD_MIDI_DEVICE_DEFINITION:
+		return "load_midi";
+	case UIType::SAVE_SONG:
+		return "save_song";
+	case UIType::SAVE_INSTRUMENT_PRESET:
+		return "save_preset";
+	case UIType::SAVE_KIT_ROW:
+		return "save_kitrow";
+	case UIType::SAVE_PATTERN:
+		return "save_pattern";
+	case UIType::SAVE_MIDI_DEVICE_DEFINITION:
+		return "save_midi";
+	case UIType::RENAME:
+		return "rename";
+	default:
+		return nullptr; // CONTEXT_MENU, NONE, etc. — keep the host on its last view
+	}
+}
+
+// Chroma: broadcast the active view when it changes, so the Companion's Learn tab auto-follows what's on screen.
+// Called from the display passenger poll (sendDisplayIfChanged), which already runs on every redraw — and a view
+// change always redraws. Cheap: a getUIType() read + int compare per call, de-duped so 0x45 only goes out on an
+// actual change. A view with no hub (nullptr slug) is skipped WITHOUT updating the de-dupe, so returning to the
+// underlying view doesn't re-fire.
+void HIDSysex::sendActiveViewIfChanged() {
+	UI* ui = getCurrentUI();
+	UIType t = ui ? ui->getUIType() : UIType::NONE;
+	if (t == lastSentView) {
+		return;
+	}
+	const char* slug = viewSlug(t);
+	if (slug == nullptr) {
+		return;
+	}
+	lastSentView = t;
+	sendActiveView(slug);
 }
 
 // Chroma WRITE direction (0x44): a one-slot inbox for an inbound voicing-mod. The MIDI-receive context stashes it;

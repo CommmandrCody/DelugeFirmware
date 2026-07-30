@@ -19,6 +19,13 @@ void sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char* contextI
 // notes + ctx), immune to the note-name overwrite that defeats the text mirror. No-op until a host handshakes.
 void sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId, int8_t spread = 0,
                     int8_t inversion = 0, uint8_t scale = 0);
+// Chroma: outbound active-view push (0x45). Sent when the on-screen view changes, so the Companion's Learn tab can
+// auto-follow what the user is looking at. Payload is a short 7-bit-ASCII view slug (e.g. "clip", "song", "kit").
+// No-op until a host handshakes; last-value de-duped by the caller so it only fires on an actual change.
+void sendActiveView(const char* viewId);
+// Chroma: poll the current UIType and, if it changed, broadcast the view slug (0x45). Cheap + de-duped; called
+// from the display passenger poll so it catches every view change without hooking the UI navigation stack.
+void sendActiveViewIfChanged();
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

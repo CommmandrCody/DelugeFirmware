@@ -26,6 +26,9 @@ void sendActiveView(const char* viewId);
 // Chroma: poll the current UIType and, if it changed, broadcast the view slug (0x45). Cheap + de-duped; called
 // from the display passenger poll so it catches every view change without hooking the UI navigation stack.
 void sendActiveViewIfChanged();
+// Chroma: push the "fx" context (0x45) when a gold knob is turned, so a following host jumps to FX. Throttled to
+// once per fx-session (re-armed when the real view changes) and doesn't disturb the view de-dupe.
+void sendFxContext();
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

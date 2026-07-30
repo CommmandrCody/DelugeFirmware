@@ -26,6 +26,8 @@ static MIDICable* lastHidCable = nullptr;
 
 // Chroma: last view slug pushed to the host (0x45 de-dupe). File-scope so the handshake RESYNC can force a re-push.
 static UIType lastSentView = UIType::NONE;
+// Chroma: whether we've pushed the "fx" context for the current gold-knob session (re-armed on any real view change).
+static bool fxContextSent = false;
 
 void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 	lastHidCable = &cable;
@@ -369,7 +371,18 @@ void HIDSysex::sendActiveViewIfChanged() {
 		return;
 	}
 	lastSentView = t;
+	fxContextSent = false; // a real view change re-arms the fx context, so the next knob turn pushes "fx" again
 	sendActiveView(slug);
+}
+
+// Chroma: a gold-knob (FX) turn isn't a view change, so the view poll never fires for it. Push an "fx" context so a
+// following host (the Companion's Learn tab) jumps to FX help. Sent WITHOUT touching lastSentView, so the view poll
+// stays de-duped and doesn't snap back; fired once per fx-session, re-armed when the real view next changes.
+void HIDSysex::sendFxContext() {
+	if (!fxContextSent) {
+		sendActiveView("fx");
+		fxContextSent = true;
+	}
 }
 
 // Chroma WRITE direction (0x44): a one-slot inbox for an inbound voicing-mod. The MIDI-receive context stashes it;

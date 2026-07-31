@@ -19,7 +19,6 @@
 #include "extern.h"
 #include "fatfs/fatfs.hpp"
 #include "gui/colour/colour.h"
-#include "gui/menu_item/value_scaling.h" // Chroma: arp-flavor gate/rhythm are unpatched params — encode via this
 #include "gui/ui/keyboard/chord_mem_service.h"
 #include "gui/ui/keyboard/chords.h"
 #include "gui/ui/keyboard/column_controls/chord_mem.h"
@@ -29,7 +28,6 @@
 #include "hid/display/display.h"
 #include "hid/hid_sysex.h"
 #include "model/settings/runtime_feature_settings.h"
-#include "modulation/params/param.h" // Chroma: params::UNPATCHED_ARP_GATE / UNPATCHED_ARP_RHYTHM
 #include "processing/engines/audio_engine.h"
 #include "storage/storage_manager.h"
 #include <stdio.h>
@@ -546,87 +544,6 @@ int32_t KeyboardLayoutHarmonic::isoNoteChromatic(int32_t localX, int32_t y) {
 	// Standard chromatic isomorphic mapping (semitone per column, rowInterval per row), anchored ONE
 	// OCTAVE BELOW the chord register so the voicing lands in the middle of the panel, not at the bottom.
 	return (getState().harmonic.isoOctave - 1) * 12 + getRootNote() + localX + y * getState().isomorphic.rowInterval;
-}
-
-// ARP FLAVORS — a curated palette of arp characters, cycled live with the horizontal wheel. Note order +
-// octave range only (all direct, safe fields); rhythm patterns (the deeper Orchid-pattern feel) come next once
-// the scaled rhythm param is verified. Names fit the 7-seg (<=4 chars).
-struct ArpFlavor {
-	const char* name;
-	ArpNoteMode noteMode;
-	ArpOctaveMode octaveMode;
-	uint8_t numOctaves;
-	uint8_t stepRepeats; // each step played N times (ratchet-ish thickening)
-	uint8_t gateMenu;    // note length 0..50 (higher = longer / less gated)
-	uint8_t rhythmMenu;  // arp rhythm pattern index (0 = straight; 2="00-", 3="0-0", 4="0-00", 8="00-0", 9="0----")
-	uint8_t spreadVel;   // SLOP: velocity humanize 0..50
-	uint8_t spreadGate;  // SLOP: gate/timing humanize 0..50
-	uint8_t ratchet;     // rolling ratchet amount 0..50
-};
-// Approximates the Orchid's performance modes on the Deluge's own arp engine: ARP (note order + octaves),
-// PATTERN (rhythm gates), SLOP (velocity/gate humanize), RATCHET (rolls). Every flavor sets ALL fields so a
-// switch fully resets character. Names <=4 chars for the 7-seg. (Strum/Harp = one-shot staggered rolls, which the
-// looping arp can't do — those wait for the note-timing engine.)
-static const ArpFlavor kArpFlavors[] = {
-    {"UP", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 42, 0, 0, 0, 0},
-    {"DOWN", ArpNoteMode::DOWN, ArpOctaveMode::UP, 1, 1, 42, 0, 0, 0, 0},
-    {"UPDN", ArpNoteMode::UP_DOWN, ArpOctaveMode::UP_DOWN, 2, 1, 40, 0, 0, 0, 0},
-    {"OCT2", ArpNoteMode::UP, ArpOctaveMode::UP, 2, 1, 42, 0, 0, 0, 0},
-    {"OCT3", ArpNoteMode::UP, ArpOctaveMode::UP, 3, 1, 42, 0, 0, 0, 0},
-    {"PLAY", ArpNoteMode::AS_PLAYED, ArpOctaveMode::UP, 1, 1, 40, 0, 0, 0, 0},
-    {"PLUK", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 16, 0, 0, 0, 0},
-    {"LEGA", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 48, 0, 0, 0, 0},
-    {"GALP", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 34, 2, 0, 0, 0},
-    {"SWNG", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 34, 3, 0, 0, 0},
-    {"DOT", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 32, 4, 0, 0, 0},
-    {"SYNC", ArpNoteMode::UP, ArpOctaveMode::UP, 2, 1, 32, 8, 0, 0, 0},
-    {"SPRS", ArpNoteMode::UP, ArpOctaveMode::UP, 2, 1, 40, 9, 0, 0, 0},
-    {"RTCH", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 2, 44, 0, 0, 0, 0},
-    {"ROLL", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 40, 0, 0, 0, 32},
-    {"SLOP", ArpNoteMode::UP, ArpOctaveMode::UP, 1, 1, 38, 0, 26, 22, 0},
-    {"DRNK", ArpNoteMode::WALK1, ArpOctaveMode::UP, 2, 1, 38, 3, 30, 26, 0},
-    {"WALK", ArpNoteMode::WALK1, ArpOctaveMode::UP, 1, 1, 40, 0, 0, 0, 0},
-    {"RAND", ArpNoteMode::RANDOM, ArpOctaveMode::RANDOM, 2, 1, 34, 0, 12, 0, 0},
-};
-static constexpr int32_t kNumArpFlavors = sizeof(kArpFlavors) / sizeof(kArpFlavors[0]);
-
-// Encode a 0..50 menu value into the signed param value an unpatched param stores (verified: menu 0 = -2^31).
-static int32_t arpMenuToParam(uint8_t menuValue) {
-	return (int32_t)(computeFinalValueForUnsignedMenuItem((int32_t)menuValue) - 2147483648u);
-}
-
-bool KeyboardLayoutHarmonic::latchedIdle() {
-	return getState().harmonic.stickyChord && heldCols == 0;
-}
-
-void KeyboardLayoutHarmonic::applyArpFlavor() {
-	if (arpFlavor < 0) {
-		arpFlavor = 0;
-	}
-	if (arpFlavor >= kNumArpFlavors) {
-		arpFlavor = (int8_t)(kNumArpFlavors - 1);
-	}
-	const ArpFlavor& f = kArpFlavors[arpFlavor];
-	InstrumentClip* clip = getCurrentInstrumentClip();
-	ArpeggiatorSettings& arp = clip->arpSettings;
-	arp.mode = ArpMode::ARP;
-	arp.noteMode = f.noteMode;
-	arp.octaveMode = f.octaveMode;
-	arp.numOctaves = f.numOctaves;
-	arp.numStepRepeats = f.stepRepeats;
-	arp.updatePresetFromCurrentSettings(); // reflect the settings back into the preset (CUSTOM if no named match)
-	// Gate, rhythm, slop (spread) and ratchet all live in the unpatched param set (synced to the arp each noteOn),
-	// so set them there. Setting every one on each switch means a flavor fully overrides the previous character.
-	namespace mp = deluge::modulation::params;
-	UnpatchedParamSet* up = clip->paramManager.getUnpatchedParamSet();
-	if (up != nullptr) {
-		up->params[mp::UNPATCHED_ARP_GATE].setCurrentValueBasicForSetup(arpMenuToParam(f.gateMenu));
-		up->params[mp::UNPATCHED_ARP_RHYTHM].setCurrentValueBasicForSetup(arpMenuToParam(f.rhythmMenu));
-		up->params[mp::UNPATCHED_SPREAD_VELOCITY].setCurrentValueBasicForSetup(arpMenuToParam(f.spreadVel));
-		up->params[mp::UNPATCHED_ARP_SPREAD_GATE].setCurrentValueBasicForSetup(arpMenuToParam(f.spreadGate));
-		up->params[mp::UNPATCHED_ARP_RATCHET_AMOUNT].setCurrentValueBasicForSetup(arpMenuToParam(f.ratchet));
-	}
-	display->displayPopup(f.name);
 }
 
 uint8_t KeyboardLayoutHarmonic::buildVoicing(int16_t* out, uint8_t maxOut) {
@@ -1315,25 +1232,8 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		display->displayPopup(hs.showChord ? "SHOW" : "HIDE");
 	}
 	if (risingIso & (uint8_t)(1u << kBtnSticky)) {
-		// The HOLD pad cycles the hold mode with a single tap: FREE -> HOLD (latch) -> ARP (latch + arpeggiate)
-		// -> FREE. No modifier (SHIFT + pad collides with the Deluge shortcut grid) and no new pad (both control
-		// columns are full). ARP mirrors the arp menu (preset UP + updateSettingsFromCurrentPreset) = the engine's
-		// own arpeggiator; with the chord latched + PLAY it arpeggiates.
-		ArpeggiatorSettings& arp = getCurrentInstrumentClip()->arpSettings;
-		bool arpOn = (arp.preset != ArpPreset::OFF);
-		if (!hs.stickyChord) {
-			hs.stickyChord = true;
-			display->displayPopup("HOLD");
-		}
-		else if (!arpOn) {
-			applyArpFlavor(); // arp on, using the selected flavor; the horizontal wheel scrubs flavors from here
-		}
-		else {
-			hs.stickyChord = false;
-			arp.preset = ArpPreset::OFF;
-			arp.updateSettingsFromCurrentPreset();
-			display->displayPopup("FREE");
-		}
+		hs.stickyChord = !hs.stickyChord; // keep the selection on-screen for editing (no sustained sound)
+		display->displayPopup(hs.stickyChord ? "HOLD" : "FREE");
 	}
 	if (risingIso & (uint8_t)(1u << kBtnLattice)) {
 		// The overlay pad cycles: ONE (off) -> LATT (full lattice) -> DIFF (voice-leading) -> ONE.
@@ -1495,20 +1395,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		namedRich = -1;
 	}
 	prevHeldCols = heldCols;
-
-	// LATCH (HOLD): sustain the selected chord hands-free. When HOLD is on and no palette pad is held this frame,
-	// re-sound the current voicing so it stays in the NotesState — keyboard_screen sees no drop, so no note-off,
-	// and the chord rings on for playing melodies over or (later) driving performance modes. The pick block sounds
-	// it while a pad is held; edit-voicing has its own drone. Toggle HOLD off or hit CLR and it vanishes next frame.
-	if (hs.stickyChord && !hs.editVoicing && heldCols == 0 && chordNoteCount > 0) {
-		int16_t voiced[kMaxVoice];
-		uint8_t vn = buildVoicing(voiced, kMaxVoice);
-		for (uint8_t i = 0; i < vn; i++) {
-			if (voiced[i] >= 0 && voiced[i] <= 127) {
-				enableNote((uint8_t)voiced[i], velocity);
-			}
-		}
-	}
 
 	ColumnControlsKeyboard::evaluatePads(presses);
 }
@@ -1730,17 +1616,6 @@ void KeyboardLayoutHarmonic::handleHorizontalEncoder(int32_t offset, bool shiftE
 		display->displayPopup(buf);
 		pushChordState();
 		return;
-	}
-	// ARP FLAVOR: arp on + no chord physically held (latched or idle) → the horizontal wheel scrubs arp flavors
-	// (note order + octave range), named on screen, live. This is where "different arps" lives.
-	{
-		ArpeggiatorSettings& arp = getCurrentInstrumentClip()->arpSettings;
-		if (arp.mode != ArpMode::OFF) {
-			arpFlavor = (int8_t)((((int32_t)arpFlavor + (offset > 0 ? 1 : -1)) % kNumArpFlavors + kNumArpFlavors)
-			                     % kNumArpFlavors);
-			applyArpFlavor();
-			return;
-		}
 	}
 	horizontalEncoderHandledByColumns(offset, shiftEnabled);
 }

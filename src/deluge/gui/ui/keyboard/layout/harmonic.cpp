@@ -1678,6 +1678,12 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 void KeyboardLayoutHarmonic::handleHorizontalEncoder(int32_t offset, bool shiftEnabled,
                                                      PressedPad presses[kMaxNumKeyboardPadPresses],
                                                      bool encoderPressed) {
+	// A SELECT-encoder turn calls this with offset==0 purely to recompute scroll bounds. It must NOT trigger the
+	// prog/stack/arp actions below — otherwise SELECT doubles as the horizontal wheel (e.g. nudging the arp flavor).
+	if (offset == 0) {
+		horizontalEncoderHandledByColumns(offset, shiftEnabled);
+		return;
+	}
 	// PROG hold: the horizontal wheel WALKS the loaded progression's chords (wraps, so a vamp loops).
 	if (progPadHeld && getState().harmonic.progPreset >= 0 && getState().harmonic.progPreset < gNumProgs) {
 		KeyboardStateHarmonic& s = getState().harmonic;

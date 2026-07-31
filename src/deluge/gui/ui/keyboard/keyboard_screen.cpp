@@ -514,6 +514,14 @@ void KeyboardScreen::updateActiveNotes() {
 			redrawNumericDisplay();
 		}
 	}
+
+	// LATCH: a HELD chord sustains hands-off, so currentNotesState stays non-empty and the block above never fires.
+	// But the notes are no longer under a finger, so the keyboard must LEAVE auditioning — otherwise CLIP/SONG/KIT/
+	// menu buttons (which require UI_MODE_NONE) stop working. Exit the mode WITHOUT silencing the latched notes.
+	else if (isUIModeActive(UI_MODE_AUDITIONING)
+	         && layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->latchedIdle()) {
+		exitUIMode(UI_MODE_AUDITIONING);
+	}
 }
 
 void KeyboardScreen::noteOff(ModelStack& modelStack, Instrument& activeInstrument, bool clipIsActiveOnInstrument,

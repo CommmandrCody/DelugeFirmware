@@ -1517,11 +1517,11 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 		if (Buttons::isButtonPressed(deluge::hid::button::Y_ENC)) {
 			voicingTurnedWhilePressed = true; // so releasing the click won't spring it away
 			int32_t h = (int32_t)s.voicingWalk + offset;
-			if (h < -8) {
-				h = -8;
+			if (h < -24) {
+				h = -24;
 			}
-			if (h > 8) {
-				h = 8;
+			if (h > 24) {
+				h = 24;
 			}
 			s.voicingWalk = (int8_t)h;
 			s.voicingHome = s.voicingWalk; // home follows — this is now the spring-back voice
@@ -1532,11 +1532,11 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 			return;
 		}
 		int32_t w = (int32_t)s.voicingWalk + offset;
-		if (w < -8) {
-			w = -8;
+		if (w < -24) {
+			w = -24;
 		}
-		if (w > 8) {
-			w = 8;
+		if (w > 24) {
+			w = 24;
 		}
 		s.voicingWalk = (int8_t)w;
 		char buf[8];

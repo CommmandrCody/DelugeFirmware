@@ -1526,7 +1526,7 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 			s.voicingWalk = (int8_t)h;
 			s.voicingHome = s.voicingWalk; // home follows — this is now the spring-back voice
 			char buf[8];
-			sprintf(buf, "HOM%d", (int)s.voicingHome);
+			sprintf(buf, "H%d", (int)s.voicingHome); // "H-24".."H24" fits the 4-char 7-seg
 			display->displayPopup(buf);
 			pushChordState();
 			return;
@@ -1540,7 +1540,7 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 		}
 		s.voicingWalk = (int8_t)w;
 		char buf[8];
-		sprintf(buf, "VOI%d", (int)s.voicingWalk);
+		sprintf(buf, "V%d", (int)s.voicingWalk); // "V-24".."V24" fits the 4-char 7-seg (VOI%d overflowed)
 		display->displayPopup(buf);
 		pushChordState(); // dashboard tracks the voicing walk live
 		return;

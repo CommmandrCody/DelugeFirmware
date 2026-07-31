@@ -724,6 +724,7 @@ ActionResult KeyboardScreen::buttonAction(deluge::hid::Button b, bool on, bool i
 	// reads the currently-sounding notes (currentNotesState), so it works in Chord Library, Chord,
 	// or even a hand-played chord on any layout, with no library required.
 	else if (b == SELECT_ENC && on && currentUIMode == UI_MODE_AUDITIONING && currentNotesState.count > 0
+	         && !layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->latchedIdle()
 	         && runtimeFeatureSettings.get(RuntimeFeatureSettingType::ChordBrush) == RuntimeFeatureStateToggle::On) {
 		PendingChord pending;
 		for (uint8_t i = 0; i < currentNotesState.count && pending.count < kMaxPendingChordNotes; i++) {
@@ -735,8 +736,9 @@ ActionResult KeyboardScreen::buttonAction(deluge::hid::Button b, bool on, bool i
 	}
 
 	// Click the select encoder while a chord is armed (but not holding new notes) to clear the
-	// harmonic brush.
-	else if (b == SELECT_ENC && on && ChordService::hasPending()) {
+	// harmonic brush. Skip when the chord is merely latched (HOLD, hands off) so SELECT reaches settings.
+	else if (b == SELECT_ENC && on && ChordService::hasPending()
+	         && !layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->latchedIdle()) {
 		ChordService::clearPending();
 	}
 

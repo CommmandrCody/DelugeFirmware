@@ -59,6 +59,9 @@ public:
 	/// A clean click springs the voicing to home; a press-and-turn dials the home. True if the layout consumed it.
 	virtual bool voicingPressBegin() { return false; }
 	virtual bool voicingPressEnd() { return false; }
+	// True when a chord is LATCHED (HOLD) but no pad is physically held. The keyboard uses this to yield the SELECT
+	// encoder to the settings menu instead of the Chord Brush, which otherwise grabs the sustained notes.
+	virtual bool latchedIdle() { return false; }
 
 	/// This function is called on visibility change and if colour offset changes
 	virtual void precalculate() = 0;

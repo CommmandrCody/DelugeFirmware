@@ -73,6 +73,8 @@ private:
 	static constexpr uint8_t kMaxVoice = 16; // capacity for a stacked voicing
 	// Apply the currently-selected arp flavor (note order + octave range) to this clip's arp and pop its name.
 	void applyArpFlavor();
+	// HOLD (latch) on and no chord pad physically held → let SELECT reach the settings menu, not the Chord Brush.
+	bool latchedIdle() override;
 	// Chroma: re-broadcast the currently-selected chord's state to the host (CT dashboard) after ANY
 	// voicing change, so the dash tracks every change live instead of only on a fresh palette pick.
 	void pushChordState();

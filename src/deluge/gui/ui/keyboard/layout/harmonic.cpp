@@ -595,6 +595,10 @@ static int32_t arpMenuToParam(uint8_t menuValue) {
 	return (int32_t)(computeFinalValueForUnsignedMenuItem((int32_t)menuValue) - 2147483648u);
 }
 
+bool KeyboardLayoutHarmonic::latchedIdle() {
+	return getState().harmonic.stickyChord && heldCols == 0;
+}
+
 void KeyboardLayoutHarmonic::applyArpFlavor() {
 	if (arpFlavor < 0) {
 		arpFlavor = 0;

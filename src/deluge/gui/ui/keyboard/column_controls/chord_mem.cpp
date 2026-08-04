@@ -16,10 +16,12 @@
  */
 
 #include "chord_mem.h"
+#include "gui/ui/keyboard/chords.h"
 #include "gui/ui/keyboard/layout/column_controls.h"
 #include "hid/buttons.h"
 #include "hid/hid_sysex.h"
 #include "model/song/song.h"
+#include "util/d_string.h"
 
 namespace deluge::gui::ui::keyboard::controls {
 
@@ -62,7 +64,24 @@ void ChordMemColumn::handlePad(ModelStackWithTimelineCounter* modelStackWithTime
 		// mirrors the palette-pick broadcast so the CT/HUD respond to banked chords too, not just picks.
 		if (vn > 0 && currentSong != nullptr) {
 			uint8_t kr = (uint8_t)((((int32_t)currentSong->key.rootNote % 12) + 12) % 12);
-			HIDSysex::sendChordState(kr, voiced, vn, "bank", 0, 0, (uint8_t)currentSong->getCurrentScale());
+			// Name it EXACTLY as the OLED does (chord_mem_service::recall) so hosts show the Deluge's TRUTH,
+			// not the bridge's own re-derivation: nameChordFromNotes + key-aware effectivePreferFlats.
+			char nameBuf[48] = {0};
+			// Use THIS slot's own stored name (captured from what you picked at bank time). NOT the global
+			// gChromaChordName -- that holds the LAST palette pick, so consulting it on recall/resync makes a
+			// banked slot revert to an unrelated chord (e.g. a later "Abmaj13"). Fall back to naming from notes.
+			if (chordMemName[pad.y][0] != '\0') {
+				strncpy(nameBuf, chordMemName[pad.y], sizeof(nameBuf) - 1);
+			}
+			else {
+				bool preferFlats = effectivePreferFlats(kr, currentSong->key.modeNotes);
+				uint8_t nb[kMaxNotesChordMem];
+				for (uint8_t k = 0; k < vn && k < kMaxNotesChordMem; k++) {
+					nb[k] = (uint8_t)(voiced[k] & 0x7f);
+				}
+				nameChordFromNotes(nb, vn, nameBuf, preferFlats);
+			}
+			HIDSysex::sendChordState(kr, voiced, vn, "bank", 0, 0, (uint8_t)currentSong->getCurrentScale(), nameBuf);
 		}
 	}
 	else {
@@ -73,9 +92,14 @@ void ChordMemColumn::handlePad(ModelStackWithTimelineCounter* modelStackWithTime
 				chordMem[pad.y][i] = currentNotesState.notes[i].note;
 			}
 			chordMemNoteCount[pad.y] = noteCount;
+			// Store the NAME you picked (e.g. "AbM9"), captured from the harmonic display — so recall reports
+			// what you chose, not a re-analysis of the (spread/inverted) notes.
+			strncpy(chordMemName[pad.y], gChromaChordName, sizeof(chordMemName[pad.y]) - 1);
+			chordMemName[pad.y][sizeof(chordMemName[pad.y]) - 1] = '\0';
 		}
 		else if (Buttons::isShiftButtonPressed()) {
 			chordMemNoteCount[pad.y] = 0;
+			chordMemName[pad.y][0] = '\0';
 		}
 	}
 };
@@ -95,6 +119,11 @@ void ChordMemColumn::writeToFile(Serializer& writer) {
 	writer.writeArrayStart("chordMem", true, true);
 	for (int32_t y = 0; y < num; y++) {
 		writer.writeArrayStart("chordSlot", true, true);
+		if (chordMemName[y][0] != '\0') {
+			writer.writeOpeningTagBeginning("name", true);
+			writer.writeAttribute("v", chordMemName[y]);
+			writer.closeTag(true);
+		}
 		for (int i = 0; i < chordMemNoteCount[y]; i++) {
 			writer.writeOpeningTagBeginning("note", true);
 			writer.writeAttribute("code", chordMem[y][i]);
@@ -135,6 +164,22 @@ void ChordMemColumn::readFromFile(Deserializer& reader) {
 					i++;
 					reader.match('}'); // note value object
 					reader.match('}'); // note box
+				}
+				else if (!strcmp(tagName, "name")) {
+					reader.match('{');
+					while (*(tagName = reader.readNextTagOrAttributeName())) {
+						if (!strcmp(tagName, "v")) {
+							String tmp;
+							reader.readTagOrAttributeValueString(&tmp);
+							strncpy(chordMemName[y], tmp.get(), sizeof(chordMemName[y]) - 1);
+							chordMemName[y][sizeof(chordMemName[y]) - 1] = '\0';
+						}
+						else {
+							reader.exitTag();
+						}
+					}
+					reader.match('}'); // v value object
+					reader.match('}'); // name box
 				}
 				else {
 					reader.exitTag();

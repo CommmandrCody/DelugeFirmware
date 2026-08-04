@@ -18,7 +18,7 @@ void sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char* contextI
 // Chroma: outbound chord-state push on every NORMAL palette pick — host renders the chord (key + voiced
 // notes + ctx), immune to the note-name overwrite that defeats the text mirror. No-op until a host handshakes.
 void sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId, int8_t spread = 0,
-                    int8_t inversion = 0, uint8_t scale = 0);
+                    int8_t inversion = 0, uint8_t scale = 0, const char* chordName = nullptr);
 // Chroma: outbound active-view push (0x45). Sent when the on-screen view changes, so the Companion's Learn tab can
 // auto-follow what the user is looking at. Payload is a short 7-bit-ASCII view slug (e.g. "clip", "song", "kit").
 // No-op until a host handshakes; last-value de-duped by the caller so it only fires on an actual change.

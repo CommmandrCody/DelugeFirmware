@@ -55,6 +55,9 @@ public:
 private:
 	uint8_t chordMemNoteCount[8] = {0};
 	uint8_t chordMem[8][kMaxNotesChordMem] = {0};
+	// The name you PICKED for each slot (e.g. "AbM9"), captured at bank-time from the harmonic display. Empty
+	// = fall back to naming from the notes. Persisted with the slot so it survives song save/load.
+	char chordMemName[8][16] = {{0}};
 	uint8_t activeChordMem = 0xFF;
 };
 

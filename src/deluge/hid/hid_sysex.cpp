@@ -237,7 +237,7 @@ void HIDSysex::sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char
 // Pushed on every NORMAL palette pick. Carries the runtime truth (voiced MIDI notes) + the graph key, so the
 // host renders the real chord regardless of what the 7-seg shows. No-op until a host handshakes.
 void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId,
-                              int8_t spread, int8_t inversion, uint8_t scale) {
+                              int8_t spread, int8_t inversion, uint8_t scale, const char* chordName) {
 	if (lastHidCable == nullptr) {
 		return;
 	}
@@ -272,6 +272,18 @@ void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t num
 	msg[i++] = (uint8_t)inversion & 0x7f;
 	msg[i++] = scale & 0x7f;
 	msg[i++] = (uint8_t)deluge::gui::ui::keyboard::gChromaSpelling & 0x7f; // 0=Auto,1=Flats,2=Sharps (synced spelling)
+	// Chroma "Delly is the truth": the Deluge's OWN chord-name string, appended after the extras as
+	// [len][ASCII...]. Every host renders this verbatim instead of re-deriving. Old hosts ignore the tail.
+	uint8_t nn = 0;
+	if (chordName != nullptr) {
+		for (const char* c = chordName; *c && nn < 16; c++) {
+			nn++;
+		}
+	}
+	msg[i++] = nn;
+	for (uint8_t k = 0; k < nn; k++) {
+		msg[i++] = (uint8_t)(chordName[k]) & 0x7f;
+	}
 	msg[i++] = 0xf7;
 	lastHidCable->sendSysex(msg, i);
 }

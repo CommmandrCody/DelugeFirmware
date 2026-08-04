@@ -350,6 +350,7 @@ bool keyPrefersFlats(uint8_t keyRootPc, NoteSet scale) {
 
 // Device-wide spelling lean (synced across surfaces). Defaults to AUTO = follow the key.
 ChromaSpelling gChromaSpelling = ChromaSpelling::AUTO;
+char gChromaChordName[16] = {0};
 
 bool effectivePreferFlats(uint8_t keyRootPc, NoteSet scale) {
 	switch (gChromaSpelling) {

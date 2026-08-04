@@ -55,6 +55,10 @@ bool keyPrefersFlats(uint8_t keyRootPc, NoteSet scale);
 // anyone can toggle it, everyone follows. (chroma_one_spelling_across_surfaces)
 enum class ChromaSpelling : uint8_t { AUTO = 0, FLATS = 1, SHARPS = 2 };
 extern ChromaSpelling gChromaSpelling;
+
+// The last chord NAME the harmonic layout drew (e.g. "AbM9") — the degree name you PICKED. Banking captures
+// this so a recalled banked chord reports the name you chose, not a re-analysis of its (spread) notes.
+extern char gChromaChordName[16];
 // The accidental style to actually use: the forced lean, or the key's own preference on AUTO.
 bool effectivePreferFlats(uint8_t keyRootPc, NoteSet scale);
 

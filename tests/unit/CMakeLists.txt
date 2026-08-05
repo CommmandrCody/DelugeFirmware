@@ -59,6 +59,9 @@ file(GLOB_RECURSE deluge_SOURCES
         ../../src/deluge/model/sync.cpp
         # For chord tests
         ../../src/deluge/gui/ui/keyboard/chords.cpp
+        # chords.cpp formats names with sprintf, which the firmware redirects to its own
+        # embedded printf (sprintf_). Without this the unit tests fail to LINK.
+        ../../src/lib/printf.c
 )
 
 add_executable(UnitTests
@@ -71,6 +74,7 @@ add_executable(UnitTests
         function_tests.cpp
         sync_tests.cpp
         chord_tests.cpp
+        harmonic_bench_tests.cpp
         time_tests.cpp
 )
 add_test(NAME UnitTests

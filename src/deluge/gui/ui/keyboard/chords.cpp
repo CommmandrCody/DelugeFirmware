@@ -158,11 +158,16 @@ PLACE_SDRAM_DATA const Chord kDim = {"DIM",
                                       {ROOT, OCT + MIN3, DIM5, -OCT, NONE, NONE, NONE}}};
 PLACE_SDRAM_DATA const Chord kFullDim = {
     "FULLDIM", NoteSet({ROOT, MIN3, DIM5, DIM7}), {{ROOT, MIN3, DIM5, DIM7, NONE, NONE, NONE}}};
+// An augmented triad is root + MAJOR third + augmented fifth. This said MIN3, which is not an
+// augmented chord at all: {0,3,8} is the first inversion of a major triad. Two consequences, both
+// shipping: a real augmented chord ({0,4,8}) matched nothing and could not be named, and every major
+// triad's first inversion got named as AUG (C/E read as "EAUG"). The voicing rows had it too, so the
+// AUG button played the wrong notes.
 PLACE_SDRAM_DATA const Chord kAug = {"AUG",
-                                     NoteSet({ROOT, MIN3, AUG5}),
-                                     {{ROOT, MIN3, AUG5, NONE, NONE, NONE, NONE},
-                                      {ROOT, OCT + MIN3, AUG5, NONE, NONE, NONE, NONE},
-                                      {ROOT, OCT + MIN3, AUG5, -OCT, NONE, NONE, NONE}}};
+                                     NoteSet({ROOT, MAJ3, AUG5}),
+                                     {{ROOT, MAJ3, AUG5, NONE, NONE, NONE, NONE},
+                                      {ROOT, OCT + MAJ3, AUG5, NONE, NONE, NONE, NONE},
+                                      {ROOT, OCT + MAJ3, AUG5, -OCT, NONE, NONE, NONE}}};
 PLACE_SDRAM_DATA const Chord kSus2 = {"SUS2",
                                       NoteSet({ROOT, MAJ2, P5}),
                                       {{ROOT, MAJ2, P5, NONE, NONE, NONE, NONE},
@@ -334,8 +339,37 @@ const char* noteNameInKey(uint8_t pitchClass, bool preferFlats) {
 // Does this key spell with flats? Determined from the circle of fifths: find the key's relative major
 // (minor keys -> +3 semitones) and check whether that major key is a flat key (F/Bb/Eb/Ab/Db).
 bool keyPrefersFlats(uint8_t keyRootPc, NoteSet scale) {
-	bool isMinor = scale.has(MIN3) && !scale.has(MAJ3); // minor-ish scale (minor 3rd, no major 3rd)
-	uint8_t majorRoot = isMinor ? (uint8_t)((keyRootPc + 3) % 12) : (uint8_t)(keyRootPc % 12);
+	// Spelling follows the KEY SIGNATURE, so we need the relative major of whatever mode we're in.
+	//
+	// This used to be "has a minor 3rd and no major 3rd -> relative major is a minor 3rd up", which is
+	// only true for natural minor. Dorian's relative major is a TONE down, phrygian's a major third
+	// down, lydian's a fourth down, mixolydian's a fifth down. So five of the seven modes read the
+	// wrong key signature and could spell with the wrong accidentals.
+	//
+	// Instead: rotate the scale until it matches the major pattern. Whatever root makes it major IS
+	// the relative major, which works for every mode without naming any of them.
+	uint8_t majorRoot;
+	bool found = false;
+	for (uint8_t r = 0; r < 12 && !found; r++) {
+		NoteSet rotated;
+		rotated.clear();
+		for (uint8_t i = 0; i < 12; i++) {
+			if (scale.has(i)) {
+				rotated.add((uint8_t)(((keyRootPc + i) - r + 24) % 12));
+			}
+		}
+		// The major scale: T T S T T T S.
+		if (rotated == NoteSet({0, 2, 4, 5, 7, 9, 11})) {
+			majorRoot = r;
+			found = true;
+		}
+	}
+	if (!found) {
+		// Not a rotation of the major scale (harmonic minor, a user scale, fewer than 7 notes).
+		// Fall back to the old heuristic rather than guessing.
+		bool isMinor = scale.has(MIN3) && !scale.has(MAJ3);
+		majorRoot = isMinor ? (uint8_t)((keyRootPc + 3) % 12) : (uint8_t)(keyRootPc % 12);
+	}
 	switch (majorRoot) {
 	case 5:  // F
 	case 10: // Bb

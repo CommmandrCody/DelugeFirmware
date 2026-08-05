@@ -38,4 +38,7 @@ public:
 	bool isFolder;
 	bool instrumentAlreadyInSong = false; // Only valid if instrument is set to something.
 	bool filenameIncludesExtension = true;
+	// Packed FAT datetime (fdate<<16 | ftime) from the directory entry. With the recency clock (diskio.c) this is
+	// monotonic with save order, so sorting by it descending == most-recently-saved first. 0 if unknown/in-memory.
+	uint32_t dateModified = 0;
 };

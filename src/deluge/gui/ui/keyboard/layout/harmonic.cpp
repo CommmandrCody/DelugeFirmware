@@ -659,8 +659,15 @@ void KeyboardLayoutHarmonic::pushChordState() {
 	}
 	int16_t voiced[kMaxVoice];
 	uint8_t vn = buildVoicing(voiced, kMaxVoice);
+	// name the chord from its voiced notes with the Deluge's OWN namer, so hosts render the truth (see hid_sysex)
+	uint8_t nb[kMaxVoice];
+	for (uint8_t k = 0; k < vn; k++) {
+		nb[k] = (uint8_t)(voiced[k] & 0x7f);
+	}
+	char nameBuf[16] = {0};
+	nameChordFromNotes(nb, vn, nameBuf, gChromaSpelling != ChromaSpelling::SHARPS);
 	HIDSysex::sendChordState(curKeyRoot_, voiced, vn, curCtx_, getState().harmonic.voiceSpread,
-	                         getState().harmonic.voiceInversion, (uint8_t)currentSong->getCurrentScale());
+	                         getState().harmonic.voiceInversion, (uint8_t)currentSong->getCurrentScale(), nameBuf);
 }
 
 // Re-render continuously while the Calculator is suggesting (pulsing) or an inbound voicing-mod is queued
@@ -833,6 +840,12 @@ uint8_t KeyboardLayoutHarmonic::buildChordAtDegree(uint8_t deg, int32_t y, const
 }
 
 void KeyboardLayoutHarmonic::drawName(const char* roman, const char* abs) {
+	// Remember the ABSOLUTE name (e.g. "AbM9") so banking can store the name you PICKED, not a re-analysis
+	// of the voiced notes. This is the string shown on the 7-seg/OLED.
+	if (abs) {
+		strncpy(gChromaChordName, abs, sizeof(gChromaChordName) - 1);
+		gChromaChordName[sizeof(gChromaChordName) - 1] = '\0';
+	}
 	char full[80];
 	if (roman && roman[0]) {
 		sprintf(full, "%s  %s", abs, roman);
@@ -1087,9 +1100,15 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 				curKeyRoot_ = (uint8_t)keyRoot;
 				strncpy(curCtx_, ctxState, sizeof(curCtx_) - 1);
 				curCtx_[sizeof(curCtx_) - 1] = '\0';
+				uint8_t nb2[kMaxVoice];
+				for (uint8_t k = 0; k < vnPlay; k++) {
+					nb2[k] = (uint8_t)(voicedPlay[k] & 0x7f);
+				}
+				char nameBuf2[16] = {0};
+				nameChordFromNotes(nb2, vnPlay, nameBuf2, gChromaSpelling != ChromaSpelling::SHARPS);
 				HIDSysex::sendChordState((uint8_t)keyRoot, voicedPlay, vnPlay, ctxState,
 				                         getState().harmonic.voiceSpread, getState().harmonic.voiceInversion,
-				                         (uint8_t)currentSong->getCurrentScale());
+				                         (uint8_t)currentSong->getCurrentScale(), nameBuf2);
 			}
 			heldCols |= (uint16_t)(1u << ci.local);
 			leftPicked = true;

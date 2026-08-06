@@ -604,8 +604,20 @@ bool describeChordInKey(const uint8_t* notes, int32_t count, uint8_t keyRootPc, 
 			// Absolute name, spelled to the key (e.g. "Db M7").
 			sprintf(absOut, "%s%s", noteNameInKey(rootPc, flats), chord.name);
 
-			// Roman numeral: only for 7-note scales when the root is a scale degree.
-			if (scaleCount == 7) {
+			// Roman numeral: only for 7-note scales when the root is a scale degree AND every tone of
+			// the chord is diatonic.
+			//
+			// Root-in-key used to be enough, which handed romans to borrowed chords: D7 in C major has
+			// a diatonic root (D) but an F#, and it came back "II7" -- an uppercase II that doesn't
+			// exist in a major scale at all. A roman asserts a FUNCTION WITHIN THE KEY, and a borrowed
+			// chord has no such function, so it gets its name and no numeral.
+			bool allDiatonic = true;
+			for (int32_t i = 0; i < 12; i++) {
+				if (present.has(i) && !scale.has((((i - keyRootPc) % 12) + 12) % 12)) {
+					allDiatonic = false;
+				}
+			}
+			if (scaleCount == 7 && allDiatonic) {
 				for (int32_t d = 0; d < 7; d++) {
 					if (((keyRootPc + scaleIv[d]) % 12) != (uint32_t)rootPc) {
 						continue;

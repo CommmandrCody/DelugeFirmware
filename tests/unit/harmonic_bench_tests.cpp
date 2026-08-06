@@ -469,3 +469,59 @@ TEST(HarmonicBench, suggestIsDeterministic) {
 		}
 	}
 }
+
+// ── describeChordInKey: the roman numeral the Deluge broadcasts ─────────────────────────────────
+//
+// This is what the Companion's Voicing tab displays, so a wrong roman here is wrong on every screen.
+// Spec section 5: a roman numeral asserts a FUNCTION WITHIN THE KEY, so it is only earned when every
+// tone of the chord is diatonic. Root-in-key is not enough.
+
+using deluge::gui::ui::keyboard::describeChordInKey;
+
+TEST(HarmonicBench, romanOnlyForFullyDiatonicChords) {
+	char abs[64], roman[64];
+	NoteSet cMajor({0, 2, 4, 5, 7, 9, 11});
+
+	// Dm7 in C major: D F A C, every tone diatonic. This IS the ii chord.
+	const uint8_t dm7[] = {62, 65, 69, 72};
+	CHECK_TRUE(describeChordInKey(dm7, 4, 0, cMajor, abs, roman));
+	CHECK_TEXT(roman[0] != '\0', "a fully diatonic chord should get a roman");
+
+	// D7 in C major: D F# A C. The ROOT is the 2nd degree, but F# is not in the key, so this is a
+	// borrowed chord and emphatically not the diatonic ii. Naming it "ii7" claims a function it
+	// does not have.
+	const uint8_t d7[] = {62, 66, 69, 72};
+	describeChordInKey(d7, 4, 0, cMajor, abs, roman);
+	STRCMP_EQUAL_TEXT("", roman, "a borrowed chord must not be given a roman numeral");
+}
+
+TEST(HarmonicBench, romanMatchesTheCompanionForEveryDiatonicTriad) {
+	// The device and the app must agree; two screens disagreeing about the same chord is the whole
+	// class of bug this bench exists to stop.
+	char abs[64], roman[64];
+	static const uint8_t MAJ[7] = {0, 2, 4, 5, 7, 9, 11};
+	static const char* const EXPECT[7] = {"I", "ii", "iii", "IV", "V", "vi", "vii"};
+	NoteSet cMajor({0, 2, 4, 5, 7, 9, 11});
+
+	for (int d = 0; d < 7; d++) {
+		uint8_t notes[3];
+		for (int k = 0; k < 3; k++) {
+			notes[k] = (uint8_t)(60 + MAJ[(d + 2 * k) % 7] + (((d + 2 * k) >= 7) ? 12 : 0));
+		}
+		CHECK_TRUE(describeChordInKey(notes, 3, 0, cMajor, abs, roman));
+		// Compare the numeral only, ignoring the quality suffix the firmware appends.
+		char numeral[8];
+		int n = 0;
+		for (int i = 0; roman[i] && n < 7; i++) {
+			char c = roman[i];
+			if (c == 'I' || c == 'V' || c == 'i' || c == 'v' || c == 'b' || c == '#') {
+				numeral[n++] = c;
+			}
+			else {
+				break;
+			}
+		}
+		numeral[n] = '\0';
+		STRCMP_EQUAL_TEXT(EXPECT[d], numeral, abs);
+	}
+}

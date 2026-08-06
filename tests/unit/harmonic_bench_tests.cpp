@@ -276,3 +276,196 @@ TEST(HarmonicBench, refusesToNameLessThanTwoNotes) {
 	CHECK_FALSE(nameChordFromNotes(one, 1, out, false));
 	CHECK_FALSE(nameChordFromNotes(one, 0, out, false));
 }
+
+// ── suggestNextChords: "the brain" ──────────────────────────────────────────────────────────────
+//
+// score(from -> to) = 10 * DH_PULL[from][to] + 8 * (6 - voiceDistance(chord(from), chord(to)))
+//
+// The DH_PULL weights are a musical OPINION (deep-house modal loops preferred over classical V-I)
+// and there is no objective test for an opinion. Everything AROUND them is arithmetic, and that is
+// what these check: the structure has to be sound whatever the weights say.
+//
+// The strongest of these is transposition invariance. Suggestion is defined purely on scale DEGREES,
+// so the same degree in any key must produce the same degrees back. If it doesn't, some pitch-class
+// arithmetic has leaked into what should be key-independent logic.
+
+using deluge::gui::ui::keyboard::ChordSuggestion;
+using deluge::gui::ui::keyboard::suggestNextChords;
+
+namespace {
+NoteSet majorScale() {
+	return NoteSet({0, 2, 4, 5, 7, 9, 11});
+}
+
+// The degrees suggested for `fromDegree` in a given key, in rank order.
+void suggestedDegrees(uint8_t keyRoot, int fromDegree, int* degreesOut, int& n) {
+	static const uint8_t IV[7] = {0, 2, 4, 5, 7, 9, 11};
+	ChordSuggestion s[8];
+	uint8_t fromPc = (uint8_t)((keyRoot + IV[fromDegree]) % 12);
+	n = suggestNextChords(keyRoot, majorScale(), 7, fromPc, s, 8);
+	for (int i = 0; i < n; i++) {
+		int deg = -1;
+		for (int d = 0; d < 7; d++) {
+			if (((keyRoot + IV[d]) % 12) == s[i].rootNote) {
+				deg = d;
+			}
+		}
+		degreesOut[i] = deg;
+	}
+}
+} // namespace
+
+TEST(HarmonicBench, suggestNeverProposesTheChordYouAreAlreadyOn) {
+	// The pull table's diagonal is zero, but the real guarantee is that the current degree is skipped
+	// entirely -- "go to where you already are" is never a suggestion.
+	int degs[8], n;
+	for (uint8_t key = 0; key < 12; key++) {
+		for (int from = 0; from < 7; from++) {
+			suggestedDegrees(key, from, degs, n);
+			for (int i = 0; i < n; i++) {
+				CHECK_TEXT(degs[i] != from, "suggested the chord you are already on");
+			}
+		}
+	}
+}
+
+TEST(HarmonicBench, suggestReturnsTheOtherSixDegreesWithNoDuplicates) {
+	int degs[8], n;
+	for (uint8_t key = 0; key < 12; key++) {
+		for (int from = 0; from < 7; from++) {
+			suggestedDegrees(key, from, degs, n);
+			CHECK_EQUAL(6, n); // seven degrees minus the one you're on
+			bool seen[7] = {false};
+			for (int i = 0; i < n; i++) {
+				CHECK_TRUE(degs[i] >= 0 && degs[i] < 7);
+				CHECK_TEXT(!seen[degs[i]], "the same degree was suggested twice");
+				seen[degs[i]] = true;
+			}
+		}
+	}
+}
+
+TEST(HarmonicBench, suggestionsAreRankedBestFirst) {
+	// The caller shows the top few, so the ORDER is the whole feature. Recompute the documented score
+	// independently -- 10*pull + 8*(6 - voiceDistance) over diatonic 7ths built by stacking scale
+	// thirds -- and require it never increases down the list.
+	static const int8_t DH_PULL[7][7] = {
+	    {0, 1, 2, 4, 3, 5, 5}, {3, 0, 1, 2, 5, 1, 2}, {2, 1, 0, 2, 1, 4, 3}, {4, 2, 1, 0, 1, 3, 5},
+	    {5, 1, 1, 2, 0, 4, 2}, {3, 2, 1, 4, 1, 0, 5}, {5, 1, 1, 3, 2, 4, 0},
+	};
+	static const uint8_t IV[7] = {0, 2, 4, 5, 7, 9, 11};
+
+	auto chordOf = [&](uint8_t key, int deg, uint8_t* pcs) {
+		for (int k = 0; k < 4; k++) {
+			pcs[k] = (uint8_t)((key + IV[(deg + 2 * k) % 7]) % 12);
+		}
+	};
+	auto voiceDist = [](const uint8_t* a, const uint8_t* b) {
+		int total = 0;
+		for (int i = 0; i < 4; i++) {
+			int best = 12;
+			for (int j = 0; j < 4; j++) {
+				int d = ((a[i] - b[j]) + 12) % 12;
+				if (d > 6) {
+					d = 12 - d;
+				}
+				if (d < best) {
+					best = d;
+				}
+			}
+			total += best;
+		}
+		return total;
+	};
+
+	for (uint8_t key = 0; key < 12; key++) {
+		for (int from = 0; from < 7; from++) {
+			int degs[8], n;
+			suggestedDegrees(key, from, degs, n);
+			uint8_t cur[4];
+			chordOf(key, from, cur);
+			int prev = 1 << 30;
+			for (int i = 0; i < n; i++) {
+				uint8_t to[4];
+				chordOf(key, degs[i], to);
+				int score = 10 * DH_PULL[from][degs[i]] + 8 * (6 - voiceDist(cur, to));
+				CHECK_TEXT(score <= prev, "suggestions are not in descending score order");
+				prev = score;
+			}
+		}
+	}
+}
+
+TEST(HarmonicBench, theSameDegreeSuggestsTheSameDegreesInEveryKey) {
+	// Suggestion is defined on DEGREES, so the key must not change the answer -- only which pitch
+	// classes those degrees land on. This is the property that catches pitch-class arithmetic leaking
+	// into degree logic.
+	for (int from = 0; from < 7; from++) {
+		int refDegs[8], refN;
+		suggestedDegrees(0, from, refDegs, refN); // C major as the reference
+		for (uint8_t key = 1; key < 12; key++) {
+			int degs[8], n;
+			suggestedDegrees(key, from, degs, n);
+			CHECK_EQUAL(refN, n);
+			for (int i = 0; i < n; i++) {
+				CHECK_EQUAL_TEXT(refDegs[i], degs[i], "the key changed which degrees were suggested");
+			}
+		}
+	}
+}
+
+TEST(HarmonicBench, suggestRespectsMaxOut) {
+	// It writes into a caller-supplied buffer. Overrunning it would be a memory bug on the device.
+	ChordSuggestion s[8];
+	for (int32_t maxOut = 0; maxOut <= 8; maxOut++) {
+		for (int i = 0; i < 8; i++) {
+			s[i].rootNote = 0xEE; // sentinel
+		}
+		int n = suggestNextChords(0, majorScale(), 7, 0, s, maxOut);
+		CHECK_TRUE(n <= maxOut);
+		for (int i = n; i < 8; i++) {
+			CHECK_EQUAL_TEXT(0xEE, s[i].rootNote, "wrote past the count it returned");
+		}
+	}
+}
+
+TEST(HarmonicBench, suggestRefusesWhatItCannotAnswer) {
+	ChordSuggestion s[8];
+	// The pull table is only defined for 7-note scales.
+	CHECK_EQUAL(0, suggestNextChords(0, NoteSet({0, 4, 7}), 3, 0, s, 8));
+	// A current root that isn't a degree of the key has no row in the table.
+	CHECK_EQUAL(0, suggestNextChords(0, majorScale(), 7, 1, s, 8)); // C# is not in C major
+}
+
+TEST(HarmonicBench, everySuggestedRootIsDiatonic) {
+	ChordSuggestion s[8];
+	static const uint8_t IV[7] = {0, 2, 4, 5, 7, 9, 11};
+	for (uint8_t key = 0; key < 12; key++) {
+		for (int from = 0; from < 7; from++) {
+			int n = suggestNextChords(key, majorScale(), 7, (uint8_t)((key + IV[from]) % 12), s, 8);
+			for (int i = 0; i < n; i++) {
+				bool inKey = false;
+				for (int d = 0; d < 7; d++) {
+					if (((key + IV[d]) % 12) == s[i].rootNote) {
+						inKey = true;
+					}
+				}
+				CHECK_TRUE_TEXT(inKey, "suggested a chord outside the key");
+			}
+		}
+	}
+}
+
+TEST(HarmonicBench, suggestIsDeterministic) {
+	ChordSuggestion a[8], b[8];
+	for (int from = 0; from < 7; from++) {
+		static const uint8_t IV[7] = {0, 2, 4, 5, 7, 9, 11};
+		int na = suggestNextChords(0, majorScale(), 7, IV[from], a, 8);
+		int nb = suggestNextChords(0, majorScale(), 7, IV[from], b, 8);
+		CHECK_EQUAL(na, nb);
+		for (int i = 0; i < na; i++) {
+			CHECK_EQUAL(a[i].rootNote, b[i].rootNote);
+			CHECK_EQUAL(a[i].chordNo, b[i].chordNo);
+		}
+	}
+}

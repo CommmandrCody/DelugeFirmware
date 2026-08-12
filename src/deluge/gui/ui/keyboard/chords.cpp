@@ -147,10 +147,10 @@ PLACE_SDRAM_DATA const Chord kDim = {"DIM",
 PLACE_SDRAM_DATA const Chord kFullDim = {
     "FULLDIM", NoteSet({ROOT, MIN3, DIM5, DIM7}), {{ROOT, MIN3, DIM5, DIM7, NONE, NONE, NONE}}};
 PLACE_SDRAM_DATA const Chord kAug = {"AUG",
-                                     NoteSet({ROOT, MIN3, AUG5}),
-                                     {{ROOT, MIN3, AUG5, NONE, NONE, NONE, NONE},
-                                      {ROOT, OCT + MIN3, AUG5, NONE, NONE, NONE, NONE},
-                                      {ROOT, OCT + MIN3, AUG5, -OCT, NONE, NONE, NONE}}};
+                                     NoteSet({ROOT, MAJ3, AUG5}),
+                                     {{ROOT, MAJ3, AUG5, NONE, NONE, NONE, NONE},
+                                      {ROOT, OCT + MAJ3, AUG5, NONE, NONE, NONE, NONE},
+                                      {ROOT, OCT + MAJ3, AUG5, -OCT, NONE, NONE, NONE}}};
 PLACE_SDRAM_DATA const Chord kSus2 = {"SUS2",
                                       NoteSet({ROOT, MAJ2, P5}),
                                       {{ROOT, MAJ2, P5, NONE, NONE, NONE, NONE},

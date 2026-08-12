@@ -2,8 +2,15 @@
 #include "definitions_cxx.hpp"
 #include "gui/ui/keyboard/chords.h"
 
+using deluge::gui::ui::keyboard::AUG5;
 using deluge::gui::ui::keyboard::ChordList;
+using deluge::gui::ui::keyboard::ChordQuality;
+using deluge::gui::ui::keyboard::getChordQuality;
+using deluge::gui::ui::keyboard::kAug;
+using deluge::gui::ui::keyboard::MAJ3;
+using deluge::gui::ui::keyboard::MIN3;
 using deluge::gui::ui::keyboard::NONE;
+using deluge::gui::ui::keyboard::ROOT;
 using deluge::gui::ui::keyboard::Voicing;
 
 TEST_GROUP(ChordTests) {
@@ -88,5 +95,51 @@ TEST(ChordTests, adjustVoicingOffsetBoundsCheck) {
 		chordList.voicingOffset[chordNo] = kUniqueVoicings - 1;
 		chordList.adjustVoicingOffset(chordNo, -1);
 		CHECK_EQUAL(kUniqueVoicings - 2, chordList.voicingOffset[chordNo]);
+	}
+}
+
+// An augmented triad is root + MAJOR third + augmented fifth. kAug said MIN3, and {0,3,8} is not an
+// augmented chord at all -- it is the first inversion of a major triad. So a real augmented chord
+// matched nothing in the table, and the AUG voicing PLAYED a major triad inversion.
+TEST(ChordTests, augIntervalSetIsMajorThirdAndAugmentedFifth) {
+	NoteSet expected({ROOT, MAJ3, AUG5});
+	CHECK_TRUE(kAug.intervalSet == expected);
+	CHECK_FALSE(kAug.intervalSet.has(MIN3));
+}
+
+// The file already disagrees with itself: getChordQuality(), a hundred lines above the table in the
+// same file, classifies AUGMENTED as MAJ3 + AUG5. kAug's declared set {ROOT, MIN3, AUG5} matches
+// none of its branches and falls through to OTHER, so the chord named AUG does not classify as
+// augmented in its own firmware. This is the test that catches that.
+TEST(ChordTests, augClassifiesAsAugmented) {
+	NoteSet intervals = kAug.intervalSet;
+	CHECK_EQUAL(static_cast<int>(ChordQuality::AUGMENTED), static_cast<int>(getChordQuality(intervals)));
+}
+
+TEST(ChordTests, augVoicingsPlayAMajorThird) {
+	// The name is only half of it; the notes the chord actually sounds have to be augmented too.
+	// Only the declared voicings are checked: the array is kUniqueVoicings long and chords declare
+	// fewer, so the trailing slots are value-initialised to all-zero and sound nothing.
+	for (int v = 0; v < kUniqueVoicings; v++) {
+		const Voicing& voicing = kAug.voicings[v];
+		bool populated = false;
+		bool hasMajorThird = false;
+		for (int i = 0; i < kMaxChordKeyboardSize; i++) {
+			int8_t o = voicing.offsets[i];
+			if (o == NONE) {
+				continue;
+			}
+			if (o != 0) {
+				populated = true;
+			}
+			int8_t interval = ((o % 12) + 12) % 12;
+			CHECK_TEXT(interval != MIN3, "an augmented voicing must not contain a minor third");
+			if (interval == MAJ3) {
+				hasMajorThird = true;
+			}
+		}
+		if (populated) {
+			CHECK_TRUE(hasMajorThird);
+		}
 	}
 }

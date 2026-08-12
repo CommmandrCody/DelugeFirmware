@@ -125,6 +125,33 @@ bool ChordService::placePendingAt(int32_t pos, int32_t length) {
 	// note in THIS chord. So one chord = one undo step, and each stamped chord undoes independently.
 	Action* action = actionLogger.getNewAction(ActionType::NOTE_EDIT, ActionAddition::NOT_ALLOWED);
 
+	// TAP THE SAME STEP AGAIN TO TAKE THE CHORD BACK OFF.
+	//
+	// Stamping twice on one step used to lay a second copy on top of the first, so nudging a chord
+	// meant reaching for UNDO. Placement is a toggle now: if this exact chord is already sitting at
+	// this step, the tap lifts it. That keeps moving a chord around to a single gesture, and leaves
+	// the next tap free to mean a NEW placement rather than a repeat of the last one.
+	bool alreadyHere = pendingChord_.count > 0;
+	for (uint8_t i = 0; i < pendingChord_.count && alreadyHere; i++) {
+		// Deliberately the NON-creating lookup: asking a question must not create empty rows.
+		NoteRow* existing = clip->getNoteRowForYNote(pendingChord_.notes[i]);
+		if (existing == nullptr || existing->notes.searchExact(pos) == -1) {
+			alreadyHere = false;
+		}
+	}
+
+	if (alreadyHere) {
+		for (uint8_t i = 0; i < pendingChord_.count; i++) {
+			ModelStackWithNoteRow* modelStackWithNoteRow = clip->getNoteRowForYNote(pendingChord_.notes[i], modelStack);
+			NoteRow* noteRow = modelStackWithNoteRow->getNoteRowAllowNull();
+			if (noteRow != nullptr) {
+				noteRow->deleteNoteByPos(modelStackWithNoteRow, pos, action);
+			}
+		}
+		display->displayPopup(deluge::l10n::get(deluge::l10n::String::STRING_FOR_CHORD_BRUSH_CLEARED));
+		return true;
+	}
+
 	bool placedAny = false;
 	for (uint8_t i = 0; i < pendingChord_.count; i++) {
 		bool scaleAltered = false;

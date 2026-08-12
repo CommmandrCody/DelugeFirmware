@@ -73,18 +73,23 @@ extern void freezeWithError(char const* errmsg);
 
 #define MAX_NUM_USB_MIDI_DEVICES 6
 
-// Paul: It seems this area is not executable, could not find a reason in the datasheet, marked NOLOAD now
-#define PLACE_INTERNAL_FRUNK __attribute__((__section__(".frunk_bss")))
-
-#ifndef IN_UNIT_TESTS
-#define PLACE_SDRAM_BSS __attribute__((__section__(".sdram_bss")))
-#define PLACE_SDRAM_DATA __attribute__((__section__(".sdram_data")))
-#define PLACE_SDRAM_RODATA __attribute__((__section__(".sdram_rodata")))
-// #define PLACE_SDRAM_TEXT __attribute__((__section__(".sdram_text"))) // Paul: I had problems with execution from
-// SDRAM, maybe timing?
-#else
+// These place data in specific RZ/A1 memory regions, which only means anything when linking the real
+// firmware. Under unit tests we build for the host, and on macOS a bare section name is a hard error
+// ("mach-o section specifier requires a segment and section separated by a comma"), so any test that
+// touches a translation unit using them fails to compile. That is why ./dbt test could not run on a
+// Mac at all. Placement is irrelevant to a host test, so compile them away.
+#ifdef IN_UNIT_TESTS
+#define PLACE_INTERNAL_FRUNK
 #define PLACE_SDRAM_BSS
 #define PLACE_SDRAM_DATA
 #define PLACE_SDRAM_RODATA
-#define PLACE_SDRAM_TEXT
+#else
+// Paul: It seems this area is not executable, could not find a reason in the datasheet, marked NOLOAD now
+#define PLACE_INTERNAL_FRUNK __attribute__((__section__(".frunk_bss")))
+
+#define PLACE_SDRAM_BSS __attribute__((__section__(".sdram_bss")))
+#define PLACE_SDRAM_DATA __attribute__((__section__(".sdram_data")))
+#define PLACE_SDRAM_RODATA __attribute__((__section__(".sdram_rodata")))
 #endif
+// #define PLACE_SDRAM_TEXT __attribute__((__section__(".sdram_text"))) // Paul: I had problems with execution from
+// SDRAM, maybe timing?

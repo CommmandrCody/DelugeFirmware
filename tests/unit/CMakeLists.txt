@@ -59,6 +59,9 @@ file(GLOB_RECURSE deluge_SOURCES
         ../../src/deluge/model/sync.cpp
         # For chord tests
         ../../src/deluge/gui/ui/keyboard/chords.cpp
+        # chords.cpp formats names with sprintf, which the firmware redirects to its own
+        # embedded printf (sprintf_). Without this the unit tests fail to LINK.
+        ../../src/lib/printf.c
         # For clock output scheduler tests
         ../../src/deluge/playback/clock_output_scheduler.cpp
         # For name comparison / default naming tests

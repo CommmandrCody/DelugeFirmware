@@ -463,32 +463,14 @@ void setupBlankSong() {
 
 #pragma GCC push
 #pragma GCC diagnostic ignored "-Wstack-usage="
-/// Can only happen after settings, which includes default settings, have been read
-void setupStartupSong() {
+/// Loads whatever the user's startup-song setting asks for. Returns early on any of several
+/// failure paths (no song configured, song missing, no template, crashed previous boot).
+static void loadStartupSong() {
 
 	auto startupSongMode = FlashStorage::defaultStartupSongMode;
 	auto defaultSongFullPath = "SONGS/DEFAULT.XML";
 	auto filename =
 	    startupSongMode == StartupSongMode::TEMPLATE ? defaultSongFullPath : runtimeFeatureSettings.getStartupSong();
-
-	// Recovery: if an unsaved song was left behind (power loss), OFFER it once the normal startup
-	// song is up. Presence of the file means unsaved work existed (a Save or a load-away deletes it).
-	//
-	// This used to swap the startup song for the recovery file silently, announcing itself only with
-	// console text. On a 7-seg that scrolls past in a second, so the Deluge would come up holding a
-	// song the user had not asked for and give them almost no clue why. It reads as a broken
-	// instrument rather than a rescued jam.
-	//
-	// So the ordering is inverted: load what the user expects FIRST, then offer the recovery as a
-	// prompt they can decline. It also fails in the right direction. If the prompt never renders for
-	// any reason, they are sitting in their own song instead of a stranger's.
-	//
-	// Declining is safe: the boot path calls loadSongUI.performLoad() directly and does NOT go
-	// through the interactive wrapper that clears the recovery file, so saying no keeps the jam on
-	// the card. It stops being offered as soon as the user saves or loads a song by hand.
-	bool offerRecovery =
-	    StorageManager::fileExists("SYSTEM/RECOVER.XML")
-	    && runtimeFeatureSettings.get(RuntimeFeatureSettingType::AutosaveRecovery) == RuntimeFeatureStateToggle::On;
 
 	String failSafePath;
 	failSafePath.concatenate("SONGS/__STARTUP_OFF_CHECK_");
@@ -562,11 +544,6 @@ void setupStartupSong() {
 				// Wipe the name so the Save action asks you for a new song
 				currentSong->name.clear();
 			}
-			if (offerRecovery) {
-				// The user's own song is loaded and on screen. NOW ask, on top of it, so declining
-				// costs nothing and the prompt has something sane sitting behind it.
-				openUI(&deluge::gui::context_menu::recoverSong);
-			}
 		}
 		else {
 			// what just failed??
@@ -579,6 +556,37 @@ void setupStartupSong() {
 		[[fallthrough]];
 	default:
 		return;
+	}
+}
+
+/// Can only happen after settings, which includes default settings, have been read
+void setupStartupSong() {
+	// Decide BEFORE loading. The load can leave a RECOVER.XML of its own behind, and we only want to
+	// offer work that predates this boot.
+	bool offerRecovery =
+	    StorageManager::fileExists("SYSTEM/RECOVER.XML")
+	    && runtimeFeatureSettings.get(RuntimeFeatureSettingType::AutosaveRecovery) == RuntimeFeatureStateToggle::On;
+
+	loadStartupSong();
+
+	// Recovery: an unsaved song was left behind by a power loss. Offer it, don't impose it.
+	//
+	// B1 loaded RECOVER.XML INSTEAD of the startup song, announcing itself only with console text
+	// that scrolls past a 7-seg in about a second. The Deluge came up holding a song the user never
+	// asked for, which reads as a broken instrument rather than a rescued jam.
+	//
+	// So the offer sits AFTER the load and OUTSIDE it. After, so the user is already looking at
+	// whatever they normally boot into and declining costs nothing. Outside, because loadStartupSong
+	// returns early on half a dozen paths - no song configured, song missing, no template, BLANK
+	// mode, crashed previous boot - and those are exactly the situations where unsaved work is most
+	// likely to be the only copy. An earlier version of this nested the offer inside the successful
+	// load and silently never fired on a card whose startup song didn't exist.
+	//
+	// Declining destroys nothing: this path calls loadSongUI.performLoad() directly and skips the
+	// interactive wrapper that clears the recovery file, so the jam stays put. It stops being
+	// offered once the user saves or loads a song by hand, both of which clear it.
+	if (offerRecovery) {
+		openUI(&deluge::gui::context_menu::recoverSong);
 	}
 }
 #pragma GCC pop

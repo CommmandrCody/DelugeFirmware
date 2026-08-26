@@ -64,7 +64,7 @@ private:
 	static constexpr int32_t kBlockW = 7;       // each grid block is 7 columns wide
 
 	uint8_t getScaleIntervals(uint8_t* ivOut);
-	uint8_t buildChordAtDegree(uint8_t deg, int32_t y, const uint8_t* iv, uint8_t sc, uint8_t keyRoot,
+	uint8_t buildChordAtDegree(int32_t deg, int32_t y, const uint8_t* iv, uint8_t sc, uint8_t keyRoot,
 	                           int16_t* notesOut, uint8_t maxNotes, uint8_t* rootPcOut, char* romanOut, char* absOut);
 	int32_t isoNoteAt(int32_t localX, int32_t y);        // in-key mapping (localX = iso column 0..6)
 	int32_t isoNoteChromatic(int32_t localX, int32_t y); // chromatic isomorphic mapping (localX 0..6)

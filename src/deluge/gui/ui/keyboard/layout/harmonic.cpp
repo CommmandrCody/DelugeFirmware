@@ -405,6 +405,12 @@ constexpr int32_t kBtnCalc = kDisplayHeight - 1; // pal-ctrl: next-chord Calcula
 // not a derived one.
 constexpr uint8_t kAutoAuditionFrames = 22;
 
+/// Which degree a palette column shows, given how far the palette is scrolled.
+/// Continuous: scroll far enough right and column 0 is showing the NEXT octave's tonic.
+inline int32_t degreeAtColumn(int32_t localColumn, int32_t scrollSteps) {
+	return localColumn + scrollSteps;
+}
+
 constexpr int32_t kBtnBass = kDisplayHeight - 3;                // pal-ctrl: BASS follow on/off (hold+dial to bind)
 constexpr int32_t kBtnStack = 3;                                // pal-ctrl: octave STACK / picker
 constexpr int32_t kBtnSpread = 2;                               // pal-ctrl: SPREAD (drop-root open)
@@ -904,7 +910,7 @@ void KeyboardLayoutHarmonic::recomputeSuggestions(uint8_t keyRoot, const uint8_t
 	}
 }
 
-uint8_t KeyboardLayoutHarmonic::buildChordAtDegree(uint8_t deg, int32_t y, const uint8_t* iv, uint8_t sc,
+uint8_t KeyboardLayoutHarmonic::buildChordAtDegree(int32_t deg, int32_t y, const uint8_t* iv, uint8_t sc,
                                                    uint8_t keyRoot, int16_t* notesOut, uint8_t maxNotes,
                                                    uint8_t* rootPcOut, char* romanOut, char* absOut) {
 	if (romanOut) {
@@ -916,8 +922,14 @@ uint8_t KeyboardLayoutHarmonic::buildChordAtDegree(uint8_t deg, int32_t y, const
 	if (sc == 0) {
 		return 0;
 	}
-	int32_t anchor = getState().harmonic.octaveBase * 12 + keyRoot;
-	uint8_t rootPc = (uint8_t)((keyRoot + iv[deg]) % 12);
+	// `deg` is a CONTINUOUS degree index, not 0..sc-1. Scrolling the palette walks it past the top of
+	// the scale and into the next octave, so the columns slide sideways through the whole range
+	// instead of sitting on seven fixed degrees with a separate register jump. Cody: "move
+	// horizontally across the octave so the columns move to the left and right".
+	int32_t degOct = floordiv((int32_t)deg, sc);   // how many octaves past the base this column sits
+	int32_t degLocal = floormod((int32_t)deg, sc); // which scale degree it lands on
+	int32_t anchor = getState().harmonic.octaveBase * 12 + keyRoot + degOct * 12;
+	uint8_t rootPc = (uint8_t)((keyRoot + iv[degLocal]) % 12);
 	if (rootPcOut) {
 		*rootPcOut = rootPc;
 	}
@@ -926,7 +938,7 @@ uint8_t KeyboardLayoutHarmonic::buildChordAtDegree(uint8_t deg, int32_t y, const
 	const Richness& rich = kLadder[yc];
 	uint8_t count = 0;
 	for (uint8_t k = 0; k < rich.count && count < maxNotes; k++) {
-		int32_t st = (int32_t)deg + rich.steps[k];
+		int32_t st = degLocal + rich.steps[k];
 		int32_t midi = anchor + floordiv(st, sc) * 12 + iv[floormod(st, sc)];
 		if (midi < 0) {
 			midi = 0;
@@ -953,8 +965,8 @@ uint8_t KeyboardLayoutHarmonic::buildChordAtDegree(uint8_t deg, int32_t y, const
 		sprintf(absOut, "%s%s", noteNameInKey(rootPc, flats), rich.suffix);
 	}
 	if (romanOut && sc == 7) {
-		int8_t third = (int8_t)(((int32_t)iv[(deg + 2) % 7] - iv[deg] + 12) % 12);
-		int8_t fifth = (int8_t)(((int32_t)iv[(deg + 4) % 7] - iv[deg] + 12) % 12);
+		int8_t third = (int8_t)(((int32_t)iv[(degLocal + 2) % 7] - iv[degLocal] + 12) % 12);
+		int8_t fifth = (int8_t)(((int32_t)iv[(degLocal + 4) % 7] - iv[degLocal] + 12) % 12);
 		bool minorish = (third == 3);
 		bool dim = (fifth == 6);
 		bool aug = (fifth == 8);
@@ -1124,8 +1136,8 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 						int16_t nbuf[kMaxChordKeyboardSize];
 						uint8_t rpc = 0;
 						char roman[32], abs[32];
-						buildChordAtDegree((uint8_t)ci.local, pressed.y, iv, sc, keyRoot, nbuf, kMaxChordKeyboardSize,
-						                   &rpc, roman, abs);
+						buildChordAtDegree(degreeAtColumn(ci.local, getState().harmonic.scrollSteps), pressed.y, iv, sc,
+						                   keyRoot, nbuf, kMaxChordKeyboardSize, &rpc, roman, abs);
 						char buf[40];
 						snprintf(buf, sizeof buf, "%s  %s", roman, abs);
 						display->displayPopup(buf);
@@ -1133,8 +1145,8 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 						int16_t nb2[kMaxChordKeyboardSize];
 						uint8_t rpc2 = 0;
 						char roman2[32], abs2[32];
-						buildChordAtDegree((uint8_t)ci.local, 2, iv, sc, keyRoot, nb2, kMaxChordKeyboardSize, &rpc2,
-						                   roman2, abs2);
+						buildChordAtDegree(degreeAtColumn(ci.local, getState().harmonic.scrollSteps), 2, iv, sc,
+						                   keyRoot, nb2, kMaxChordKeyboardSize, &rpc2, roman2, abs2);
 						if (roman2[0] == '\0') {
 							snprintf(roman2, sizeof roman2, "deg%d", (int)ci.local + 1);
 						}
@@ -1195,7 +1207,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 		if (ci.region == REG_PAL && ci.local < numCols) {
 			// The chord explorer — columns are the diatonic degrees, in order.
-			uint8_t deg = (uint8_t)ci.local;
+			int32_t deg = degreeAtColumn(ci.local, getState().harmonic.scrollSteps);
 			int16_t notes[kMaxChordKeyboardSize];
 			uint8_t rootPc = 0;
 			char roman[32], abs[32];
@@ -1795,19 +1807,26 @@ void KeyboardLayoutHarmonic::handleHorizontalEncoder(int32_t offset, bool shiftE
 		pushChordState();
 		return;
 	}
-	// Nothing held: the horizontal wheel moves the PALETTE's register, matching the way the palette
-	// is laid out across the grid. SHIFT still scrolls through the degrees.
+	// Nothing held: the horizontal wheel SCROLLS the palette, and it scrolls continuously - past the
+	// top of the scale and on into the next octave, so the columns slide sideways through the whole
+	// range the way the iso does vertically. Cody: "the palette to live scroll along ... move
+	// horizontally across the octave so the columns move to the left and right".
+	//
+	// This replaces a discrete register jump. One motion now covers what used to be two ideas
+	// (which degree, and which octave), so there is nothing to explain about how they interact.
 	if (!shiftEnabled) {
 		KeyboardStateHarmonic& hs = getState().harmonic;
-		int32_t next = std::clamp(hs.octaveBase + offset, 1_i32, 8_i32);
-		if (next != hs.octaveBase) {
-			hs.octaveBase = next;
-			char buf[8];
-			sprintf(buf, "OCT%d", (int)hs.octaveBase);
-			display->displayPopup(buf);
-			precalculate();
-			pushChordState(); // re-voice, so a held chord moves register as you turn
+		uint8_t sc = getScaleNoteCount();
+		if (sc == 0) {
+			return;
 		}
+		// Bounded by where the chords would run off the ends of MIDI rather than by an arbitrary
+		// number of octaves: roughly the base register down to one, and up to eight.
+		int32_t lo = -(int32_t)sc * (hs.octaveBase - 1);
+		int32_t hi = (int32_t)sc * (8 - hs.octaveBase);
+		hs.scrollSteps = std::clamp(hs.scrollSteps + offset, lo, hi);
+		precalculate();
+		pushChordState(); // a held chord follows the scroll, and re-sounds so you hear where you are
 		return;
 	}
 	horizontalEncoderHandledByColumns(offset, shiftEnabled);
@@ -1927,7 +1946,11 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				continue;
 			}
-			RGB hue = kDegreeHue[local % 7];
+			// Colour follows the DEGREE, not the column. Otherwise scrolling would slide the chords
+			// while the colours stayed nailed to the grid, and the palette would look static while
+			// its contents changed underneath - the most confusing possible combination.
+			// Following the degree means you SEE the palette move: the colours travel with it.
+			RGB hue = kDegreeHue[floormod(degreeAtColumn(local, getState().harmonic.scrollSteps), 7)];
 			bool haveCalc = (numSuggestions > 0);
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
 				RGB c = hue.adjustFractional(kRichBright[y], 255);

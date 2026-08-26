@@ -54,7 +54,22 @@ void SongChordMemColumn::handlePad(ModelStackWithTimelineCounter* modelStackWith
 	else {
 		activeChordMem = 0xFF;
 		// Release: store the held notes into the slot if it's empty (or Shift), else Shift clears it.
-		if ((!ChordMemService::noteCount(pad.y) || Buttons::isShiftButtonPressed()) && currentNotesState.count) {
+		// Ask the layout whether it holds a chord of its own first. The harmonic palette does: you
+		// pick, shape, listen, shape again, and only then bank - by which point nothing is ringing,
+		// so storing the sounding notes would store nothing. Every other layout returns 0 here and
+		// keeps the old behaviour exactly.
+		int16_t held[kMaxNotesChordMem];
+		uint8_t heldCount = layout ? layout->chordToBank(held, kMaxNotesChordMem) : 0;
+		bool slotFree = (!ChordMemService::noteCount(pad.y) || Buttons::isShiftButtonPressed());
+
+		if (slotFree && heldCount > 0) {
+			NotesState banked{};
+			for (uint8_t i = 0; i < heldCount && banked.count < kMaxNotesChordMem; i++) {
+				banked.enableNote((uint8_t)held[i], 64);
+			}
+			ChordMemService::store(pad.y, banked);
+		}
+		else if (slotFree && currentNotesState.count) {
 			ChordMemService::store(pad.y, currentNotesState);
 		}
 		else if (Buttons::isShiftButtonPressed()) {

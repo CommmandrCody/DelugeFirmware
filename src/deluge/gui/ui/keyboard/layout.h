@@ -97,6 +97,17 @@ public:
 	/// the layout is gone with nothing left on screen to explain why.
 	virtual void releaseExternalNotes() {}
 
+	/// The chord this layout would have you BANK, if it holds one independently of what is sounding.
+	///
+	/// Banking normally stores whatever is audible right now, which is right for a layout where you
+	/// hold a chord down and press save. The harmonic palette doesn't work that way: you pick a
+	/// chord, shape it, listen, shape it again, and only then bank - and by that point nothing is
+	/// ringing. Storing "what's sounding" there would bank silence.
+	///
+	/// Return 0 to mean "I have no opinion, use the sounding notes" - which is what every other
+	/// layout does, so their behaviour is untouched.
+	virtual uint8_t chordToBank(int16_t* out, uint8_t maxOut) { return 0; }
+
 protected:
 	inline bool isKit() { return getCurrentOutputType() == OutputType::KIT; }
 	/// Song root note can be in any octave, layouts get the normalized one

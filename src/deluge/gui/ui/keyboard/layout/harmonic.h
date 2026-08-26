@@ -117,6 +117,7 @@ private:
 	/// Sound `note` on the bound bass track, releasing whatever it held. note<0 just releases.
 	void soundBassNote(int32_t note, uint8_t velocity);
 	void releaseExternalNotes() override; // the bass plays another track, so it can't self-release
+	uint8_t chordToBank(int16_t* out, uint8_t maxOut) override; // the loaded chord, not the audible one
 	/// Frames left of an automatic re-sound after an adjustment. Deliberately a short RING, not a
 	/// latch: a sustained chord kept currentNotesState non-empty, which pinned the keyboard in
 	/// UI_MODE_AUDITIONING and locked out SONG/CLIP/KIT/SELECT. That cost us a whole revert in July.

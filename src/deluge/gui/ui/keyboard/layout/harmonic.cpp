@@ -61,26 +61,36 @@ struct ColInfo {
 	Region region;
 	int32_t local; // index within a 7-wide block (0..6); 0 for control columns
 };
-constexpr int32_t kBlockWidth = 7;
+constexpr int32_t kPalWidth = 8;           // a FULL octave of chords: tonic to tonic
+constexpr int32_t kIsoWidth = 7;           // the playing surface
+constexpr int32_t kBlockWidth = kIsoWidth; // legacy name, iso-sized
 
 // Fixed layout: PALETTE 0-6 | pal-ctrl 7 | iso-ctrl 8 | ISO 9-15.
 // Handedness used to mirror all of this. Cody: "swap was a thought and not a necessity" - so the
 // whole conditional is gone, and every column is now where it looks like it is.
+// PALETTE 0-7 | CONTROL 8 | ISO 9-15.
+//
+// The palette is EIGHT wide so you see a complete octave of chords, tonic to tonic. At seven the
+// octave boundary was invisible: you saw seven degrees and had to know where the next octave began.
+// At eight you see the tonic at both ends, so the span you are looking at IS the octave - which
+// matters much more now the palette scrolls, because otherwise the window never lines up with
+// anything musical.
+//
+// ONE control column, not two. The old second column held only view preferences - what to show,
+// which overlay, whether to snap - and none of them are things you touch while playing. They are
+// settings wearing pad costumes, so they went to the settings menu and their column went to the
+// palette.
 inline ColInfo colInfoFor(int32_t x) {
 	constexpr int32_t palStart = 0;
-	constexpr int32_t isoStart = 9;
-	constexpr int32_t palCtrl = 7;
-	constexpr int32_t isoCtrl = 8;
-	if (x == palCtrl) {
+	constexpr int32_t ctrlCol = kPalWidth;      // 8
+	constexpr int32_t isoStart = kPalWidth + 1; // 9
+	if (x == ctrlCol) {
 		return {REG_PAL_CTRL, 0};
 	}
-	if (x == isoCtrl) {
-		return {REG_ISO_CTRL, 0};
-	}
-	if (x >= palStart && x < palStart + kBlockWidth) {
+	if (x >= palStart && x < palStart + kPalWidth) {
 		return {REG_PAL, x - palStart};
 	}
-	if (x >= isoStart && x < isoStart + kBlockWidth) {
+	if (x >= isoStart && x < isoStart + kIsoWidth) {
 		return {REG_ISO, x - isoStart};
 	}
 	return {REG_NONE, 0};
@@ -393,8 +403,8 @@ constexpr int32_t kBtnShowChord = kDisplayHeight - 2; // iso-ctrl: show / hide t
 constexpr int32_t kBtnSticky = kDisplayHeight - 3;    // iso-ctrl: sticky chord voicing
 constexpr int32_t kBtnLattice = kDisplayHeight - 4;   // iso-ctrl: full chord lattice on/off
 constexpr int32_t kBtnSnap = 3;                       // iso-ctrl: SNAP — iso jumps to the chord's octave on pick
-constexpr int32_t kBtnProg = 2;                       // iso-ctrl: PROGRESSION hold-to-dial (encoders)
-constexpr int32_t kBtnEdit = 1;                       // iso-ctrl: voice-edit toggle (sculpt notes ON the iso surface)
+constexpr int32_t kBtnProg = kDisplayHeight - 1;      // ctrl: PROGRESSION hold-to-dial
+constexpr int32_t kBtnEdit = kDisplayHeight - 3;      // ctrl: sculpt notes on the iso
 constexpr int32_t kBtnAudition = 0;      // iso-ctrl: AUDITION the voicing — momentary, hold to hear the chord
 constexpr uint8_t kIsoCtrlClearMask = 0; // iso-ctrl: row 2 free (for the Diff View); no clear pads here
 
@@ -411,7 +421,7 @@ inline int32_t degreeAtColumn(int32_t localColumn, int32_t scrollSteps) {
 	return localColumn + scrollSteps;
 }
 
-constexpr int32_t kBtnBass = kDisplayHeight - 3;                // pal-ctrl: BASS follow on/off (hold+dial to bind)
+constexpr int32_t kBtnBass = kDisplayHeight - 2;                // ctrl: BASS follow (hold+dial to bind)
 constexpr int32_t kBtnStack = 3;                                // pal-ctrl: octave STACK / picker
 constexpr int32_t kBtnSpread = 2;                               // pal-ctrl: SPREAD (drop-root open)
 constexpr int32_t kBtnInversion = 1;                            // pal-ctrl: INVERSION (cycle 0..3)
@@ -439,19 +449,15 @@ struct ControlPad {
 };
 
 constexpr ControlPad kControlPads[] = {
-    // pal-ctrl — CRIMSON column, beside the PALETTE
-    {REG_PAL_CTRL, kBtnCalc, "CALCULATOR", "CALC"},
+    // ONE column, and every pad on it changes the SOUND. Nothing here is a view preference, a mode,
+    // or a thing you set once - those went to the settings menu, because a pad you touch once a
+    // month is costing you a pad you'd touch every bar.
+    {REG_PAL_CTRL, kBtnProg, "PROGRESSION (HOLD + DIAL)", "PROG"},
     {REG_PAL_CTRL, kBtnBass, "BASS FOLLOW (HOLD + DIAL TO BIND)", "BASS"},
+    {REG_PAL_CTRL, kBtnEdit, "EDIT NOTES", "EDIT"},
     {REG_PAL_CTRL, kBtnStack, "OCTAVE STACK PICKER", "STACK"},
     {REG_PAL_CTRL, kBtnSpread, "SPREAD (DROP-ROOT)", "SPREAD"},
     {REG_PAL_CTRL, kBtnInversion, "INVERSION", "INV"},
-    // iso-ctrl — PURPLE column, beside the ISO
-    {REG_ISO_CTRL, kBtnIsoView, "VIEW: IN-KEY / CHROMATIC", "VIEW"},
-    {REG_ISO_CTRL, kBtnShowChord, "SHOW CHORD SHAPE", "SHOW"},
-    {REG_ISO_CTRL, kBtnLattice, "OVERLAY: ONE / LATTICE / DIFF", "OVERLAY"},
-    {REG_ISO_CTRL, kBtnSnap, "SNAP ISO TO CHORD", "SNAP"},
-    {REG_ISO_CTRL, kBtnProg, "PROGRESSION (HOLD + DIAL)", "PROG"},
-    {REG_ISO_CTRL, kBtnEdit, "EDIT NOTES", "EDIT"},
 };
 
 // The point of the table is that it can be rearranged, so the compiler checks the rearrangement.
@@ -774,6 +780,16 @@ void KeyboardLayoutHarmonic::soundBassNote(int32_t note, uint8_t velocity) {
 	}
 }
 
+uint8_t KeyboardLayoutHarmonic::chordToBank(int16_t* out, uint8_t maxOut) {
+	// Bank what is LOADED, not what happens to be sounding. The whole point of the palette is that
+	// you pick a chord, shape it, listen, shape it again - and only then bank. By that moment the
+	// audition ring has long stopped, so "store the sounding notes" would store nothing at all.
+	if (chordNoteCount == 0) {
+		return 0; // nothing loaded: fall back to the sounding notes, like every other layout
+	}
+	return buildVoicing(out, maxOut);
+}
+
 void KeyboardLayoutHarmonic::releaseExternalNotes() {
 	// The bass sounds on a DIFFERENT instrument, so the screen's per-frame note diff never sees it
 	// and will never turn it off. Without this it hangs when you leave the layout.
@@ -1021,7 +1037,8 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	uint8_t iv[12];
 	uint8_t sc = getScaleIntervals(iv);
 	uint8_t keyRoot = (uint8_t)getRootNote();
-	uint8_t numCols = (sc > 7) ? 7 : sc;
+	// One full octave plus the closing tonic: 8 columns for a 7-note scale, 6 for a pentatonic.
+	uint8_t numCols = (uint8_t)std::min<int32_t>((int32_t)sc + 1, kPalWidth);
 	heldCols = 0;
 
 	// Live held-pad feedback: rebuild from the current press state every call (the array is the full set of
@@ -1455,13 +1472,21 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	// BASS bind: hold the crimson BASS pad and the vertical wheel walks the song's SYNTH tracks.
 	// Same hold-to-dial shape as PROG above, so it's one gesture to learn rather than two.
 	bassPadHeld = (palCtrlNow & (uint8_t)(1u << kBtnBass)) != 0;
-	if (risingIso & (uint8_t)(1u << kBtnEdit)) {
-		hs.editVoicing = !hs.editVoicing;
-		if (hs.editVoicing) {
-			hs.showChord = true;   // editing needs the chord shown
-			hs.stickyChord = true; // and HELD — so the chord survives editing/playing, doesn't vanish on a tap
+	// EDIT is MOMENTARY, not a mode. Hold it and tap iso pads to add or remove notes from the loaded
+	// chord; let go and you are playing again. A latching edit mode means iso taps mean two different
+	// things depending on a state you cannot see, and you have to remember to leave it - which is
+	// exactly the kind of thing that breaks the flow of picking, shaping and banking a chord.
+	//
+	// Same shape as every other control here: hold the pad, then act.
+	{
+		bool editNow = (palCtrlNow & (uint8_t)(1u << kBtnEdit)) != 0;
+		if (editNow != hs.editVoicing) {
+			hs.editVoicing = editNow;
+			if (editNow) {
+				hs.showChord = true; // you cannot sculpt what you cannot see
+			}
+			display->displayPopup(editNow ? "EDIT" : "PLAY");
 		}
-		display->displayPopup(hs.editVoicing ? "EDIT" : "PLAY");
 	}
 	if (risingIso & kIsoCtrlClearMask) {
 		clearSelection();
@@ -1584,7 +1609,8 @@ void KeyboardLayoutHarmonic::loadProgStep() {
 	uint8_t iv[12];
 	uint8_t sc = getScaleIntervals(iv);
 	uint8_t keyRoot = (uint8_t)getRootNote();
-	uint8_t numCols = (sc > 7) ? 7 : sc;
+	// One full octave plus the closing tonic: 8 columns for a 7-note scale, 6 for a pentatonic.
+	uint8_t numCols = (uint8_t)std::min<int32_t>((int32_t)sc + 1, kPalWidth);
 	uint8_t deg = (uint8_t)p.steps[h.progStep].degree;
 	if (deg >= numCols) {
 		deg = 0; // guard for scales with fewer than 7 notes
@@ -1847,7 +1873,8 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	uint8_t iv[12];
 	uint8_t sc = getScaleIntervals(iv);
 	uint8_t keyRoot = (uint8_t)getRootNote();
-	uint8_t numCols = (sc > 7) ? 7 : sc;
+	// One full octave plus the closing tonic: 8 columns for a 7-note scale, 6 for a pentatonic.
+	uint8_t numCols = (uint8_t)std::min<int32_t>((int32_t)sc + 1, kPalWidth);
 	bool chromatic = getState().harmonic.isoChromatic;
 	bool showChord = getState().harmonic.showChord;
 	bool sticky = getState().harmonic.stickyChord;

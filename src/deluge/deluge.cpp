@@ -465,12 +465,45 @@ void setupBlankSong() {
 #pragma GCC diagnostic ignored "-Wstack-usage="
 /// Loads whatever the user's startup-song setting asks for. Returns early on any of several
 /// failure paths (no song configured, song missing, no template, crashed previous boot).
+/// Is this a path the user actually chose, or an unset setting?
+///
+/// A Deluge that has never saved a song stores an empty name, which reaches us as "SONGS/.XML" -
+/// a well-formed path with nothing in it. Treating that as a missing song produces a "Song missing"
+/// error on a machine where nothing is wrong, every single boot. Nothing is broken; the user simply
+/// never picked a startup song.
+static bool isConfiguredSongPath(char const* path) {
+	if (path == nullptr || *path == 0) {
+		return false;
+	}
+	// Find the basename, then check there's something before the extension.
+	char const* base = path;
+	for (char const* c = path; *c != 0; c++) {
+		if (*c == '/') {
+			base = c + 1;
+		}
+	}
+	return *base != 0 && *base != '.';
+}
+
 static void loadStartupSong() {
 
 	auto startupSongMode = FlashStorage::defaultStartupSongMode;
 	auto defaultSongFullPath = "SONGS/DEFAULT.XML";
 	auto filename =
 	    startupSongMode == StartupSongMode::TEMPLATE ? defaultSongFullPath : runtimeFeatureSettings.getStartupSong();
+
+	// No startup song was ever chosen. That is a normal, unconfigured Deluge, not a fault, so it
+	// must not produce an error. Use the template if one happens to exist, otherwise come up blank
+	// and say nothing. (Any unsaved work still gets offered by setupStartupSong afterwards.)
+	if (startupSongMode != StartupSongMode::TEMPLATE && !isConfiguredSongPath(filename)) {
+		if (StorageManager::fileExists(defaultSongFullPath)) {
+			filename = defaultSongFullPath;
+			startupSongMode = StartupSongMode::TEMPLATE;
+		}
+		else {
+			return; // blank song, quietly
+		}
+	}
 
 	String failSafePath;
 	failSafePath.concatenate("SONGS/__STARTUP_OFF_CHECK_");
@@ -522,14 +555,20 @@ static void loadStartupSong() {
 				f_unlink(failSafePath.get());
 				return;
 			}
-			display->consoleText("Song missing");
-			// user didn't ask for the template, but if it exists let's use it instead
+			// A song WAS chosen and it has genuinely gone (renamed, deleted, different card). Worth
+			// one word, because the user's expectation is about to be broken. One, not two: on a
+			// 7-seg a second message just shoves the first off the display before it can be read.
+			//
+			// The unconfigured case never reaches here - it was handled quietly at the top.
 			if (StorageManager::fileExists(defaultSongFullPath)) {
-				display->consoleText("Using template");
+				display->consoleText("Startup song missing, using template");
 				filename = defaultSongFullPath;
 				startupSongMode = StartupSongMode::TEMPLATE;
 			}
 			else {
+				// Chosen song gone and no template to fall back on. Come up blank, but say so -
+				// silence here would look like the Deluge had forgotten the song on its own.
+				display->consoleText("Startup song missing");
 				// cleanup, this wasn't a crash
 				f_unlink(failSafePath.get());
 				return;

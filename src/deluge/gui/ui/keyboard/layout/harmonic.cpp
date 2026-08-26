@@ -553,11 +553,15 @@ const char* controlPadId(Region region, int32_t y) {
 // Reserved control-zone colours — a "control family" (CRIMSON + PURPLE) used NOWHERE else in Chroma. The two
 // centre columns get DIFFERENT hues so they're instantly distinguishable: palette-control = CRIMSON,
 // iso-control = PURPLE. On = bright, off = dim, whole column faintly tinted so each reads as its own zone.
-const RGB kCtrlHue =
-    RGB{.r = 180,
-        .g = 20,
-        .b = 55}; // palette-control = CRIMSON (dark+warm; far from the white suggestion flash + magenta degree)
-const RGB kCtrlHueIso = RGB{.r = 150, .g = 80, .b = 255}; // iso-control = PURPLE
+// Cody, on hardware: "we need VERY distinctive, they aren't distinctive enough and it is messy."
+// He was right. Crimson (180,20,55) against purple (150,80,255) share a red channel and both read
+// as "dark and cool-ish" under stage light, so the two columns blurred into one stripe.
+//
+// AMBER vs CYAN instead: opposite ends of the spectrum, no channel in common, and both far from
+// the palette's degree hues and the white suggestion flash. They also survive being dimmed, which
+// matters because most pads in these columns are OFF most of the time.
+const RGB kCtrlHue = RGB{.r = 255, .g = 140, .b = 0};    // palette-control = AMBER (the chord)
+const RGB kCtrlHueIso = RGB{.r = 0, .g = 190, .b = 210}; // iso-control = CYAN (the surface)
 // The iso-control column reads in three BANDS (SEE → SHAPE → HEAR), each a distinct shade of the purple
 // family so the column groups at a glance instead of one undifferentiated list.
 const RGB kHueSee = RGB{.r = 90, .g = 115, .b = 255};   // SEE   band (lens / overlays): bluer purple
@@ -1713,32 +1717,38 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 		return;
 	}
 
-	// Octave is a continuous thing, so it belongs on a knob. It used to cost two pads in the control
-	// column, which is a lot of surface for something a wheel does better - and those two pads are
-	// now free for controls that genuinely need to be a button.
+	// OCTAVE — one wheel, both halves, together.
 	//
-	// The two octaves split along the same line as the two columns: plain turn moves what you SEE
-	// (the iso surface), SHIFT+turn moves what you HEAR (the register the chords are built in).
-	if (Buttons::isShiftButtonPressed()) {
-		KeyboardStateHarmonic& hs = getState().harmonic;
-		int32_t next = hs.octaveBase + offset;
-		hs.octaveBase = std::clamp(next, 1_i32, 8_i32);
-		char buf[8];
-		sprintf(buf, "OCT%d", (int)hs.octaveBase);
-		display->displayPopup(buf);
-		precalculate();
-		return;
+	// These were two separate octaves: the chord register and the iso view, moved by two different
+	// gestures. Cody, on being told which was which: "why not adjust BOTH at the same time cmon".
+	// Quite. Nobody wants the chords in one register while the surface they're played on sits in
+	// another - and the layout already has a SNAP control whose whole job is dragging the two back
+	// together, which rather admits they wanted to be one thing all along.
+	//
+	// So a plain turn moves both, and there is no hidden modifier to remember for the ordinary case.
+	// Before this, the common gesture was silent and the rare one announced itself, so you could
+	// turn the wheel and have no idea what had moved.
+	//
+	// SHIFT+turn still moves the iso alone, for parking the surface high to riff over a low chord.
+	// That's the rare thing, so it's the one that costs a modifier.
+	KeyboardStateHarmonic& hs = getState().harmonic;
+	bool isoOnly = Buttons::isShiftButtonPressed();
+
+	int32_t iso = std::clamp(hs.isoOctave + offset, 1_i32, 8_i32);
+	bool isoMoved = (iso != hs.isoOctave);
+	hs.isoOctave = iso;
+
+	if (!isoOnly) {
+		// Move the chord register with it, but only as far as the iso actually travelled, so the two
+		// can't drift apart when one hits its end stop.
+		if (isoMoved) {
+			hs.octaveBase = std::clamp(hs.octaveBase + offset, 1_i32, 8_i32);
+		}
 	}
 
-	// Vertical encoder scrolls the ISO independently (like the native iso keyboard) — the "octave shown".
-	KeyboardStateHarmonic& state = getState().harmonic;
-	state.isoOctave += offset;
-	if (state.isoOctave < 1) {
-		state.isoOctave = 1;
-	}
-	if (state.isoOctave > 8) {
-		state.isoOctave = 8;
-	}
+	char buf[8];
+	sprintf(buf, isoOnly ? "ISO%d" : "OCT%d", (int)(isoOnly ? hs.isoOctave : hs.octaveBase));
+	display->displayPopup(buf);
 	precalculate();
 }
 

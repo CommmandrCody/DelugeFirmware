@@ -993,6 +993,9 @@ PLACE_SDRAM_DATA Language english{
         {STRING_FOR_CHORD_BRUSH_CLEARED, "Cleared"},
         {STRING_FOR_VOICING_UP, "Voicing up"},
         {STRING_FOR_VOICING_DOWN, "Voicing down"},
+        {STRING_FOR_RECOVER_UNSAVED_QMARK, "Recover unsaved song?"},
+        {STRING_FOR_RECOVER, "Recover"},
+        {STRING_FOR_COMMUNITY_FEATURE_AUTOSAVE_RECOVERY, "Autosave Recovery"},
     },
 };
 } // namespace deluge::l10n::built_in

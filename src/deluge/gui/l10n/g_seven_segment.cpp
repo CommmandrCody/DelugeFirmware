@@ -554,6 +554,9 @@ PLACE_SDRAM_DATA Language seven_segment{
         {STRING_FOR_CHORD_BRUSH_CLEARED, "CLR"},
         {STRING_FOR_VOICING_UP, "UP"},
         {STRING_FOR_VOICING_DOWN, "DOWN"},
+        {STRING_FOR_RECOVER_UNSAVED_QMARK, "RECV?"},
+        {STRING_FOR_RECOVER, "RECV"},
+        {STRING_FOR_COMMUNITY_FEATURE_AUTOSAVE_RECOVERY, "ASAV"},
     },
     &built_in::english,
 };

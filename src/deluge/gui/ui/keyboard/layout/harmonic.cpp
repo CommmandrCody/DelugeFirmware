@@ -809,6 +809,32 @@ void KeyboardLayoutHarmonic::pushChordState() {
 	// through here, so this is the one place that needs to ask for the re-sound.
 	autoAuditionFrames = kAutoAuditionFrames;
 
+	// Work out WHICH notes moved, so the eye is told the same thing as the ear. A note that is in
+	// the new voicing but wasn't in the old one has just arrived; those are what pulse. Notes that
+	// merely stayed put are exactly the ones you don't need pointing out.
+	arrivedCount = 0;
+	for (uint8_t i = 0; i < vn && arrivedCount < kMaxVoice; i++) {
+		bool wasThere = false;
+		for (uint8_t j = 0; j < lastVoicedCount; j++) {
+			if (lastVoiced[j] == voiced[i]) {
+				wasThere = true;
+				break;
+			}
+		}
+		if (!wasThere) {
+			arrivedNotes[arrivedCount++] = voiced[i];
+		}
+	}
+	// A brand-new pick has nothing to compare against, so everything would "arrive" and the whole
+	// chord would flash. That says nothing about movement, so say nothing.
+	if (lastVoicedCount == 0) {
+		arrivedCount = 0;
+	}
+	lastVoicedCount = (vn > kMaxVoice) ? kMaxVoice : vn;
+	for (uint8_t i = 0; i < lastVoicedCount; i++) {
+		lastVoiced[i] = voiced[i];
+	}
+
 	// BASS FOLLOW: the root, an octave under the voicing's lowest note - the same note the bass
 	// spotlight has always drawn on the iso. This is where it stops being only a picture.
 	// Hooked here because this is the one place every chord change already passes through.
@@ -1318,6 +1344,10 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 
 	auto clearSelection = [&]() {
 		chordNoteCount = 0;
+		// Forget what the voicing was, so the NEXT pick doesn't pulse every note as "arrived" by
+		// comparing itself against a chord that is no longer on screen.
+		lastVoicedCount = 0;
+		arrivedCount = 0;
 		selDeg = -1;
 		selRichness = -1;
 		numSuggestions = 0;
@@ -2078,7 +2108,25 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				// the key's COLOUR — the root pops as the brightest expression of that colour, never white.
 				// ORDER MATTERS: the bright states (voicing, playing) win over the faint lattice backdrop, so a
 				// note you PLAY still lights up even when the lattice is on (the lattice is only the dim canvas).
-				if (diffOn && showChord && chordNoteCount > 0) {
+				// JUST MOVED: for exactly as long as the chord rings after an adjustment, the notes
+				// that arrived pulse. This is the visible half of "adjusting is auditioning" - without
+				// it you can hear the voicing change but not see which voice went where, which is
+				// what Cody meant by "how is the active chord revoiced, I don't see it".
+				// Checked BEFORE the diff view so a live adjustment wins over the chord-to-chord ghost.
+				bool justArrived = false;
+				if (autoAuditionFrames > 0 && showChord) {
+					for (uint8_t a = 0; a < arrivedCount; a++) {
+						if (arrivedNotes[a] == note) {
+							justArrived = true;
+							break;
+						}
+					}
+				}
+				if (justArrived) {
+					// Full-brightness breathe in the chord's own colour: unmistakably "this one moved".
+					out = chordHue.adjustFractional(pulse, 255);
+				}
+				else if (diffOn && showChord && chordNoteCount > 0) {
 					// VOICE-LEADING view: show the motion from the previous chord to this one.
 					bool inPrev = (prevPcMask & (uint16_t)(1u << pc)) != 0;
 					if (inChordExact(note)) {

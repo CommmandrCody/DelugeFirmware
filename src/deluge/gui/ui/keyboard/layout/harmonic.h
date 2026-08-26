@@ -122,6 +122,17 @@ private:
 	/// latch: a sustained chord kept currentNotesState non-empty, which pinned the keyboard in
 	/// UI_MODE_AUDITIONING and locked out SONG/CLIP/KIT/SELECT. That cost us a whole revert in July.
 	uint8_t autoAuditionFrames = 0;
+
+	/// The voicing as it was BEFORE the last change, and the notes that arrived because of it.
+	///
+	/// Adjusting a chord re-sounds it, but sound alone doesn't tell you WHAT moved - Cody, on the
+	/// re-voicing: "I don't see it". These let the notes that just arrived pulse on the iso for
+	/// exactly as long as the chord rings, so the ear and the eye are told the same thing at the
+	/// same moment.
+	int16_t lastVoiced[16] = {0};
+	uint8_t lastVoicedCount = 0;
+	int16_t arrivedNotes[16] = {0};
+	uint8_t arrivedCount = 0;
 	bool bassPadHeld = false; // BASS (crimson) held last frame — gates the bind dial, same shape as PROG
 
 	// LEARN inspect mode: while LEARN is held the whole surface goes SILENT and each pad just names itself.

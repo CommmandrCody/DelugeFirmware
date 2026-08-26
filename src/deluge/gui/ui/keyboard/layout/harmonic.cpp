@@ -399,7 +399,12 @@ constexpr int32_t kBtnAudition = 0;      // iso-ctrl: AUDITION the voicing — m
 constexpr uint8_t kIsoCtrlClearMask = 0; // iso-ctrl: row 2 free (for the Diff View); no clear pads here
 
 // VOICING controls live on the pal-ctrl column (they shape the CHORD, not the surface).
-constexpr int32_t kBtnCalc = kDisplayHeight - 1;                // pal-ctrl: next-chord Calculator on/off
+constexpr int32_t kBtnCalc = kDisplayHeight - 1; // pal-ctrl: next-chord Calculator on/off
+// How long an adjustment re-sounds for. Long enough to actually hear the chord, short enough that
+// it has clearly stopped before you reach for the next control. Tune by ear - this is a feel value,
+// not a derived one.
+constexpr uint8_t kAutoAuditionFrames = 22;
+
 constexpr int32_t kBtnBass = kDisplayHeight - 3;                // pal-ctrl: BASS follow on/off (hold+dial to bind)
 constexpr int32_t kBtnStack = 3;                                // pal-ctrl: octave STACK / picker
 constexpr int32_t kBtnSpread = 2;                               // pal-ctrl: SPREAD (drop-root open)
@@ -437,12 +442,10 @@ constexpr ControlPad kControlPads[] = {
     // iso-ctrl — PURPLE column, beside the ISO
     {REG_ISO_CTRL, kBtnIsoView, "VIEW: IN-KEY / CHROMATIC", "VIEW"},
     {REG_ISO_CTRL, kBtnShowChord, "SHOW CHORD SHAPE", "SHOW"},
-    {REG_ISO_CTRL, kBtnSticky, "STICKY (HOLD CHORD)", "STICKY"},
     {REG_ISO_CTRL, kBtnLattice, "OVERLAY: ONE / LATTICE / DIFF", "OVERLAY"},
     {REG_ISO_CTRL, kBtnSnap, "SNAP ISO TO CHORD", "SNAP"},
     {REG_ISO_CTRL, kBtnProg, "PROGRESSION (HOLD + DIAL)", "PROG"},
     {REG_ISO_CTRL, kBtnEdit, "EDIT NOTES", "EDIT"},
-    {REG_ISO_CTRL, kBtnAudition, "AUDITION (HOLD TO HEAR)", "AUDITION"},
 };
 
 // The point of the table is that it can be rearranged, so the compiler checks the rearrangement.
@@ -779,6 +782,10 @@ void KeyboardLayoutHarmonic::pushChordState() {
 	}
 	int16_t voiced[kMaxVoice];
 	uint8_t vn = buildVoicing(voiced, kMaxVoice);
+
+	// Every adjustment - inversion, spread, stack, the voicing dial, register - already funnels
+	// through here, so this is the one place that needs to ask for the re-sound.
+	autoAuditionFrames = kAutoAuditionFrames;
 
 	// BASS FOLLOW: the root, an octave under the voicing's lowest note - the same note the bass
 	// spotlight has always drawn on the iso. This is where it stops being only a picture.
@@ -1385,10 +1392,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		hs.showChord = !hs.showChord;
 		display->displayPopup(hs.showChord ? "SHOW" : "HIDE");
 	}
-	if (risingIso & (uint8_t)(1u << kBtnSticky)) {
-		hs.stickyChord = !hs.stickyChord; // keep the selection on-screen for editing (no sustained sound)
-		display->displayPopup(hs.stickyChord ? "HOLD" : "FREE");
-	}
 	if (risingIso & (uint8_t)(1u << kBtnLattice)) {
 		// The overlay pad cycles: ONE (off) -> LATT (full lattice) -> DIFF (voice-leading) -> ONE.
 		if (!hs.latticeOn && !hs.diffOn) {
@@ -1452,8 +1455,11 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		clearSelection();
 		display->displayPopup("CLR");
 	}
-	// AUDITION (momentary): while held, sound the current VOICING (base chord through spread + stack).
-	if (isoCtrlNow & (uint8_t)(1u << kBtnAudition)) {
+	// ADJUSTING IS AUDITIONING. Any change to the voicing re-sounds the stored chord for a moment,
+	// so you hear what you just did instead of hunting for a pad that plays it back. This is what
+	// the AUDITION pad used to be for; making it automatic means the pad isn't needed.
+	if (autoAuditionFrames > 0) {
+		autoAuditionFrames--;
 		int16_t voiced[kMaxVoice];
 		uint8_t vn = buildVoicing(voiced, kMaxVoice);
 		for (uint8_t i = 0; i < vn; i++) {
@@ -1970,9 +1976,6 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				else if (y == kBtnShowChord) {
 					c = grp.adjustFractional(showChord ? kCtrlOn : kCtrlOff, 255);
 				}
-				else if (y == kBtnSticky) {
-					c = grp.adjustFractional(sticky ? kCtrlOn : kCtrlOff, 255);
-				}
 				else if (y == kBtnLattice) {
 					c = grp.adjustFractional(latticeOn ? kCtrlOn : kCtrlOff, 255);
 				}
@@ -1986,10 +1989,6 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (y == kBtnEdit) {
 					c = grp.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);
-				}
-				else if (y == kBtnAudition) {
-					// AUDITION = momentary play button; faint ember when a chord is loaded (ready to strike).
-					c = grp.adjustFractional(chordNoteCount > 0 ? kCtrlReady : kCtrlOff, 255);
 				}
 				image[y][x] = c;
 			}

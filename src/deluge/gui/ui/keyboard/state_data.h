@@ -73,7 +73,7 @@ struct KeyboardStateHarmonic {
 	int32_t octaveBase = 3;    // PALETTE octave: register the chords are built in (pal-ctrl OCT+/- buttons)
 	int32_t isoOctave = 3;     // ISO octave SHOWN: the iso scrolls independently (vertical encoder)
 	bool isoChromatic = false; // right panel: false = in-key (matches In-Key kbd), true = standard chromatic iso
-	bool stickyChord = false;  // true = selected chord shape persists through iso free-play; false = clears
+	bool stickyChord = true;   // a picked chord is ALWAYS held: you cannot adjust what vanished on release
 	bool calculatorOn = true;  // true = show next-chord brain suggestions on the left
 	bool showChord = true;     // true = light the selected chord's shape on the iso; false = clean grid
 	bool latticeOn = false;    // true = light the FULL chord lattice (every repeat) with an upward fade

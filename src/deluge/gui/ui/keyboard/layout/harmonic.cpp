@@ -398,97 +398,106 @@ constexpr uint8_t kIsoCtrlClearMask = 0; // iso-ctrl: row 2 free (for the Diff V
 // VOICING controls live on the pal-ctrl column (they shape the CHORD, not the surface).
 constexpr int32_t kBtnCalc = kDisplayHeight - 1;                // pal-ctrl: next-chord Calculator on/off
 constexpr int32_t kBtnSwap = kDisplayHeight - 2;                // pal-ctrl: swap the two sides (handedness)
-constexpr int32_t kBtnPalOctUp = kDisplayHeight - 3;            // pal-ctrl: PALETTE octave up
-constexpr int32_t kBtnPalOctDown = kDisplayHeight - 4;          // pal-ctrl: PALETTE octave down
 constexpr int32_t kBtnStack = 3;                                // pal-ctrl: octave STACK / picker
 constexpr int32_t kBtnSpread = 2;                               // pal-ctrl: SPREAD (drop-root open)
 constexpr int32_t kBtnInversion = 1;                            // pal-ctrl: INVERSION (cycle 0..3)
 constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << 1) - 1); // row 0 = clear pad
 
+// ── THE CONTROL LAYOUT, as data ───────────────────────────────────────────────────────────────
+//
+// Every control pad used to be a bare constant, referenced from five places: its declaration, its
+// LEARN name, its host token, its press handler and its LED render. Moving one pad meant finding
+// all five, so in practice nobody moved any, and the arrangement stayed wherever it first landed
+// rather than wherever it belonged. That is why the columns ended up mixed: pads that change the
+// CHORD sitting on the column labelled "surface", and vice versa.
+//
+// The table below is now the single description of where things are and what they're called.
+// Name and token lookups read it. Rearranging the surface means editing a `y` here, which is what
+// makes it possible to try an arrangement, play it, and try another.
+//
+// It deliberately does NOT own behaviour. What a pad DOES stays in the press handler, keyed by id,
+// because that is real logic and hiding it in a table would only make it harder to follow.
+struct ControlPad {
+	Region region;
+	int32_t y;
+	char const* name;  // shown on OLED / scrolled on the 7-seg under LEARN
+	char const* token; // stable host token, sent as control:<TOKEN>
+};
+
+constexpr ControlPad kControlPads[] = {
+    // pal-ctrl — CRIMSON column, beside the PALETTE
+    {REG_PAL_CTRL, kBtnCalc, "CALCULATOR", "CALC"},
+    {REG_PAL_CTRL, kBtnSwap, "SWAP SIDES", "SWAP"},
+    {REG_PAL_CTRL, kBtnStack, "OCTAVE STACK PICKER", "STACK"},
+    {REG_PAL_CTRL, kBtnSpread, "SPREAD (DROP-ROOT)", "SPREAD"},
+    {REG_PAL_CTRL, kBtnInversion, "INVERSION", "INV"},
+    // iso-ctrl — PURPLE column, beside the ISO
+    {REG_ISO_CTRL, kBtnIsoView, "VIEW: IN-KEY / CHROMATIC", "VIEW"},
+    {REG_ISO_CTRL, kBtnShowChord, "SHOW CHORD SHAPE", "SHOW"},
+    {REG_ISO_CTRL, kBtnSticky, "STICKY (HOLD CHORD)", "STICKY"},
+    {REG_ISO_CTRL, kBtnLattice, "OVERLAY: ONE / LATTICE / DIFF", "OVERLAY"},
+    {REG_ISO_CTRL, kBtnSnap, "SNAP ISO TO CHORD", "SNAP"},
+    {REG_ISO_CTRL, kBtnProg, "PROGRESSION (HOLD + DIAL)", "PROG"},
+    {REG_ISO_CTRL, kBtnEdit, "EDIT NOTES", "EDIT"},
+    {REG_ISO_CTRL, kBtnAudition, "AUDITION (HOLD TO HEAR)", "AUDITION"},
+};
+
+// The point of the table is that it can be rearranged, so the compiler checks the rearrangement.
+// Two pads on one position would silently shadow each other - the second unreachable, its function
+// simply gone - and that is the kind of bug you only find by pressing every pad and noticing one
+// does nothing. Here it's a build error instead.
+constexpr bool controlPadsAreUnique() {
+	for (size_t i = 0; i < std::size(kControlPads); i++) {
+		for (size_t j = i + 1; j < std::size(kControlPads); j++) {
+			if (kControlPads[i].region == kControlPads[j].region && kControlPads[i].y == kControlPads[j].y) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+static_assert(controlPadsAreUnique(), "two control pads share a position - one of them is unreachable");
+
+constexpr bool controlPadsAreInRange() {
+	for (auto const& p : kControlPads) {
+		if (p.y < 0 || p.y >= kDisplayHeight) {
+			return false;
+		}
+		if (p.region != REG_PAL_CTRL && p.region != REG_ISO_CTRL) {
+			return false;
+		}
+	}
+	return true;
+}
+static_assert(controlPadsAreInRange(), "a control pad is off the grid, or not in a control column");
+
+/// The pad at this position, or nullptr if the position isn't a control.
+constexpr ControlPad const* findControlPad(Region region, int32_t y) {
+	for (auto const& p : kControlPads) {
+		if (p.region == region && p.y == y) {
+			return &p;
+		}
+	}
+	return nullptr;
+}
+
 // LEARN-mode help: hold the LEARN button and tap a control pad to read its function (it won't activate).
 // Names scroll on the 7-seg, show whole on OLED — so you don't have to memorise the control columns.
 const char* controlPadName(Region region, int32_t y) {
-	if (region == REG_PAL_CTRL) { // CRIMSON — the chord
-		switch (y) {
-		case kBtnCalc:
-			return "CALCULATOR";
-		case kBtnSwap:
-			return "SWAP SIDES";
-		case kBtnPalOctUp:
-			return "PALETTE OCTAVE UP";
-		case kBtnPalOctDown:
-			return "PALETTE OCTAVE DOWN";
-		case kBtnStack:
-			return "OCTAVE STACK PICKER";
-		case kBtnSpread:
-			return "SPREAD (DROP-ROOT)";
-		case kBtnInversion:
-			return "INVERSION";
-		default:
-			return "CLEAR";
-		}
+	if (ControlPad const* p = findControlPad(region, y)) {
+		return p->name;
 	}
-	switch (y) { // PURPLE — the surface
-	case kBtnIsoView:
-		return "VIEW: IN-KEY / CHROMATIC";
-	case kBtnShowChord:
-		return "SHOW CHORD SHAPE";
-	case kBtnSticky:
-		return "STICKY (HOLD CHORD)";
-	case kBtnLattice:
-		return "OVERLAY: ONE / LATTICE / DIFF";
-	case kBtnSnap:
-		return "SNAP ISO TO CHORD";
-	case kBtnProg:
-		return "PROGRESSION (HOLD + DIAL)";
-	case kBtnEdit:
-		return "EDIT NOTES";
-	default:
-		return "AUDITION (HOLD TO HEAR)";
-	}
+	// pal-ctrl's spare rows are CLEAR pads; iso-ctrl has none, so anything unlisted there is a gap.
+	return region == REG_PAL_CTRL ? "CLEAR" : "";
 }
 
 // Short, stable token for a control pad's contextId (control:<TOKEN>) — what the host LEARN event carries.
 // Distinct from controlPadName (the human label shown on the device). See chroma-schema SCHEMA.md 2.1.
 const char* controlPadId(Region region, int32_t y) {
-	if (region == REG_PAL_CTRL) {
-		switch (y) {
-		case kBtnCalc:
-			return "CALC";
-		case kBtnSwap:
-			return "SWAP";
-		case kBtnPalOctUp:
-			return "OCTUP";
-		case kBtnPalOctDown:
-			return "OCTDN";
-		case kBtnStack:
-			return "STACK";
-		case kBtnSpread:
-			return "SPREAD";
-		case kBtnInversion:
-			return "INV";
-		default:
-			return "CLEAR";
-		}
+	if (ControlPad const* p = findControlPad(region, y)) {
+		return p->token;
 	}
-	switch (y) {
-	case kBtnIsoView:
-		return "VIEW";
-	case kBtnShowChord:
-		return "SHOW";
-	case kBtnSticky:
-		return "STICKY";
-	case kBtnLattice:
-		return "OVERLAY";
-	case kBtnSnap:
-		return "SNAP";
-	case kBtnProg:
-		return "PROG";
-	case kBtnEdit:
-		return "EDIT";
-	default:
-		return "AUDITION";
-	}
+	return region == REG_PAL_CTRL ? "CLEAR" : "";
 }
 
 // Reserved control-zone colours — a "control family" (CRIMSON + PURPLE) used NOWHERE else in Chroma. The two
@@ -1343,22 +1352,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		hs.swapped = !hs.swapped;
 		display->displayPopup(hs.swapped ? "SWAP" : "NORM");
 	}
-	if (risingPal & (uint8_t)(1u << kBtnPalOctUp)) {
-		if (hs.octaveBase < 8) {
-			hs.octaveBase++;
-		}
-		char buf[8];
-		sprintf(buf, "OCT%d", (int)hs.octaveBase);
-		display->displayPopup(buf);
-	}
-	if (risingPal & (uint8_t)(1u << kBtnPalOctDown)) {
-		if (hs.octaveBase > 1) {
-			hs.octaveBase--;
-		}
-		char buf[8];
-		sprintf(buf, "OCT%d", (int)hs.octaveBase);
-		display->displayPopup(buf);
-	}
 	if (risingPal & (uint8_t)(1u << kBtnStack)) {
 		hs.stackPick = !hs.stackPick;
 		hs.voiceOctaves |= (uint8_t)(1u << 3);
@@ -1567,8 +1560,24 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 	if (verticalEncoderHandledByColumns(offset)) {
 		return;
 	}
+	// Octave is a continuous thing, so it belongs on a knob. It used to cost two pads in the control
+	// column, which is a lot of surface for something a wheel does better - and those two pads are
+	// now free for controls that genuinely need to be a button.
+	//
+	// The two octaves split along the same line as the two columns: plain turn moves what you SEE
+	// (the iso surface), SHIFT+turn moves what you HEAR (the register the chords are built in).
+	if (Buttons::isShiftButtonPressed()) {
+		KeyboardStateHarmonic& hs = getState().harmonic;
+		int32_t next = hs.octaveBase + offset;
+		hs.octaveBase = std::clamp(next, 1_i32, 8_i32);
+		char buf[8];
+		sprintf(buf, "OCT%d", (int)hs.octaveBase);
+		display->displayPopup(buf);
+		precalculate();
+		return;
+	}
+
 	// Vertical encoder scrolls the ISO independently (like the native iso keyboard) — the "octave shown".
-	// The PALETTE octave is separate (pal-ctrl OCT+/- buttons), so you set chord register + iso view apart.
 	KeyboardStateHarmonic& state = getState().harmonic;
 	state.isoOctave += offset;
 	if (state.isoOctave < 1) {
@@ -1781,9 +1790,6 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				else if (y == kBtnSwap) {
 					c = kCtrlHue.adjustFractional(swapped ? kCtrlOn : kCtrlOff, 255);
-				}
-				else if (y == kBtnPalOctUp || y == kBtnPalOctDown) {
-					c = kCtrlHue.adjustFractional(kCtrlReady, 255); // momentary octave +/- — faint ember, findable
 				}
 				else if (y == kBtnStack) {
 					c = kCtrlHue.adjustFractional(stackPick ? kCtrlOn : kCtrlOff, 255); // octave-picker mode

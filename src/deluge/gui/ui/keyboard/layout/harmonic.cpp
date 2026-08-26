@@ -1012,7 +1012,9 @@ uint8_t KeyboardLayoutHarmonic::buildChordAtDegree(int32_t deg, int32_t y, const
 		bool minorish = (third == 3);
 		bool dim = (fifth == 6);
 		bool aug = (fifth == 8);
-		int8_t accidental = (int8_t)iv[deg] - (int8_t)kMajorIv[deg];
+		// degLocal, not deg: iv[] and kNumerals[] hold 7 entries and deg is a CONTINUOUS degree
+		// now, so the eighth column (and anything scrolled) would index past the end of both.
+		int8_t accidental = (int8_t)iv[degLocal] - (int8_t)kMajorIv[degLocal];
 		char buf[32];
 		int p = 0;
 		for (int8_t a = 0; a < -accidental; a++) {
@@ -1021,7 +1023,7 @@ uint8_t KeyboardLayoutHarmonic::buildChordAtDegree(int32_t deg, int32_t y, const
 		for (int8_t a = 0; a < accidental; a++) {
 			buf[p++] = '#';
 		}
-		for (const char* c = kNumerals[deg]; *c; c++) {
+		for (const char* c = kNumerals[degLocal]; *c; c++) {
 			buf[p++] = (minorish || dim) ? (char)(*c - 'A' + 'a') : *c;
 		}
 		if (dim) {
@@ -1882,7 +1884,10 @@ void KeyboardLayoutHarmonic::handleHorizontalEncoder(int32_t offset, bool shiftE
 		int32_t hi = (int32_t)sc * (8 - hs.octaveBase);
 		hs.scrollSteps = std::clamp(hs.scrollSteps + offset, lo, hi);
 		precalculate();
-		pushChordState(); // a held chord follows the scroll, and re-sounds so you hear where you are
+		// NOT pushChordState(). Scrolling moves the VIEW, it does not change the chord - and
+		// pushChordState re-arms the audition, so scrolling re-fired the chord on every detent and
+		// left it stuttering on the root for as long as you kept turning. The loaded chord is
+		// untouched by scrolling; there is nothing to re-hear.
 		return;
 	}
 	horizontalEncoderHandledByColumns(offset, shiftEnabled);
@@ -1922,7 +1927,9 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	int32_t isoStart = isoStartCol();
 	// The highlighted chord on the iso wears its PALETTE colour (the selected degree's hue) — bright primary,
 	// faded repeats. Falls back to white when there's no degree (e.g. a voicing built from scratch in EDIT).
-	RGB chordHue = (selDeg >= 0 && selDeg < 7) ? kDegreeHue[selDeg] : RGB{.r = 255, .g = 255, .b = 255};
+	// selDeg is a CONTINUOUS degree, so fold it: degree 7 is degree 0 an octave up and wears the
+	// same colour. The old `< 7` guard silently turned every scrolled chord white instead.
+	RGB chordHue = (selDeg >= 0) ? kDegreeHue[floormod(selDeg, 7)] : RGB{.r = 255, .g = 255, .b = 255};
 	(void)iv;
 
 	// Breathing pulse for the Calculator's next-chord suggestions (same cadence as the Chord Library).
@@ -2007,11 +2014,20 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 			// while the colours stayed nailed to the grid, and the palette would look static while
 			// its contents changed underneath - the most confusing possible combination.
 			// Following the degree means you SEE the palette move: the colours travel with it.
-			RGB hue = kDegreeHue[floormod(degreeAtColumn(local, getState().harmonic.scrollSteps), 7)];
+			// A column has TWO degree identities and they are not interchangeable:
+			//   degCont - the continuous degree, which is what selDeg holds and what identifies the
+			//             exact chord (degree 0 and degree 7 are different chords, an octave apart)
+			//   degFold - folded to 0..6, for the per-degree arrays and hues, which have 7 entries
+			// Indexing degBright by COLUMN read past the end of a 7-entry array on the eighth column,
+			// every render frame, and that is what locked the Deluge up. Comparing a COLUMN against
+			// selDeg was wrong too - it only happened to work while the palette could not scroll.
+			int32_t degCont = degreeAtColumn(local, getState().harmonic.scrollSteps);
+			int32_t degFold = floormod(degCont, 7);
+			RGB hue = kDegreeHue[degFold];
 			bool haveCalc = (numSuggestions > 0);
 			for (int32_t y = 0; y < kDisplayHeight; y++) {
 				RGB c = hue.adjustFractional(kRichBright[y], 255);
-				if (local == selDeg && y == selRichness) {
+				if (degCont == selDeg && y == selRichness) {
 					// Selected chord cell: bright near-white tint of the column colour. Blend the FULL-brightness
 					// hue (not the row-dimmed one) so the selection pops just as hard on the lusher upper rows
 					// (7/9/11/13) as on the triad — otherwise a dim row makes a picked chord read as "not lit".
@@ -2019,8 +2035,9 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					        .g = (uint8_t)((hue.g + 255) >> 1),
 					        .b = (uint8_t)((hue.b + 255) >> 1)};
 				}
-				else if (haveCalc && local != selDeg && degBright[local] > 0 && (y >= kRowTriad && y <= kRow7th + 1)) {
-					c = RGB::monochrome((uint8_t)((uint32_t)pulse * degBright[local] / 255));
+				else if (haveCalc && degCont != selDeg && degBright[degFold] > 0
+				         && (y >= kRowTriad && y <= kRow7th + 1)) {
+					c = RGB::monochrome((uint8_t)((uint32_t)pulse * degBright[degFold] / 255));
 				}
 				image[y][x] = c;
 			}

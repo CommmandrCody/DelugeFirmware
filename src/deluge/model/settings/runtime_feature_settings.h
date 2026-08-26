@@ -70,6 +70,7 @@ enum RuntimeFeatureSettingType : uint32_t {
 	ChordBrush,
 	KeyboardNotePreview,
 	RetrospectiveCapture,
+	AutosaveRecovery,
 	MaxElement // Keep as boundary
 };
 

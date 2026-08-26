@@ -53,6 +53,7 @@ SettingToggle menuTrimFromStartOfAudioClip(RuntimeFeatureSettingType::TrimFromSt
 SettingToggle menuShowBatteryLevel(RuntimeFeatureSettingType::ShowBatteryLevel);
 SettingToggle menuRepairSongDates(RuntimeFeatureSettingType::RepairSongDates);
 SettingToggle menuRetrospectiveCapture(RuntimeFeatureSettingType::RetrospectiveCapture);
+SettingToggle menuAutosaveRecovery(RuntimeFeatureSettingType::AutosaveRecovery);
 
 std::array<MenuItem*, RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettings> subMenuEntries{
     &menuDrumRandomizer,
@@ -80,7 +81,8 @@ std::array<MenuItem*, RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettin
     &menuHorizontalMenus,
     &menuTrimFromStartOfAudioClip,
     &menuShowBatteryLevel,
-    &menuRepairSongDates};
+    &menuRepairSongDates,
+    &menuAutosaveRecovery};
 
 Settings::Settings(l10n::String name, l10n::String title) : menu_item::Submenu(name, title, subMenuEntries) {
 }

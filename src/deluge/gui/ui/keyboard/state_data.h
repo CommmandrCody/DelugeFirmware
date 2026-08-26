@@ -76,7 +76,6 @@ struct KeyboardStateHarmonic {
 	bool stickyChord = false;  // true = selected chord shape persists through iso free-play; false = clears
 	bool calculatorOn = true;  // true = show next-chord brain suggestions on the left
 	bool showChord = true;     // true = light the selected chord's shape on the iso; false = clean grid
-	bool swapped = false;      // handedness: false = palette LEFT / iso RIGHT; true = mirror the two blocks
 	bool latticeOn = false;    // true = light the FULL chord lattice (every repeat) with an upward fade
 	bool diffOn = false; // DIFF/voice-leading view: prev->current motion (common hold, arriving breathe, leaving ghost)
 	uint16_t prevChordPcMask = 0; // pitch-class set of the PREVIOUS chord — drives the DIFF / voice-leading view

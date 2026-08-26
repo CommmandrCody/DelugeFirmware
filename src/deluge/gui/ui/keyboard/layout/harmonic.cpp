@@ -63,11 +63,14 @@ struct ColInfo {
 };
 constexpr int32_t kBlockWidth = 7;
 
-inline ColInfo colInfoFor(int32_t x, bool swapped) {
-	int32_t palStart = swapped ? 9 : 0;
-	int32_t isoStart = swapped ? 0 : 9;
-	int32_t palCtrl = swapped ? 8 : 7;
-	int32_t isoCtrl = swapped ? 7 : 8;
+// Fixed layout: PALETTE 0-6 | pal-ctrl 7 | iso-ctrl 8 | ISO 9-15.
+// Handedness used to mirror all of this. Cody: "swap was a thought and not a necessity" - so the
+// whole conditional is gone, and every column is now where it looks like it is.
+inline ColInfo colInfoFor(int32_t x) {
+	constexpr int32_t palStart = 0;
+	constexpr int32_t isoStart = 9;
+	constexpr int32_t palCtrl = 7;
+	constexpr int32_t isoCtrl = 8;
 	if (x == palCtrl) {
 		return {REG_PAL_CTRL, 0};
 	}
@@ -82,8 +85,8 @@ inline ColInfo colInfoFor(int32_t x, bool swapped) {
 	}
 	return {REG_NONE, 0};
 }
-inline int32_t isoStartCol(bool swapped) {
-	return swapped ? 0 : 9;
+inline int32_t isoStartCol() {
+	return 9;
 }
 
 // Additive richness ladder: y=0 (bottom) = the ROOT alone (bass/anchor lane), building UP by stacking
@@ -397,7 +400,6 @@ constexpr uint8_t kIsoCtrlClearMask = 0; // iso-ctrl: row 2 free (for the Diff V
 
 // VOICING controls live on the pal-ctrl column (they shape the CHORD, not the surface).
 constexpr int32_t kBtnCalc = kDisplayHeight - 1;                // pal-ctrl: next-chord Calculator on/off
-constexpr int32_t kBtnSwap = kDisplayHeight - 2;                // pal-ctrl: swap the two sides (handedness)
 constexpr int32_t kBtnBass = kDisplayHeight - 3;                // pal-ctrl: BASS follow on/off (hold+dial to bind)
 constexpr int32_t kBtnStack = 3;                                // pal-ctrl: octave STACK / picker
 constexpr int32_t kBtnSpread = 2;                               // pal-ctrl: SPREAD (drop-root open)
@@ -428,7 +430,6 @@ struct ControlPad {
 constexpr ControlPad kControlPads[] = {
     // pal-ctrl — CRIMSON column, beside the PALETTE
     {REG_PAL_CTRL, kBtnCalc, "CALCULATOR", "CALC"},
-    {REG_PAL_CTRL, kBtnSwap, "SWAP SIDES", "SWAP"},
     {REG_PAL_CTRL, kBtnBass, "BASS FOLLOW (HOLD + DIAL TO BIND)", "BASS"},
     {REG_PAL_CTRL, kBtnStack, "OCTAVE STACK PICKER", "STACK"},
     {REG_PAL_CTRL, kBtnSpread, "SPREAD (DROP-ROOT)", "SPREAD"},
@@ -535,7 +536,12 @@ constexpr ControlPad const* findControlPad(Region region, int32_t y) {
 // Names scroll on the 7-seg, show whole on OLED — so you don't have to memorise the control columns.
 const char* controlPadName(Region region, int32_t y) {
 	if (ControlPad const* p = findControlPad(region, y)) {
-		return p->name;
+		// A 7-seg is FOUR characters. "PROGRESSION (HOLD + DIAL)" rendered there is not a shortened
+		// label, it is noise - Cody read one as "251" and another as "cFULLdim". These names were
+		// written for an OLED and quietly assumed everyone had one.
+		//
+		// The short token already exists for the host protocol and is already 7-seg sized, so use it.
+		return display->have7SEG() ? p->token : p->name;
 	}
 	// pal-ctrl's spare rows are CLEAR pads; iso-ctrl has none, so anything unlisted there is a gap.
 	return region == REG_PAL_CTRL ? "CLEAR" : "";
@@ -997,7 +1003,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	uint8_t sc = getScaleIntervals(iv);
 	uint8_t keyRoot = (uint8_t)getRootNote();
 	uint8_t numCols = (sc > 7) ? 7 : sc;
-	bool swapped = getState().harmonic.swapped;
 	heldCols = 0;
 
 	// Live held-pad feedback: rebuild from the current press state every call (the array is the full set of
@@ -1085,7 +1090,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		if (pressed.x >= kDisplayWidth) {
 			continue;
 		}
-		ColInfo ci = colInfoFor(pressed.x, swapped);
+		ColInfo ci = colInfoFor(pressed.x);
 		if (learnHeld) {
 			// Inspect mode: name whatever this pad is, once per press, and fire nothing.
 			if (pressed.y >= 0 && pressed.y < kDisplayHeight) {
@@ -1472,10 +1477,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 		display->displayPopup(hs.calculatorOn ? "CALC" : "OFF");
 	}
-	if (risingPal & (uint8_t)(1u << kBtnSwap)) {
-		hs.swapped = !hs.swapped;
-		display->displayPopup(hs.swapped ? "SWAP" : "NORM");
-	}
 	if (risingPal & (uint8_t)(1u << kBtnBass)) {
 		// A tap only ever toggles. Binding is hold-and-dial, so a stray tap can never point the
 		// bass at some arbitrary track - it just tells you there is nothing to point at yet.
@@ -1717,37 +1718,17 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 		return;
 	}
 
-	// OCTAVE — one wheel, both halves, together.
+	// OCTAVE follows the SHAPE of the thing it moves. Cody: "the palette is horizontal and the iso
+	// vertical - the octave should shift horizontal on the palette and vertical on the iso."
 	//
-	// These were two separate octaves: the chord register and the iso view, moved by two different
-	// gestures. Cody, on being told which was which: "why not adjust BOTH at the same time cmon".
-	// Quite. Nobody wants the chords in one register while the surface they're played on sits in
-	// another - and the layout already has a SNAP control whose whole job is dragging the two back
-	// together, which rather admits they wanted to be one thing all along.
-	//
-	// So a plain turn moves both, and there is no hidden modifier to remember for the ordinary case.
-	// Before this, the common gesture was silent and the rare one announced itself, so you could
-	// turn the wheel and have no idea what had moved.
-	//
-	// SHIFT+turn still moves the iso alone, for parking the surface high to riff over a low chord.
-	// That's the rare thing, so it's the one that costs a modifier.
+	// So each wheel owns the panel whose axis it matches. The iso rises vertically, so the VERTICAL
+	// wheel moves the iso's octave; the palette runs across, so the HORIZONTAL wheel moves the chord
+	// register (see handleHorizontalEncoder). No modifier to remember, and nothing silent - which is
+	// what went wrong when this was a SHIFT gesture nobody could see.
 	KeyboardStateHarmonic& hs = getState().harmonic;
-	bool isoOnly = Buttons::isShiftButtonPressed();
-
-	int32_t iso = std::clamp(hs.isoOctave + offset, 1_i32, 8_i32);
-	bool isoMoved = (iso != hs.isoOctave);
-	hs.isoOctave = iso;
-
-	if (!isoOnly) {
-		// Move the chord register with it, but only as far as the iso actually travelled, so the two
-		// can't drift apart when one hits its end stop.
-		if (isoMoved) {
-			hs.octaveBase = std::clamp(hs.octaveBase + offset, 1_i32, 8_i32);
-		}
-	}
-
+	hs.isoOctave = std::clamp(hs.isoOctave + offset, 1_i32, 8_i32);
 	char buf[8];
-	sprintf(buf, isoOnly ? "ISO%d" : "OCT%d", (int)(isoOnly ? hs.isoOctave : hs.octaveBase));
+	sprintf(buf, "ISO%d", (int)hs.isoOctave);
 	display->displayPopup(buf);
 	precalculate();
 }
@@ -1808,6 +1789,21 @@ void KeyboardLayoutHarmonic::handleHorizontalEncoder(int32_t offset, bool shiftE
 		pushChordState();
 		return;
 	}
+	// Nothing held: the horizontal wheel moves the PALETTE's register, matching the way the palette
+	// is laid out across the grid. SHIFT still scrolls through the degrees.
+	if (!shiftEnabled) {
+		KeyboardStateHarmonic& hs = getState().harmonic;
+		int32_t next = std::clamp(hs.octaveBase + offset, 1_i32, 8_i32);
+		if (next != hs.octaveBase) {
+			hs.octaveBase = next;
+			char buf[8];
+			sprintf(buf, "OCT%d", (int)hs.octaveBase);
+			display->displayPopup(buf);
+			precalculate();
+			pushChordState(); // re-voice, so a held chord moves register as you turn
+		}
+		return;
+	}
 	horizontalEncoderHandledByColumns(offset, shiftEnabled);
 }
 
@@ -1831,7 +1827,6 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	bool showChord = getState().harmonic.showChord;
 	bool sticky = getState().harmonic.stickyChord;
 	bool calc = getState().harmonic.calculatorOn;
-	bool swapped = getState().harmonic.swapped;
 	bool latticeOn = getState().harmonic.latticeOn;
 	bool diffOn = getState().harmonic.diffOn;
 	uint16_t prevPcMask = getState().harmonic.prevChordPcMask;
@@ -1842,7 +1837,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	uint8_t voiceOctaves = getState().harmonic.voiceOctaves;
 	int8_t voiceSpread = getState().harmonic.voiceSpread;
 	int8_t voiceInversion = getState().harmonic.voiceInversion;
-	int32_t isoStart = isoStartCol(swapped);
+	int32_t isoStart = isoStartCol();
 	// The highlighted chord on the iso wears its PALETTE colour (the selected degree's hue) — bright primary,
 	// faded repeats. Falls back to white when there's no degree (e.g. a voicing built from scratch in EDIT).
 	RGB chordHue = (selDeg >= 0 && selDeg < 7) ? kDegreeHue[selDeg] : RGB{.r = 255, .g = 255, .b = 255};
@@ -1914,7 +1909,7 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	}
 
 	for (int32_t x = 0; x < kDisplayWidth; x++) {
-		ColInfo ci = colInfoFor(x, swapped);
+		ColInfo ci = colInfoFor(x);
 
 		if (ci.region == REG_PAL) {
 			// The chord explorer. Each column a distinct hue; the triad (bottom) is lightest and the column
@@ -1950,9 +1945,6 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				RGB c = kCtrlHue.adjustFractional(kCtrlFaint, 255); // blank by default — only engaged controls light
 				if (y == kBtnCalc) {
 					c = kCtrlHue.adjustFractional(calc ? kCtrlOn : kCtrlOff, 255);
-				}
-				else if (y == kBtnSwap) {
-					c = kCtrlHue.adjustFractional(swapped ? kCtrlOn : kCtrlOff, 255);
 				}
 				else if (y == kBtnStack) {
 					c = kCtrlHue.adjustFractional(stackPick ? kCtrlOn : kCtrlOff, 255); // octave-picker mode

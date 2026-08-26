@@ -437,6 +437,11 @@ PLACE_SDRAM_DATA Language seven_segment{
         {STRING_FOR_COMMUNITY_FEATURE_ALTERNATIVE_TAP_TEMPO_BEHAVIOUR, "TAPT"},
         {STRING_FOR_COMMUNITY_FEATURE_TRIM_FROM_START_OF_AUDIO_CLIP, "TRIM"},
         {STRING_FOR_COMMUNITY_FEATURE_SHOW_BATTERY_LEVEL, "BATT"},
+        {STRING_FOR_COMMUNITY_FEATURE_AUTOSAVE_RECOVERY, "ASAV"},
+        // Without these two the 7-seg falls back to the full English text and scrolls a whole
+        // sentence across four characters, which is unreadable at boot.
+        {STRING_FOR_RECOVER_UNSAVED_QMARK, "RECV"},
+        {STRING_FOR_RECOVER, "RECV"},
         {STRING_FOR_TRACK_STILL_HAS_CLIPS_IN_SESSION, "CANT"},
         {STRING_FOR_DELETE_ALL_TRACKS_CLIPS_FIRST, "CANT"},
         {STRING_FOR_CANT_DELETE_FINAL_CLIP, "CANT"},

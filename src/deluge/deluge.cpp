@@ -20,6 +20,7 @@
 #include "RZA1/sdhi/inc/sdif.h"
 #include "definitions_cxx.hpp"
 #include "drivers/pic/pic.h"
+#include "gui/context_menu/recover_song.h"
 #include "gui/ui/audio_recorder.h"
 #include "gui/ui/browser/browser.h"
 #include "gui/ui/keyboard/keyboard_screen.h"
@@ -403,14 +404,24 @@ void setupStartupSong() {
 	auto filename =
 	    startupSongMode == StartupSongMode::TEMPLATE ? defaultSongFullPath : runtimeFeatureSettings.getStartupSong();
 
-	// Recovery: if an unsaved song was left behind (power loss), load it INSTEAD of the normal startup
-	// song, through this exact same proven path so it inherits the crash-protection canary below.
-	// Presence of the file means unsaved work existed (a Save deletes it).
-	bool recoveringUnsavedSong = StorageManager::fileExists("SYSTEM/RECOVER.XML");
-	if (recoveringUnsavedSong) {
-		filename = "SYSTEM/RECOVER.XML";
-		startupSongMode = StartupSongMode::LASTOPENED; // force the load path (not TEMPLATE/BLANK)
-	}
+	// Recovery: if an unsaved song was left behind (power loss), OFFER it once the normal startup
+	// song is up. Presence of the file means unsaved work existed (a Save or a load-away deletes it).
+	//
+	// This used to swap the startup song for the recovery file silently, announcing itself only with
+	// console text. On a 7-seg that scrolls past in a second, so the Deluge would come up holding a
+	// song the user had not asked for and give them almost no clue why. It reads as a broken
+	// instrument rather than a rescued jam.
+	//
+	// So the ordering is inverted: load what the user expects FIRST, then offer the recovery as a
+	// prompt they can decline. It also fails in the right direction. If the prompt never renders for
+	// any reason, they are sitting in their own song instead of a stranger's.
+	//
+	// Declining is safe: the boot path calls loadSongUI.performLoad() directly and does NOT go
+	// through the interactive wrapper that clears the recovery file, so saying no keeps the jam on
+	// the card. It stops being offered as soon as the user saves or loads a song by hand.
+	bool offerRecovery =
+	    StorageManager::fileExists("SYSTEM/RECOVER.XML")
+	    && runtimeFeatureSettings.get(RuntimeFeatureSettingType::AutosaveRecovery) == RuntimeFeatureStateToggle::On;
 
 	String failSafePath;
 	failSafePath.concatenate("SONGS/__STARTUP_OFF_CHECK_");
@@ -484,15 +495,10 @@ void setupStartupSong() {
 				// Wipe the name so the Save action asks you for a new song
 				currentSong->name.clear();
 			}
-			if (recoveringUnsavedSong) {
-				// Tell the user, don't do it silently. (Keep the file: it stays until a Save clears it,
-				// so a second power flip before saving still recovers.)
-				display->consoleText("Recovered unsaved song");
-				// The song was loaded from SYSTEM/RECOVER.XML, so the Deluge would otherwise name it
-				// "RECOVER" and save it into SYSTEM/. Clear the name (so Save asks for a real name) and
-				// point it at SONGS/, so the recovered jam saves like any normal song, no "RECOVER" dupes.
-				currentSong->name.clear();
-				currentSong->dirPath.set("SONGS");
+			if (offerRecovery) {
+				// The user's own song is loaded and on screen. NOW ask, on top of it, so declining
+				// costs nothing and the prompt has something sane sitting behind it.
+				openUI(&deluge::gui::context_menu::recoverSong);
 			}
 		}
 		else {
@@ -604,6 +610,15 @@ void registerTasks() {
 	// live audio.
 	addRepeatingTask(
 	    []() {
+		    // Off means OFF: no recovery file gets written at all, not merely "written but never
+		    // offered". Someone who turns this off is saying they don't want the Deluge writing to
+		    // their card behind their back, and a stale RECOVER.XML left lying around would also
+		    // ambush them the moment they switched the feature back on.
+		    if (runtimeFeatureSettings.get(RuntimeFeatureSettingType::AutosaveRecovery)
+		        != RuntimeFeatureStateToggle::On) {
+			    songNeedsRecoverySave = false;
+			    return;
+		    }
 		    if (songNeedsRecoverySave && !currentlyAccessingCard && !playbackHandler.isEitherClockActive()) {
 			    songNeedsRecoverySave = false;
 			    StorageManager::writeRecoveryFile();

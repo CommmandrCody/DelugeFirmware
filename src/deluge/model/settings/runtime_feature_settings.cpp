@@ -200,6 +200,13 @@ void RuntimeFeatureSettings::init() {
 	SetupOnOffSetting(settings[RuntimeFeatureSettingType::ShowBatteryLevel],
 	                  STRING_FOR_COMMUNITY_FEATURE_SHOW_BATTERY_LEVEL, "showBatteryLevel",
 	                  RuntimeFeatureStateToggle::On);
+
+	// Autosave Recovery: keep a copy of unsaved work in SYSTEM/RECOVER.XML and, on the next boot,
+	// offer to load it. Off means no recovery file is written and no prompt appears, for anyone who
+	// would rather the Deluge never touched the card behind their back.
+	SetupOnOffSetting(settings[RuntimeFeatureSettingType::AutosaveRecovery],
+	                  STRING_FOR_COMMUNITY_FEATURE_AUTOSAVE_RECOVERY, "autosaveRecovery",
+	                  RuntimeFeatureStateToggle::On);
 }
 
 void RuntimeFeatureSettings::readSettingsFromFile() {

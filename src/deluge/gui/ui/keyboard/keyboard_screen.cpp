@@ -236,6 +236,19 @@ void captureNoteOff(int32_t note) {
 		}
 	}
 }
+/// Let the active layout release anything it is sounding outside the per-frame note diff.
+/// Safe before the layout list is populated, and safe to call twice.
+void releaseExternalNotesOfCurrentLayout() {
+	auto* clip = getCurrentInstrumentClip();
+	if (clip == nullptr) {
+		return;
+	}
+	KeyboardLayout* layout = layout_list[clip->keyboardState.currentLayout];
+	if (layout != nullptr) {
+		layout->releaseExternalNotes();
+	}
+}
+
 void captureClear() {
 	g_captureCount = 0;
 }
@@ -644,6 +657,7 @@ ActionResult KeyboardScreen::buttonAction(deluge::hid::Button b, bool on, bool i
 		if (currentUIMode == UI_MODE_NONE && !keyboardButtonActive
 		    && !keyboardButtonUsed) { // Leave if key up and not used
 
+			releaseExternalNotesOfCurrentLayout();
 			captureClear(); // leaving keyboard view → drop the retrospective-capture buffer
 			instrumentClipView.recalculateColours();
 			if (getCurrentClip()->onAutomationClipView) {
@@ -659,6 +673,7 @@ ActionResult KeyboardScreen::buttonAction(deluge::hid::Button b, bool on, bool i
 
 	// Song view button
 	else if (b == SESSION_VIEW && on && currentUIMode == UI_MODE_NONE) {
+		releaseExternalNotesOfCurrentLayout();
 		captureClear(); // leaving keyboard view → drop the retrospective-capture buffer
 		ClipMinder::transitionToArrangerOrSession();
 	}
@@ -883,6 +898,7 @@ void KeyboardScreen::selectLayout(int8_t offset) {
 	if (getCurrentInstrumentClip()->keyboardState.currentLayout != lastLayout) {
 		// Switching layout is a context change, so disarm any harmonic-chord brush.
 		ChordService::clearPending();
+		releaseExternalNotesOfCurrentLayout();
 		captureClear(); // and drop the retrospective-capture buffer (fresh context)
 		display->displayPopup(l10n::get(layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->name()));
 	}

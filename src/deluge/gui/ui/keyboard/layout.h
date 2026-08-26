@@ -88,6 +88,15 @@ public:
 
 	virtual void checkNewInstrument(Instrument* newInstrument) {}
 
+	/// Called when this layout stops being the active surface: leaving keyboard view, or switching
+	/// to another layout.
+	///
+	/// The usual note lifecycle is handled for you - layouts declare notes each frame and the screen
+	/// diffs them, so anything played that way stops by itself. A layout that sounds notes on some
+	/// OTHER instrument is outside that mechanism and must release them here, or they hang after
+	/// the layout is gone with nothing left on screen to explain why.
+	virtual void releaseExternalNotes() {}
+
 protected:
 	inline bool isKit() { return getCurrentOutputType() == OutputType::KIT; }
 	/// Song root note can be in any octave, layouts get the normalized one

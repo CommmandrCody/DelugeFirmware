@@ -18,6 +18,9 @@
 #pragma once
 #include "definitions_cxx.hpp"
 #include "gui/ui/keyboard/chords.h"
+
+class Output; // bass-follow target; only ever held as a re-validated pointer, never dereferenced here
+
 #include "gui/ui/keyboard/layout/column_control_state.h"
 #include "storage/flash_storage.h"
 
@@ -90,8 +93,20 @@ struct KeyboardStateHarmonic {
 	// PROGRESSION WALKER (MVP): HOLD purple row 2, then dial — vertical wheel picks which progression, horizontal
 	// wheel walks the chords. Holding sustains the current step; release leaves the chord loaded. No grid strip.
 	int8_t progPreset = -1; // loaded preset index (-1 = none dialled yet)
-	int8_t progStep = 0;    // current step in the loaded progression
-	bool progVoiced = true; // VOICED = load each step with its baked-in voicing; BARE = plain chord (CLEAR toggles)
+	// BASS FOLLOW. The chord's root, sounded an octave below the voicing, on a SYNTH track of the
+	// user's choosing so it gets its own patch instead of thickening the chord.
+	//
+	// Deliberately inert until bound: an unbound BASS pad does nothing but say so. Nothing is
+	// auto-created and nothing is borrowed, because a feature that silently starts playing notes
+	// through someone else's track is worse than a feature that waits to be told where to go.
+	//
+	// Held as a raw pointer, so it MUST be re-validated against the song's output list before every
+	// use - the track can be deleted, or the whole song swapped, while this still points at it.
+	Output* bassOutput = nullptr;
+	bool bassOn = false;       // does the bass sound? only meaningful once bound
+	int32_t bassLastNote = -1; // note currently sounding, so it can be turned off before the next
+	int8_t progStep = 0;       // current step in the loaded progression
+	bool progVoiced = true;    // VOICED = load each step with its baked-in voicing; BARE = plain chord (CLEAR toggles)
 };
 /// Please note that saving and restoring currently needs to be added manually in instrument_clip.cpp and all layouts
 /// share one struct for storage

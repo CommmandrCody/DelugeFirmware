@@ -114,6 +114,10 @@ private:
 	uint8_t isoCtrlHeldMask = 0; // iso-control column rows held last frame (rising-edge detect)
 	uint64_t isoHeldMask = 0;    // iso pads held last frame (bit = localX*8+y) — rising-edge for voice edit
 	bool progPadHeld = false;    // PROG (purple row 2) held last frame — gates the encoder dial + step sustain
+	/// Sound `note` on the bound bass track, releasing whatever it held. note<0 just releases.
+	void soundBassNote(int32_t note, uint8_t velocity);
+	void releaseExternalNotes() override; // the bass plays another track, so it can't self-release
+	bool bassPadHeld = false;             // BASS (crimson) held last frame — gates the bind dial, same shape as PROG
 
 	// LEARN inspect mode: while LEARN is held the whole surface goes SILENT and each pad just names itself.
 	// These track which pads were already named last frame (pad id = x*kDisplayHeight + y, 0..127) so a held

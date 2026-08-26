@@ -398,6 +398,7 @@ constexpr uint8_t kIsoCtrlClearMask = 0; // iso-ctrl: row 2 free (for the Diff V
 // VOICING controls live on the pal-ctrl column (they shape the CHORD, not the surface).
 constexpr int32_t kBtnCalc = kDisplayHeight - 1;                // pal-ctrl: next-chord Calculator on/off
 constexpr int32_t kBtnSwap = kDisplayHeight - 2;                // pal-ctrl: swap the two sides (handedness)
+constexpr int32_t kBtnBass = kDisplayHeight - 3;                // pal-ctrl: BASS follow on/off (hold+dial to bind)
 constexpr int32_t kBtnStack = 3;                                // pal-ctrl: octave STACK / picker
 constexpr int32_t kBtnSpread = 2;                               // pal-ctrl: SPREAD (drop-root open)
 constexpr int32_t kBtnInversion = 1;                            // pal-ctrl: INVERSION (cycle 0..3)
@@ -428,6 +429,7 @@ constexpr ControlPad kControlPads[] = {
     // pal-ctrl — CRIMSON column, beside the PALETTE
     {REG_PAL_CTRL, kBtnCalc, "CALCULATOR", "CALC"},
     {REG_PAL_CTRL, kBtnSwap, "SWAP SIDES", "SWAP"},
+    {REG_PAL_CTRL, kBtnBass, "BASS FOLLOW (HOLD + DIAL TO BIND)", "BASS"},
     {REG_PAL_CTRL, kBtnStack, "OCTAVE STACK PICKER", "STACK"},
     {REG_PAL_CTRL, kBtnSpread, "SPREAD (DROP-ROOT)", "SPREAD"},
     {REG_PAL_CTRL, kBtnInversion, "INVERSION", "INV"},
@@ -470,6 +472,54 @@ constexpr bool controlPadsAreInRange() {
 	return true;
 }
 static_assert(controlPadsAreInRange(), "a control pad is off the grid, or not in a control column");
+
+// ── BASS FOLLOW ───────────────────────────────────────────────────────────────────────────────
+//
+// The chord's root, an octave under the voicing, played on a SYNTH track the user picks. Orchid
+// has a whole second engine for this; the Deluge already has as many synth tracks as you like, so
+// the feature is really just "aim the root at one of them".
+//
+// It stays silent until bound. Auto-picking a track would mean this feature could start playing
+// notes through whatever instrument happened to be first in the song, which is a nasty surprise
+// mid-performance, so binding is a deliberate act and the pad says BIND until you make it.
+
+/// Is this output still in the song, and still a synth we can play? The binding is a raw pointer
+/// held across song loads and track deletions, so nothing may touch it without asking this first.
+bool bassTargetIsLive(Output* target) {
+	if (target == nullptr || currentSong == nullptr) {
+		return false;
+	}
+	for (Output* o = currentSong->firstOutput; o != nullptr; o = o->next) {
+		if (o == target) {
+			return o->type == OutputType::SYNTH && o->getActiveClip() != nullptr;
+		}
+	}
+	return false; // gone: song swapped, or the track was deleted under us
+}
+
+/// The next SYNTH output after `from`, wrapping. nullptr if the song has none at all.
+Output* nextSynthOutput(Output* from) {
+	if (currentSong == nullptr) {
+		return nullptr;
+	}
+	Output* first = nullptr;
+	bool seenFrom = (from == nullptr);
+	for (Output* o = currentSong->firstOutput; o != nullptr; o = o->next) {
+		if (o->type != OutputType::SYNTH || o->getActiveClip() == nullptr) {
+			continue;
+		}
+		if (first == nullptr) {
+			first = o;
+		}
+		if (seenFrom) {
+			return o;
+		}
+		if (o == from) {
+			seenFrom = true;
+		}
+	}
+	return first; // wrapped, or `from` is no longer present
+}
 
 /// The pad at this position, or nullptr if the position isn't a control.
 constexpr ControlPad const* findControlPad(Region region, int32_t y) {
@@ -662,12 +712,79 @@ uint8_t KeyboardLayoutHarmonic::buildVoicing(int16_t* out, uint8_t maxOut) {
 
 // Chroma: re-broadcast the currently-selected chord (same key + context) with its freshly-rebuilt
 // voicing, so the host dashboard tracks SPRD/INV/STACK changes live, not only on a fresh palette pick.
+/// Sound `note` on the bound bass track, releasing whatever it was already holding.
+///
+/// Always releases first. A bass that stacks notes instead of replacing them would pile up voices
+/// under a progression until the track chokes, and a note left ringing after the chord changed is
+/// the single most obvious way for this to feel broken.
+///
+/// Pass note < 0 to just release (chord cleared, bass switched off, binding lost).
+void KeyboardLayoutHarmonic::soundBassNote(int32_t note, uint8_t velocity) {
+	KeyboardStateHarmonic& hs = getState().harmonic;
+
+	// Already sounding exactly this? Leave it alone. The callers include toggles that re-push the
+	// chord state without the chord having changed (SPREAD, INVERSION, the stack picker), and
+	// re-triggering the bass on each of those would machine-gun the note while you shape a voicing.
+	if (note >= 0 && note == hs.bassLastNote) {
+		return;
+	}
+
+	Output* target = hs.bassOutput;
+	if (!bassTargetIsLive(target)) {
+		// The track went away. Forget the binding rather than keep aiming at freed memory, and
+		// drop the remembered note with it - there is nothing left to send the note-off to.
+		hs.bassOutput = nullptr;
+		hs.bassLastNote = -1;
+		return;
+	}
+
+	auto* instrument = static_cast<MelodicInstrument*>(target);
+	char stackMemory[MODEL_STACK_MAX_SIZE];
+	ModelStackWithThreeMainThings* modelStack = setupModelStackWithThreeMainThingsButNoNoteRow(
+	    stackMemory, currentSong, instrument->toModControllable(), target->getActiveClip(),
+	    instrument->getParamManager(currentSong));
+
+	// mpeValues is nullptr: this is a plain note from a pad, with no expression to carry.
+	if (hs.bassLastNote >= 0) {
+		instrument->sendNote(modelStack, false, hs.bassLastNote, nullptr, MIDI_CHANNEL_NONE, velocity);
+		hs.bassLastNote = -1;
+	}
+	if (note >= 0) {
+		instrument->sendNote(modelStack, true, note, nullptr, MIDI_CHANNEL_NONE, velocity);
+		hs.bassLastNote = note;
+	}
+}
+
+void KeyboardLayoutHarmonic::releaseExternalNotes() {
+	// The bass sounds on a DIFFERENT instrument, so the screen's per-frame note diff never sees it
+	// and will never turn it off. Without this it hangs when you leave the layout.
+	soundBassNote(-1, 0);
+}
+
 void KeyboardLayoutHarmonic::pushChordState() {
 	if (chordNoteCount == 0) {
-		return; // nothing selected — nothing to broadcast
+		// Nothing selected. Let the bass go too, or it hangs on the last root after you clear.
+		soundBassNote(-1, 0);
+		return; // nothing to broadcast
 	}
 	int16_t voiced[kMaxVoice];
 	uint8_t vn = buildVoicing(voiced, kMaxVoice);
+
+	// BASS FOLLOW: the root, an octave under the voicing's lowest note - the same note the bass
+	// spotlight has always drawn on the iso. This is where it stops being only a picture.
+	// Hooked here because this is the one place every chord change already passes through.
+	if (getState().harmonic.bassOn && vn > 0) {
+		int16_t lo = voiced[0];
+		for (uint8_t i = 1; i < vn; i++) {
+			if (voiced[i] < lo) {
+				lo = voiced[i];
+			}
+		}
+		int32_t bassNote = (int32_t)lo - 12;
+		if (bassNote >= 0) { // an octave below the very bottom of MIDI isn't a note
+			soundBassNote(bassNote, 100);
+		}
+	}
 	// name the chord from its voiced notes with the Deluge's OWN namer, so hosts render the truth (see hid_sysex)
 	uint8_t nb[kMaxVoice];
 	for (uint8_t k = 0; k < vn; k++) {
@@ -1311,6 +1428,9 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 	}
 	progPadHeld = progNow;
+	// BASS bind: hold the crimson BASS pad and the vertical wheel walks the song's SYNTH tracks.
+	// Same hold-to-dial shape as PROG above, so it's one gesture to learn rather than two.
+	bassPadHeld = (palCtrlNow & (uint8_t)(1u << kBtnBass)) != 0;
 	if (risingIso & (uint8_t)(1u << kBtnEdit)) {
 		hs.editVoicing = !hs.editVoicing;
 		if (hs.editVoicing) {
@@ -1351,6 +1471,21 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	if (risingPal & (uint8_t)(1u << kBtnSwap)) {
 		hs.swapped = !hs.swapped;
 		display->displayPopup(hs.swapped ? "SWAP" : "NORM");
+	}
+	if (risingPal & (uint8_t)(1u << kBtnBass)) {
+		// A tap only ever toggles. Binding is hold-and-dial, so a stray tap can never point the
+		// bass at some arbitrary track - it just tells you there is nothing to point at yet.
+		if (!bassTargetIsLive(hs.bassOutput)) {
+			hs.bassOutput = nullptr;
+			display->displayPopup("BIND"); // hold this pad and turn the vertical wheel to choose a synth
+		}
+		else {
+			hs.bassOn = !hs.bassOn;
+			display->displayPopup(hs.bassOn ? "BASS" : "OFF");
+			if (!hs.bassOn) {
+				soundBassNote(-1, 0); // switching off must not leave the last root ringing
+			}
+		}
 	}
 	if (risingPal & (uint8_t)(1u << kBtnStack)) {
 		hs.stackPick = !hs.stackPick;
@@ -1560,6 +1695,24 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 	if (verticalEncoderHandledByColumns(offset)) {
 		return;
 	}
+	// BASS bind: while the BASS pad is held, the wheel walks the song's SYNTH tracks and the display
+	// names each one, so you bind by ear and eye rather than by remembering track order. Binding
+	// arms the bass too - having to then find the pad again to switch it on would be a pointless
+	// second step when choosing a track plainly means "play the bass there".
+	if (bassPadHeld) {
+		KeyboardStateHarmonic& hs = getState().harmonic;
+		Output* next = nextSynthOutput(bassTargetIsLive(hs.bassOutput) ? hs.bassOutput : nullptr);
+		if (next == nullptr) {
+			display->displayPopup("NONE"); // the song has no synth track to play a bass on
+			return;
+		}
+		soundBassNote(-1, 0); // release from the OLD track before pointing somewhere else
+		hs.bassOutput = next;
+		hs.bassOn = true;
+		display->displayPopup(next->name.get());
+		return;
+	}
+
 	// Octave is a continuous thing, so it belongs on a knob. It used to cost two pads in the control
 	// column, which is a lot of surface for something a wheel does better - and those two pads are
 	// now free for controls that genuinely need to be a button.

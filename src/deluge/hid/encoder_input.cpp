@@ -177,7 +177,12 @@ checkResult:
 
 				// Do it, only if
 				if (offset + modEncoderInitialTurnDirection[e] != 0) {
-					int8_t offset_accelerated = offset * encoder.calcNextKnobSpeed(offset);
+					// int32_t, not int8_t: calcNextKnobSpeed returns up to 3.0, so any offset of 43 or
+					// more overflows a signed char and FLIPS SIGN - 43*3 = 129 becomes -127. A fast
+					// turn produces exactly that: a large offset, multiplied, wrapping negative, so
+					// the parameter lurches the wrong way. modEncoderAction takes an int32_t, so the
+					// narrowing was never needed.
+					int32_t offset_accelerated = offset * encoder.calcNextKnobSpeed(offset);
 
 					getCurrentUI()->modEncoderAction(e, offset_accelerated);
 

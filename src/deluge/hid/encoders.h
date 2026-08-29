@@ -62,13 +62,16 @@ public:
 	bool pending() const { return pos.load(std::memory_order_relaxed) != 0; }
 
 	/// Returns the accumulated tick count and resets pos to 0.
-	int8_t take();
+	int32_t take();
 
 	/// Returns multiplier for encoder offset
-	double calcNextKnobSpeed(int8_t offset);
+	double calcNextKnobSpeed(int32_t offset);
 
 private:
-	std::atomic_int8_t pos = 0;   ///< Written by the IRQ (applyEdges), drained by the encoder task.
+	/// int32_t, matching DetentedEncoder. The IRQ accumulates edges here between drains, and a fast
+	/// spin generates enough of them to overflow a signed char - at which point the count wraps and
+	/// CHANGES SIGN, so turning the knob quickly one way moves the parameter the other way.
+	std::atomic_int32_t pos = 0;  ///< Written by the IRQ (applyEdges), drained by the encoder task.
 	double currentKnobSpeed{0.0}; // Used for encoder acceleration
 };
 

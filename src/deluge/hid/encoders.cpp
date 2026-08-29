@@ -44,11 +44,11 @@ int32_t DetentedEncoder::take() {
 
 // -- ContinuousEncoder ------------------------------------------------------
 
-int8_t ContinuousEncoder::take() {
+int32_t ContinuousEncoder::take() {
 	return pos.exchange(0, std::memory_order_relaxed);
 }
 
-double ContinuousEncoder::calcNextKnobSpeed(int8_t offset) {
+double ContinuousEncoder::calcNextKnobSpeed(int32_t offset) {
 	// - inertia and acceleration control how fast the knob speeds up in horizontal menus
 	// - speedScale controls how we go from "raw speed" to speed used as offset multiplier
 	// - min and max speed clamp the max effective speed
@@ -64,7 +64,7 @@ double ContinuousEncoder::calcNextKnobSpeed(int8_t offset) {
 	constexpr double reset_speed_time_threshold = 0.3;
 
 	// lastOffset and lastEncoderTime keep track of our direction and time
-	static int8_t last_offset = 0;
+	static int32_t last_offset = 0;
 	static double last_encoder_time = 0.0;
 	const double time = getSystemTime();
 
@@ -126,13 +126,48 @@ constexpr EncoderIrqEntry kEncoderIrqMap[kNumEncoders] = {
     /* mod0    */ {.irqPin = 0, .compPin = 15, .irqNum = 4, .invert = false},
 };
 
+// Quadrature transition table, indexed by (previous << 2) | current, where each state is (A << 1) | B.
+// A gray-code encoder only ever moves between adjacent states, so the PAIR of states says which way it
+// went. Invalid pairs - a double transition, which is what a missed edge looks like - yield 0 rather
+// than a guess.
+//
+// This replaces reading both pins at interrupt time and inferring direction from (a == b). That works
+// while the knob is slow, because the pins are still in the state that caused the edge. Turn fast and
+// the encoder has moved on before the ISR is serviced, so the comparison reports the WRONG DIRECTION -
+// which is why turning a gold knob down quickly sent the parameter up. Comparing against the previous
+// state instead is immune to being late: whatever we read, the transition from where we were is still
+// the truth.
+constexpr int8_t kQuadratureTable[16] = {
+    /* 00->00 */ 0,  /* 00->01 */ +1, /* 00->10 */ -1, /* 00->11 */ 0,
+    /* 01->00 */ -1, /* 01->01 */ 0,  /* 01->10 */ 0,  /* 01->11 */ +1,
+    /* 10->00 */ +1, /* 10->01 */ 0,  /* 10->10 */ 0,  /* 10->11 */ -1,
+    /* 11->00 */ 0,  /* 11->01 */ -1, /* 11->10 */ +1, /* 11->11 */ 0,
+};
+
 template <size_t IDX>
 void encoderIrqHandler(uint32_t /*sense*/) {
 	constexpr EncoderIrqEntry m = kEncoderIrqMap[IDX];
 	bool a = readInput(1, m.irqPin) != 0;
 	bool b = readInput(1, m.compPin) != 0;
-	bool cw = m.invert ? (a != b) : (a == b);
-	int8_t inc = cw ? +1 : -1;
+
+	// Per-encoder previous state. Seeded from the first reading so we never emit a phantom edge on boot.
+	static uint8_t prevState = 0xff;
+	const uint8_t state = static_cast<uint8_t>((a ? 2 : 0) | (b ? 1 : 0));
+	if (prevState == 0xff) {
+		prevState = state;
+		clearIRQInterrupt(m.irqNum);
+		return;
+	}
+	int8_t inc = kQuadratureTable[(prevState << 2) | state];
+	prevState = state;
+	if (m.invert) {
+		inc = -inc;
+	}
+	if (inc == 0) {
+		// No movement, or a transition we cannot trust. Better to drop it than to invent a direction.
+		clearIRQInterrupt(m.irqNum);
+		return;
+	}
 
 	if constexpr (IDX == 0) {
 		scrollY.applyEdges(inc);

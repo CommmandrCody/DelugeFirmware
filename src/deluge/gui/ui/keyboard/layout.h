@@ -55,6 +55,11 @@ public:
 	                                     PressedPad presses[kMaxNumKeyboardPadPresses],
 	                                     bool encoderPressed = false) = 0;
 
+	/// Spring-loaded voicing (perform), vertical-encoder press. Begin fires on press-down (arms), end on release.
+	/// A clean click springs the voicing to home; a press-and-turn dials the home. True if the layout consumed it.
+	virtual bool voicingPressBegin() { return false; }
+	virtual bool voicingPressEnd() { return false; }
+
 	/// This function is called on visibility change and if colour offset changes
 	virtual void precalculate() = 0;
 
@@ -80,10 +85,32 @@ public:
 	/// (e.g. the chord keyboard) override this so the scale-mode sidebar can avoid selecting a scale
 	/// the layout can't handle.
 	virtual bool supportsScale(Scale scale) { return true; }
+	/// Return true to have the keyboard re-render every graphics tick (e.g. to animate pulsing pads).
+	virtual bool requestsContinuousRender() { return false; }
 
 	virtual NotesState& getNotesState() { return currentNotesState; }
 
 	virtual void checkNewInstrument(Instrument* newInstrument) {}
+
+	/// Called when this layout stops being the active surface: leaving keyboard view, or switching
+	/// to another layout.
+	///
+	/// The usual note lifecycle is handled for you - layouts declare notes each frame and the screen
+	/// diffs them, so anything played that way stops by itself. A layout that sounds notes on some
+	/// OTHER instrument is outside that mechanism and must release them here, or they hang after
+	/// the layout is gone with nothing left on screen to explain why.
+	virtual void releaseExternalNotes() {}
+
+	/// The chord this layout would have you BANK, if it holds one independently of what is sounding.
+	///
+	/// Banking normally stores whatever is audible right now, which is right for a layout where you
+	/// hold a chord down and press save. The harmonic palette doesn't work that way: you pick a
+	/// chord, shape it, listen, shape it again, and only then bank - and by that point nothing is
+	/// ringing. Storing "what's sounding" there would bank silence.
+	///
+	/// Return 0 to mean "I have no opinion, use the sounding notes" - which is what every other
+	/// layout does, so their behaviour is untouched.
+	virtual uint8_t chordToBank(int16_t* out, uint8_t maxOut) { return 0; }
 
 protected:
 	inline bool isKit() { return getCurrentOutputType() == OutputType::KIT; }

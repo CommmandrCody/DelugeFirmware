@@ -64,6 +64,9 @@ file(GLOB_RECURSE deluge_SOURCES
         # For name comparison / default naming tests
         ../../src/deluge/util/name_compare.cpp
         ../../src/deluge/gui/ui/browser/default_name.cpp
+        # chords.cpp formats names with sprintf, which the firmware redirects to its own
+        # embedded printf (sprintf_). Without this the unit tests fail to LINK.
+        ../../src/lib/printf.c
 )
 
 add_executable(UnitTests
@@ -76,6 +79,7 @@ add_executable(UnitTests
         function_tests.cpp
         sync_tests.cpp
         chord_tests.cpp
+        harmonic_bench_tests.cpp
         time_tests.cpp
         clock_output_scheduler_tests.cpp
         name_compare_tests.cpp

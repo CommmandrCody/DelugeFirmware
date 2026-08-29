@@ -44,12 +44,16 @@ EmulatedDisplay menuEmulatedDisplay{};
 SettingToggle menuEnableKeyboardViewSidebarMenuExit(RuntimeFeatureSettingType::EnableKeyboardViewSidebarMenuExit);
 SettingToggle menuEnableLaunchEventPlayhead(RuntimeFeatureSettingType::EnableLaunchEventPlayhead);
 SettingToggle menuDisplayChordLayout(RuntimeFeatureSettingType::DisplayChordKeyboard);
+SettingToggle menuChordBrush(RuntimeFeatureSettingType::ChordBrush);
 SettingToggle menuAlternativePlaybackStartBehaviour(RuntimeFeatureSettingType::AlternativePlaybackStartBehaviour);
 SettingToggle menuEnableGridViewLoopPads(RuntimeFeatureSettingType::EnableGridViewLoopPads);
 SettingToggle menuAlternativeTapTempoBehaviour(RuntimeFeatureSettingType::AlternativeTapTempoBehaviour);
 SettingToggle menuHorizontalMenus(RuntimeFeatureSettingType::HorizontalMenus);
 SettingToggle menuTrimFromStartOfAudioClip(RuntimeFeatureSettingType::TrimFromStartOfAudioClip);
 SettingToggle menuShowBatteryLevel(RuntimeFeatureSettingType::ShowBatteryLevel);
+SettingToggle menuRepairSongDates(RuntimeFeatureSettingType::RepairSongDates);
+SettingToggle menuRetrospectiveCapture(RuntimeFeatureSettingType::RetrospectiveCapture);
+SettingToggle menuAutosaveRecovery(RuntimeFeatureSettingType::AutosaveRecovery);
 
 std::array<MenuItem*, RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettings> subMenuEntries{
     &menuDrumRandomizer,
@@ -69,12 +73,16 @@ std::array<MenuItem*, RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettin
     &menuEnableKeyboardViewSidebarMenuExit,
     &menuEnableLaunchEventPlayhead,
     &menuDisplayChordLayout,
+    &menuChordBrush,
+    &menuRetrospectiveCapture,
     &menuAlternativePlaybackStartBehaviour,
     &menuEnableGridViewLoopPads,
     &menuAlternativeTapTempoBehaviour,
     &menuHorizontalMenus,
     &menuTrimFromStartOfAudioClip,
-    &menuShowBatteryLevel};
+    &menuShowBatteryLevel,
+    &menuRepairSongDates,
+    &menuAutosaveRecovery};
 
 Settings::Settings(l10n::String name, l10n::String title) : menu_item::Submenu(name, title, subMenuEntries) {
 }

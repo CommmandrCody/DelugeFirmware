@@ -40,6 +40,7 @@
 #include "storage/audio/audio_file_manager.h"
 #include "storage/file_item.h"
 
+#include "model/settings/runtime_feature_settings.h"
 #include "util/firmware_version.h"
 #include "util/functions.h"
 #include "util/try.h"
@@ -69,6 +70,10 @@ PLACE_SDRAM_BSS JsonDeserializer smJsonDeserializer;
 FileDeserializer* activeDeserializer = &smDeserializer;
 
 const bool writeJsonFlag = false;
+
+// Autosave/recovery dirty flag (see storage_manager.h). Set on structural change, consumed
+// by the card-safe autosave task in registerTasks().
+bool songNeedsRecoverySave = false;
 
 Serializer& GetSerializer() {
 	if (writeJsonFlag) {
@@ -220,6 +225,43 @@ bool StorageManager::fileExists(char const* pathName) {
 	return (result == FR_OK);
 }
 
+// Autosave: write the current song to SONGS/RECOVER.XML via a temp file + atomic rename, so a
+// power loss mid-write can't corrupt the recovery copy. Mirrors SaveSongUI::performSave's exact
+// write/verify sequence (so the file is a byte-valid song) but with no UI and no named-save side
+// effects. The caller is responsible for only invoking this when the card is free.
+// Reserved recovery paths. NOT under SONGS/ — the song browser only scans SONGS/, so these never
+// appear in the song list and can't collide with a user's song name (e.g. their own "Recovery").
+char const* const kRecoveryFinalPath = "SYSTEM/RECOVER.XML";
+char const* const kRecoveryTempPath = "SYSTEM/RECOVER.TMP";
+
+Error StorageManager::writeRecoveryFile() {
+	if (currentSong == nullptr) {
+		return Error::NONE;
+	}
+	Error error = createXMLFile(kRecoveryTempPath, smSerializer, true, false); // mayOverwrite, no error popups
+	if (error != Error::NONE) {
+		return error;
+	}
+	currentSong->writeToFile();
+	error = GetSerializer().closeFileAfterWriting(kRecoveryTempPath,
+	                                              "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<song\n", "\n</song>\n");
+	if (error != Error::NONE) {
+		return error;
+	}
+	f_unlink(kRecoveryFinalPath);                    // harmless if it doesn't exist yet
+	f_rename(kRecoveryTempPath, kRecoveryFinalPath); // atomic swap into place
+	return Error::NONE;
+}
+
+// Clear the recovery file and the dirty flag. Called after a manual Save (work is now safe) and on
+// load-away. This is the invariant that makes presence-at-boot mean "unsaved work was lost":
+// RECOVER exists ⟺ there is unsaved work. Save is the "work is safe" event that clears it.
+void StorageManager::clearRecoveryFile() {
+	songNeedsRecoverySave = false; // so the autosave task won't immediately re-create it
+	f_unlink(kRecoveryFinalPath);  // harmless if it doesn't exist
+	f_unlink(kRecoveryTempPath);
+}
+
 // Lets you get the FilePointer for the file.
 bool StorageManager::fileExists(char const* pathName, FilePointer* fp) {
 	FIL fil;
@@ -238,6 +280,112 @@ bool StorageManager::fileExists(char const* pathName, FilePointer* fp) {
 
 	f_close(&fil);
 	return true;
+}
+
+// Recency: seed the synthetic save-clock (diskio.c) from the newest date already in SONGS, so files saved this
+// session sort AFTER everything already on the card. One bounded, read-only directory scan per fresh mount.
+static void seedRecencyClockFromCard() {
+	auto dres = FatFS::Directory::open("SONGS");
+	if (!dres) {
+		return; // no SONGS folder yet — get_fattime falls back to a sane base date
+	}
+	FatFS::Directory& dir = *dres;
+	DWORD maxPacked = 0;
+	for (int32_t guard = 0; guard < 100000; guard++) {
+		auto rr = dir.read();
+		if (!rr) {
+			break;
+		}
+		FatFS::FileInfo info = *rr;
+		if (info.fname[0] == 0) {
+			break; // end of directory
+		}
+		if ((info.fattrib & AM_DIR) != 0) {
+			continue;
+		}
+		// Ignore implausible far-future dates. A corrupt entry — or, once it has happened, any file this bug
+		// already stamped near the FAT year ceiling (2107) — would otherwise become "newest" and lock the clock
+		// up there forever (it renders as a 1970-ish garbage date on a computer). Only seed from sane years.
+		uint32_t yearOffset = (uint32_t)((info.fdate >> 9) & 0x7Fu); // 0 = 1980
+		if (yearOffset >= 120u) {                                    // >= year 2100
+			continue;
+		}
+		DWORD packed = ((DWORD)info.fdate << 16) | (DWORD)info.ftime;
+		if (packed > maxPacked) {
+			maxPacked = packed;
+		}
+	}
+	if (maxPacked != 0) {
+		fatClockSeedFromPacked(maxPacked);
+	}
+}
+
+// THE TRAP (worth knowing): the Deluge has no real-time clock, so the recency clock seeds itself at mount from the
+// newest FAT date in SONGS. A corrupt directory entry (power-loss mid-SD-write is common) — or a song imported with a
+// bogus date — can decode to a near-ceiling year (~2100+). The seed then adopts it as "newest" and pins the clock up
+// near the FAT year ceiling (~2106); every later save inherits that and becomes the new "newest", so it never recovers
+// on its own. The dates are real and ordered, but the YEAR is garbage, and host OSes (macOS msdosfs especially) render
+// a ~2106 date as 1970 — so it LOOKS like every save has a zeroed date. seedRecencyClockFromCard() now clamps the seed
+// so a bad date can't poison the clock; this opt-in pass HEALS files already stamped that way.
+//
+// Re-stamps any SONGS/*.XML whose year >= 2100 down by 82 years (2106 -> 2024), keeping month/day/time so the original
+// save order is preserved. Read-only scan first (directory closes before we touch entries), then f_utime each. Bounded
+// per mount; if a card somehow has more poisoned files than the cap, the rest heal on the next mount.
+static void repairSongDatesOnCard() {
+	if (!runtimeFeatureSettings.isOn(RuntimeFeatureSettingType::RepairSongDates)) {
+		return;
+	}
+	constexpr int32_t kMaxRepair = 96;
+	constexpr int32_t kNameLen = 40;
+	static char names[kMaxRepair][kNameLen];
+	static uint16_t newFdate[kMaxRepair];
+	static uint16_t keepFtime[kMaxRepair];
+	int32_t n = 0;
+	{
+		auto dres = FatFS::Directory::open("SONGS");
+		if (!dres) {
+			return;
+		}
+		FatFS::Directory& dir = *dres;
+		for (int32_t guard = 0; guard < 100000 && n < kMaxRepair; guard++) {
+			auto rr = dir.read();
+			if (!rr) {
+				break;
+			}
+			FatFS::FileInfo info = *rr;
+			if (info.fname[0] == 0) {
+				break; // end of directory
+			}
+			if ((info.fattrib & AM_DIR) != 0) {
+				continue;
+			}
+			uint32_t yearOffset = (uint32_t)((info.fdate >> 9) & 0x7Fu);
+			if (yearOffset < 120u) {
+				continue; // already a sane year (< 2100)
+			}
+			newFdate[n] = (uint16_t)(((yearOffset - 82u) << 9) | (info.fdate & 0x01FFu)); // shift year, keep month/day
+			keepFtime[n] = info.ftime;
+			int32_t k = 0;
+			for (; info.fname[k] != 0 && k < kNameLen - 1; k++) {
+				names[n][k] = info.fname[k];
+			}
+			names[n][k] = 0;
+			n++;
+		}
+	} // Directory closes here (RAII) — don't mutate entries while still iterating the dir.
+	for (int32_t i = 0; i < n; i++) {
+		String path;
+		if (path.set("SONGS/") != Error::NONE) {
+			continue;
+		}
+		if (path.concatenate(names[i]) != Error::NONE) {
+			continue;
+		}
+		FILINFO fno;
+		fno.fdate = newFdate[i];
+		fno.ftime = keepFtime[i];
+		f_utime(path.get(), &fno);
+	}
 }
 
 // Gets ready to access SD card.
@@ -263,6 +411,8 @@ Error StorageManager::initSD() {
 	});
 	if (success) {
 		audioFileManager.firstCardRead(); // tell the audio file manager that we have a new card
+		seedRecencyClockFromCard();       // recency: keep new saves dated after existing ones
+		repairSongDatesOnCard();          // opt-in: heal songs whose date overshot to the FAT year ceiling
 		return Error::NONE;
 	}
 	return Error::SD_CARD;

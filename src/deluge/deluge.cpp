@@ -20,6 +20,7 @@
 #include "RZA1/sdhi/inc/sdif.h"
 #include "definitions_cxx.hpp"
 #include "drivers/pic/pic.h"
+#include "gui/context_menu/recover_song.h"
 #include "gui/ui/audio_recorder.h"
 #include "gui/ui/browser/browser.h"
 #include "gui/ui/keyboard/keyboard_screen.h"
@@ -395,13 +396,50 @@ void setupBlankSong() {
 	AudioEngine::mustUpdateReverbParamsBeforeNextRender = true;
 }
 
-/// Can only happen after settings, which includes default settings, have been read
-void setupStartupSong() {
+#pragma GCC push
+#pragma GCC diagnostic ignored "-Wstack-usage="
+/// Loads whatever the user's startup-song setting asks for. Returns early on any of several
+/// failure paths (no song configured, song missing, no template, crashed previous boot).
+/// Is this a path the user actually chose, or an unset setting?
+///
+/// A Deluge that has never saved a song stores an empty name, which reaches us as "SONGS/.XML" -
+/// a well-formed path with nothing in it. Treating that as a missing song produces a "Song missing"
+/// error on a machine where nothing is wrong, every single boot. Nothing is broken; the user simply
+/// never picked a startup song.
+static bool isConfiguredSongPath(char const* path) {
+	if (path == nullptr || *path == 0) {
+		return false;
+	}
+	// Find the basename, then check there's something before the extension.
+	char const* base = path;
+	for (char const* c = path; *c != 0; c++) {
+		if (*c == '/') {
+			base = c + 1;
+		}
+	}
+	return *base != 0 && *base != '.';
+}
+
+static void loadStartupSong() {
 
 	auto startupSongMode = FlashStorage::defaultStartupSongMode;
 	auto defaultSongFullPath = "SONGS/DEFAULT.XML";
 	auto filename =
 	    startupSongMode == StartupSongMode::TEMPLATE ? defaultSongFullPath : runtimeFeatureSettings.getStartupSong();
+
+	// No startup song was ever chosen. That is a normal, unconfigured Deluge, not a fault, so it
+	// must not produce an error. Use the template if one happens to exist, otherwise come up blank
+	// and say nothing. (Any unsaved work still gets offered by setupStartupSong afterwards.)
+	if (startupSongMode != StartupSongMode::TEMPLATE && !isConfiguredSongPath(filename)) {
+		if (StorageManager::fileExists(defaultSongFullPath)) {
+			filename = defaultSongFullPath;
+			startupSongMode = StartupSongMode::TEMPLATE;
+		}
+		else {
+			return; // blank song, quietly
+		}
+	}
+
 	String failSafePath;
 	failSafePath.concatenate("SONGS/__STARTUP_OFF_CHECK_");
 	auto size = strlen(filename) + 1;
@@ -452,14 +490,20 @@ void setupStartupSong() {
 				f_unlink(failSafePath.get());
 				return;
 			}
-			display->consoleText("Song missing");
-			// user didn't ask for the template, but if it exists let's use it instead
+			// A song WAS chosen and it has genuinely gone (renamed, deleted, different card). Worth
+			// one word, because the user's expectation is about to be broken. One, not two: on a
+			// 7-seg a second message just shoves the first off the display before it can be read.
+			//
+			// The unconfigured case never reaches here - it was handled quietly at the top.
 			if (StorageManager::fileExists(defaultSongFullPath)) {
-				display->consoleText("Using template");
+				display->consoleText("Startup song missing, using template");
 				filename = defaultSongFullPath;
 				startupSongMode = StartupSongMode::TEMPLATE;
 			}
 			else {
+				// Chosen song gone and no template to fall back on. Come up blank, but say so -
+				// silence here would look like the Deluge had forgotten the song on its own.
+				display->consoleText("Startup song missing");
 				// cleanup, this wasn't a crash
 				f_unlink(failSafePath.get());
 				return;
@@ -488,6 +532,38 @@ void setupStartupSong() {
 		return;
 	}
 }
+
+/// Can only happen after settings, which includes default settings, have been read
+void setupStartupSong() {
+	// Decide BEFORE loading. The load can leave a RECOVER.XML of its own behind, and we only want to
+	// offer work that predates this boot.
+	bool offerRecovery =
+	    StorageManager::fileExists("SYSTEM/RECOVER.XML")
+	    && runtimeFeatureSettings.get(RuntimeFeatureSettingType::AutosaveRecovery) == RuntimeFeatureStateToggle::On;
+
+	loadStartupSong();
+
+	// Recovery: an unsaved song was left behind by a power loss. Offer it, don't impose it.
+	//
+	// B1 loaded RECOVER.XML INSTEAD of the startup song, announcing itself only with console text
+	// that scrolls past a 7-seg in about a second. The Deluge came up holding a song the user never
+	// asked for, which reads as a broken instrument rather than a rescued jam.
+	//
+	// So the offer sits AFTER the load and OUTSIDE it. After, so the user is already looking at
+	// whatever they normally boot into and declining costs nothing. Outside, because loadStartupSong
+	// returns early on half a dozen paths - no song configured, song missing, no template, BLANK
+	// mode, crashed previous boot - and those are exactly the situations where unsaved work is most
+	// likely to be the only copy. An earlier version of this nested the offer inside the successful
+	// load and silently never fired on a card whose startup song didn't exist.
+	//
+	// Declining destroys nothing: this path calls loadSongUI.performLoad() directly and skips the
+	// interactive wrapper that clears the recovery file, so the jam stays put. It stops being
+	// offered once the user saves or loads a song by hand, both of which clear it.
+	if (offerRecovery) {
+		openUI(&deluge::gui::context_menu::recoverSong);
+	}
+}
+#pragma GCC pop
 
 void setupOLED() {
 	// delayMS(10);
@@ -579,6 +655,26 @@ void registerTasks() {
 	// formerly part of cluster loading (why? no idea), actions undo/redo midi commands
 	addRepeatingTask([]() { playbackHandler.slowRoutine(); }, p++, 0.01, 0.09, 0.1, "playback slow routine",
 	                 RESOURCE_SD);
+	// Autosave/recovery (slice 1): if the song structure changed, the card is free, and we're NOT
+	// playing, write SONGS/RECOVER.XML. Card-safe (RESOURCE_SD_ROUTINE) and never during playback,
+	// so it can't glitch live audio. Restore-on-boot is a later slice.
+	addRepeatingTask(
+	    []() {
+		    // Off means OFF: no recovery file gets written at all, not merely "written but never
+		    // offered". Someone who turns this off is saying they don't want the Deluge writing to
+		    // their card behind their back, and a stale RECOVER.XML left lying around would also
+		    // ambush them the moment they switched the feature back on.
+		    if (runtimeFeatureSettings.get(RuntimeFeatureSettingType::AutosaveRecovery)
+		        != RuntimeFeatureStateToggle::On) {
+			    songNeedsRecoverySave = false;
+			    return;
+		    }
+		    if (songNeedsRecoverySave && !currentlyAccessingCard && !playbackHandler.isEitherClockActive()) {
+			    songNeedsRecoverySave = false;
+			    StorageManager::writeRecoveryFile();
+		    }
+	    },
+	    p++, 0.5, 2.0, 10.0, "autosave recovery", RESOURCE_SD_ROUTINE);
 	// 31-39: Idle priority (40 for dyn tasks)
 	p = 31;
 	addRepeatingTask(&(PIC::flush), p++, 0.001, 0.001, 0.02, "PIC flush", RESOURCE_NONE);

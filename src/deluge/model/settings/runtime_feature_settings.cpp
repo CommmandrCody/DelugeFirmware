@@ -78,6 +78,38 @@ static void SetupSyncScalingActionSetting(RuntimeFeatureSetting& setting, deluge
 	};
 }
 
+static void SetupQuantizeDivisionSetting(RuntimeFeatureSetting& setting, deluge::l10n::String displayName,
+                                         std::string_view xmlName, RuntimeFeatureStateQuantizeDivision def) {
+	setting.displayName = displayName;
+	setting.xmlName = xmlName;
+	setting.value = static_cast<uint32_t>(def);
+
+	// "Zoom" is the default so nothing changes for anyone who has not gone looking for this. The rest
+	// are ::SyncLevel values, which is what makes the tick maths in InstrumentClipView a one-liner.
+	setting.options = {
+	    {
+	        .displayName = display->haveOLED() ? "Zoom" : "ZOOM",
+	        .value = RuntimeFeatureStateQuantizeDivision::QuantizeToZoom,
+	    },
+	    {
+	        .displayName = display->haveOLED() ? "1/4" : "4TH",
+	        .value = RuntimeFeatureStateQuantizeDivision::QuantizeTo4th,
+	    },
+	    {
+	        .displayName = display->haveOLED() ? "1/8" : "8TH",
+	        .value = RuntimeFeatureStateQuantizeDivision::QuantizeTo8th,
+	    },
+	    {
+	        .displayName = display->haveOLED() ? "1/16" : "16TH",
+	        .value = RuntimeFeatureStateQuantizeDivision::QuantizeTo16th,
+	    },
+	    {
+	        .displayName = display->haveOLED() ? "1/32" : "32ND",
+	        .value = RuntimeFeatureStateQuantizeDivision::QuantizeTo32nd,
+	    },
+	};
+}
+
 static void SetupEmulatedDisplaySetting(RuntimeFeatureSetting& setting, deluge::l10n::String displayName,
                                         std::string_view xmlName, RuntimeFeatureStateEmulatedDisplay def) {
 	setting.displayName = displayName;
@@ -110,6 +142,10 @@ void RuntimeFeatureSettings::init() {
 	// Quantize
 	SetupOnOffSetting(settings[RuntimeFeatureSettingType::Quantize], STRING_FOR_COMMUNITY_FEATURE_QUANTIZE, "quantize",
 	                  RuntimeFeatureStateToggle::On);
+	// Quantize division: what "quantize" snaps to. Zoom = the old behaviour.
+	SetupQuantizeDivisionSetting(settings[RuntimeFeatureSettingType::QuantizeDivision],
+	                             STRING_FOR_COMMUNITY_FEATURE_QUANTIZE_DIVISION, "quantizeDivision",
+	                             RuntimeFeatureStateQuantizeDivision::QuantizeToZoom);
 	// FineTempoKnob
 	SetupOnOffSetting(settings[RuntimeFeatureSettingType::FineTempoKnob], STRING_FOR_COMMUNITY_FEATURE_FINE_TEMPO_KNOB,
 	                  "fineTempoKnob", RuntimeFeatureStateToggle::On);
@@ -171,6 +207,27 @@ void RuntimeFeatureSettings::init() {
 	                  STRING_FOR_COMMUNITY_FEATURE_CHORD_KEYBOARD, "displayChordKeyboard",
 	                  RuntimeFeatureStateToggle::Off);
 
+	// ChordBrush
+	SetupOnOffSetting(settings[RuntimeFeatureSettingType::ChordBrush], STRING_FOR_COMMUNITY_FEATURE_CHORD_BRUSH,
+	                  "chordBrush", RuntimeFeatureStateToggle::On);
+
+	// KeyboardNotePreview — light up played notes on the keyboard grid (incl. during playback)
+	SetupOnOffSetting(settings[RuntimeFeatureSettingType::KeyboardNotePreview],
+	                  STRING_FOR_COMMUNITY_FEATURE_KEYBOARD_NOTE_PREVIEW, "keyboardNotePreview",
+	                  RuntimeFeatureStateToggle::On);
+
+	// RetrospectiveCapture — background-buffer notes played in a keyboard layout (even when not
+	// recording); SHIFT+RECORD dumps them into the clip. "Never lose a noodled idea."
+	SetupOnOffSetting(settings[RuntimeFeatureSettingType::RetrospectiveCapture],
+	                  STRING_FOR_COMMUNITY_FEATURE_RETROSPECTIVE_CAPTURE, "retrospectiveCapture",
+	                  RuntimeFeatureStateToggle::On);
+
+	// RepairSongDates — when on, the card-mount scan re-stamps any song whose date overshot to the FAT year
+	// ceiling (the recency-seed trap) back to a sane year, preserving order. Opt-in; off does nothing.
+	SetupOnOffSetting(settings[RuntimeFeatureSettingType::RepairSongDates],
+	                  STRING_FOR_COMMUNITY_FEATURE_REPAIR_SONG_DATES, "repairSongDates",
+	                  RuntimeFeatureStateToggle::Off);
+
 	// AlternativePlaybackStartBehaviour
 	SetupOnOffSetting(settings[RuntimeFeatureSettingType::AlternativePlaybackStartBehaviour],
 	                  STRING_FOR_COMMUNITY_FEATURE_ALTERNATIVE_PLAYBACK_START_BEHAVIOUR,
@@ -199,6 +256,13 @@ void RuntimeFeatureSettings::init() {
 	// Show Battery Level
 	SetupOnOffSetting(settings[RuntimeFeatureSettingType::ShowBatteryLevel],
 	                  STRING_FOR_COMMUNITY_FEATURE_SHOW_BATTERY_LEVEL, "showBatteryLevel",
+	                  RuntimeFeatureStateToggle::On);
+
+	// Autosave Recovery: keep a copy of unsaved work in SYSTEM/RECOVER.XML and, on the next boot,
+	// offer to load it. Off means no recovery file is written and no prompt appears, for anyone who
+	// would rather the Deluge never touched the card behind their back.
+	SetupOnOffSetting(settings[RuntimeFeatureSettingType::AutosaveRecovery],
+	                  STRING_FOR_COMMUNITY_FEATURE_AUTOSAVE_RECOVERY, "autosaveRecovery",
 	                  RuntimeFeatureStateToggle::On);
 }
 

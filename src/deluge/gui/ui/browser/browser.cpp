@@ -38,6 +38,8 @@
 #include "storage/storage_manager.h"
 #include "util/functions.h"
 #include "util/try.h"
+#include <climits>
+#include <cstddef> // offsetof, for the recents sort key
 #include <cstring>
 #include <new>
 
@@ -331,6 +333,9 @@ extensionNotSupported:
 		}
 		thisItem->isFolder = isFolder;
 		thisItem->filePointer = thisFilePointer;
+		// Recency: keep the directory entry's packed datetime so the "sort songs by recents" load list can order
+		// newest-first. With the recency clock this tracks save order.
+		thisItem->dateModified = ((uint32_t)staticFNO.fdate << 16) | (uint32_t)staticFNO.ftime;
 
 		// displayName is the CStringArray sort key, and must equal the real on-card name. The 7SEG short form ("185")
 		// is produced at render time, not stored here - storing it made enteredText display-dependent, which is what

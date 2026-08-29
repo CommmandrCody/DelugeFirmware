@@ -78,6 +78,38 @@ static void SetupSyncScalingActionSetting(RuntimeFeatureSetting& setting, deluge
 	};
 }
 
+static void SetupQuantizeDivisionSetting(RuntimeFeatureSetting& setting, deluge::l10n::String displayName,
+                                         std::string_view xmlName, RuntimeFeatureStateQuantizeDivision def) {
+	setting.displayName = displayName;
+	setting.xmlName = xmlName;
+	setting.value = static_cast<uint32_t>(def);
+
+	// "Zoom" is the default so nothing changes for anyone who has not gone looking for this. The rest
+	// are ::SyncLevel values, which is what makes the tick maths in InstrumentClipView a one-liner.
+	setting.options = {
+	    {
+	        .displayName = display->haveOLED() ? "Zoom" : "ZOOM",
+	        .value = RuntimeFeatureStateQuantizeDivision::QuantizeToZoom,
+	    },
+	    {
+	        .displayName = display->haveOLED() ? "1/4" : "4TH",
+	        .value = RuntimeFeatureStateQuantizeDivision::QuantizeTo4th,
+	    },
+	    {
+	        .displayName = display->haveOLED() ? "1/8" : "8TH",
+	        .value = RuntimeFeatureStateQuantizeDivision::QuantizeTo8th,
+	    },
+	    {
+	        .displayName = display->haveOLED() ? "1/16" : "16TH",
+	        .value = RuntimeFeatureStateQuantizeDivision::QuantizeTo16th,
+	    },
+	    {
+	        .displayName = display->haveOLED() ? "1/32" : "32ND",
+	        .value = RuntimeFeatureStateQuantizeDivision::QuantizeTo32nd,
+	    },
+	};
+}
+
 static void SetupEmulatedDisplaySetting(RuntimeFeatureSetting& setting, deluge::l10n::String displayName,
                                         std::string_view xmlName, RuntimeFeatureStateEmulatedDisplay def) {
 	setting.displayName = displayName;
@@ -110,6 +142,10 @@ void RuntimeFeatureSettings::init() {
 	// Quantize
 	SetupOnOffSetting(settings[RuntimeFeatureSettingType::Quantize], STRING_FOR_COMMUNITY_FEATURE_QUANTIZE, "quantize",
 	                  RuntimeFeatureStateToggle::On);
+	// Quantize division: what "quantize" snaps to. Zoom = the old behaviour.
+	SetupQuantizeDivisionSetting(settings[RuntimeFeatureSettingType::QuantizeDivision],
+	                             STRING_FOR_COMMUNITY_FEATURE_QUANTIZE_DIVISION, "quantizeDivision",
+	                             RuntimeFeatureStateQuantizeDivision::QuantizeToZoom);
 	// FineTempoKnob
 	SetupOnOffSetting(settings[RuntimeFeatureSettingType::FineTempoKnob], STRING_FOR_COMMUNITY_FEATURE_FINE_TEMPO_KNOB,
 	                  "fineTempoKnob", RuntimeFeatureStateToggle::On);

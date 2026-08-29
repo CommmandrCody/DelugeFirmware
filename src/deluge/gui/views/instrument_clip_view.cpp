@@ -6372,10 +6372,34 @@ ActionResult InstrumentClipView::commandStopQuantize(int32_t y) {
 	;
 }
 
+/// How wide one quantize step is, in sequencer ticks.
+///
+/// Historically this was always one pad column at the current zoom, which meant "quantize" landed
+/// on a different musical division depending on how far you happened to be zoomed in - and there
+/// was no way to say "1/16" and mean it. QuantizeDivision names the grid instead; Zoom keeps the
+/// original behaviour and is the default, so nothing changes unless you go and ask for it.
+int32_t InstrumentClipView::quantizeGridSize() {
+	const auto division = static_cast<RuntimeFeatureStateQuantizeDivision>(
+	    runtimeFeatureSettings.get(RuntimeFeatureSettingType::QuantizeDivision));
+	if (division == RuntimeFeatureStateQuantizeDivision::QuantizeToZoom) {
+		return getPosFromSquare(1) - getPosFromSquare(0);
+	}
+	// Same maths as record quantize (InstrumentClip::processCurrentPos), so a division means the same
+	// number of ticks whether it is applied while recording or afterwards.
+	const uint32_t baseThing = currentSong->tripletsOn ? 4 : 3;
+	const int32_t shift = 8 + currentSong->insideWorldTickMagnitude + currentSong->insideWorldTickMagnitudeOffsetFromBPM
+	                      - static_cast<int32_t>(division);
+	if (shift < 0 || shift >= 31) {
+		// Absurd tempo scaling; fall back rather than shifting by a silly amount.
+		return getPosFromSquare(1) - getPosFromSquare(0);
+	}
+	return static_cast<int32_t>(baseThing << shift);
+}
+
 void InstrumentClipView::commandQuantizeNotes(int8_t offset, NudgeMode nudgeMode) {
 	shouldIgnoreHorizontalScrollKnobActionIfNotAlsoPressedForThisNotePress = true;
 
-	int32_t squareSize = getPosFromSquare(1) - getPosFromSquare(0);
+	int32_t squareSize = quantizeGridSize();
 
 	if (quantizeAmount >= kQuantizationPrecision && offset > 0) {
 		return;

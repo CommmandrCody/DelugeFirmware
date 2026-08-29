@@ -391,6 +391,8 @@ private:
 
 	// TEMPO encoder commands
 	void commandQuantizeNotes(int8_t offset, NudgeMode nudgeMode);
+	/// Width of one quantize step in ticks: the configured division, or the zoom level.
+	int32_t quantizeGridSize();
 	void commandStartQuantize(int8_t offset, NudgeMode nudgeMode);
 	ActionResult commandStopQuantize(int32_t y);
 	void silenceAllAuditions();

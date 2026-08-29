@@ -41,10 +41,24 @@ enum RuntimeFeatureStateSyncScalingAction : uint32_t { SyncScaling = 0, Fill = 1
 
 enum RuntimeFeatureStateEmulatedDisplay : uint32_t { Hardware = 0, Toggle = 1, OnBoot = 2 };
 
+// Which grid the clip quantizer snaps to. Zoom keeps the original behaviour - the grid is whatever
+// one pad column happens to be at the current zoom - which means the musical division depends on
+// how far you are zoomed in. The named divisions make it explicit: pick 1/16 once and quantize
+// means 1/16 regardless of what you are looking at. Values are ::SyncLevel, so the existing tick
+// maths in InstrumentClip applies unchanged.
+enum RuntimeFeatureStateQuantizeDivision : uint32_t {
+	QuantizeToZoom = 0,
+	QuantizeTo4th = 3,
+	QuantizeTo8th = 4,
+	QuantizeTo16th = 5,
+	QuantizeTo32nd = 6,
+};
+
 /// Every setting needs to be declared in here
 enum RuntimeFeatureSettingType : uint32_t {
 	DrumRandomizer,
 	Quantize,
+	QuantizeDivision,
 	FineTempoKnob,
 	CatchNotes,
 	DeleteUnusedKitRows,

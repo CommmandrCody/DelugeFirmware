@@ -54,35 +54,50 @@ SettingToggle menuShowBatteryLevel(RuntimeFeatureSettingType::ShowBatteryLevel);
 SettingToggle menuRepairSongDates(RuntimeFeatureSettingType::RepairSongDates);
 SettingToggle menuRetrospectiveCapture(RuntimeFeatureSettingType::RetrospectiveCapture);
 SettingToggle menuAutosaveRecovery(RuntimeFeatureSettingType::AutosaveRecovery);
+// Not a toggle: Quantize Division has five options (Zoom, 1/4, 1/8, 1/16, 1/32).
+Setting menuQuantizeDivision(RuntimeFeatureSettingType::QuantizeDivision);
 
-std::array<MenuItem*, RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettings> subMenuEntries{
-    &menuDrumRandomizer,
-    &menuFineTempo,
-    &menuQuantize,
-    &menuCatchNotes,
-    &menuDeleteUnusedKitRows,
-    &menuAltGoldenKnobDelayParams,
-    &menuDevSysexAllowed,
-    &menuSyncScalingAction,
-    &menuHighlightIncomingNotes,
-    &menuDisplayNornsLayout,
-    &menuShiftIsSticky,
-    &menuLightShiftLed,
-    &menuEnableDX7Engine,
-    &menuEmulatedDisplay,
-    &menuEnableKeyboardViewSidebarMenuExit,
-    &menuEnableLaunchEventPlayhead,
-    &menuDisplayChordLayout,
-    &menuChordBrush,
-    &menuRetrospectiveCapture,
-    &menuAlternativePlaybackStartBehaviour,
-    &menuEnableGridViewLoopPads,
-    &menuAlternativeTapTempoBehaviour,
-    &menuHorizontalMenus,
-    &menuTrimFromStartOfAudioClip,
-    &menuShowBatteryLevel,
-    &menuRepairSongDates,
-    &menuAutosaveRecovery};
+// COMPILE-TIME GUARD. This array is SIZED from the enum but FILLED by hand, so adding a setting
+// without adding its entry here leaves a trailing nullptr - and scrolling onto one freezes the
+// device. That is not theoretical: adding QuantizeDivision to the enum and forgetting this line
+// locked up a Deluge in the Community Features menu, and it took a long evening to find.
+//
+// The static_assert below turns that into a build error instead. If it fires, either add the
+// menu item to this list, or increment kNonTopLevelSettings because the setting deliberately has
+// no top-level entry.
+auto subMenuEntries = std::to_array<MenuItem*>({&menuDrumRandomizer,
+                                                &menuFineTempo,
+                                                &menuQuantize,
+                                                &menuCatchNotes,
+                                                &menuDeleteUnusedKitRows,
+                                                &menuAltGoldenKnobDelayParams,
+                                                &menuDevSysexAllowed,
+                                                &menuSyncScalingAction,
+                                                &menuHighlightIncomingNotes,
+                                                &menuDisplayNornsLayout,
+                                                &menuShiftIsSticky,
+                                                &menuLightShiftLed,
+                                                &menuEnableDX7Engine,
+                                                &menuEmulatedDisplay,
+                                                &menuEnableKeyboardViewSidebarMenuExit,
+                                                &menuEnableLaunchEventPlayhead,
+                                                &menuDisplayChordLayout,
+                                                &menuChordBrush,
+                                                &menuRetrospectiveCapture,
+                                                &menuAlternativePlaybackStartBehaviour,
+                                                &menuEnableGridViewLoopPads,
+                                                &menuAlternativeTapTempoBehaviour,
+                                                &menuHorizontalMenus,
+                                                &menuTrimFromStartOfAudioClip,
+                                                &menuShowBatteryLevel,
+                                                &menuRepairSongDates,
+                                                &menuAutosaveRecovery,
+                                                &menuQuantizeDivision});
+
+static_assert(subMenuEntries.size() == RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettings,
+              "subMenuEntries must have one entry per runtime feature setting that has a top-level "
+              "menu item. A short list leaves trailing nullptrs, and scrolling onto one freezes the "
+              "device. Add the menu item, or bump kNonTopLevelSettings.");
 
 Settings::Settings(l10n::String name, l10n::String title) : menu_item::Submenu(name, title, subMenuEntries) {
 }

@@ -25,9 +25,15 @@ Setting::Setting(RuntimeFeatureSettingType ty) : currentSettingIndex(static_cast
 }
 
 void Setting::readCurrentValue() {
-	for (uint32_t idx = 0; idx < RUNTIME_FEATURE_SETTING_MAX_OPTIONS; ++idx) {
-		if (runtimeFeatureSettings.settings[currentSettingIndex].options[idx].value
-		    == runtimeFeatureSettings.settings[currentSettingIndex].value) {
+	// Iterate the options this setting ACTUALLY has, not RUNTIME_FEATURE_SETTING_MAX_OPTIONS (9).
+	// `options` is a vector sized by whatever the Setup* function pushed into it - two for an on/off
+	// setting - so the fixed bound read up to seven elements past the end of a heap allocation every
+	// time the menu landed on one. It usually gets away with it, because whatever follows happens to
+	// be readable and happens not to compare equal. When it does not get away with it, selecting the
+	// setting hangs the device. getOptions() below already iterates the vector properly.
+	const auto& options = runtimeFeatureSettings.settings[currentSettingIndex].options;
+	for (uint32_t idx = 0; idx < options.size(); ++idx) {
+		if (options[idx].value == runtimeFeatureSettings.settings[currentSettingIndex].value) {
 			this->setValue(idx);
 			return;
 		}

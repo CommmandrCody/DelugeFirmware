@@ -49,10 +49,17 @@ const char* noteNameInKey(uint8_t pitchClass, bool preferFlats);
 // True if the key spells with flats (F/Bb/Eb/Ab/Db major + their relative minors), from the scale.
 bool keyPrefersFlats(uint8_t keyRootPc, NoteSet scale);
 
-// Chroma spelling "lean": a device-wide override of the accidental style, so every surface (Deluge screen,
-// CT, iPad) spells identically. AUTO defers to the key (keyPrefersFlats); FLATS/SHARPS force it. It's a
-// SYNCED param — broadcast in 0x43 and settable from any surface via 0x44 — the Deluge holds the value,
-// anyone can toggle it, everyone follows. (chroma_one_spelling_across_surfaces)
+// Chroma spelling: a device-wide accidental style, so every surface (Deluge screen, CT, iPad) spells
+// identically. It's a SYNCED param — broadcast in 0x43 and settable from any surface via 0x44 — the
+// Deluge holds the value, anyone can toggle it, everyone follows. (chroma_one_spelling_across_surfaces)
+//
+// TWO choices: FLATS or SHARPS. AUTO is LEGACY. It read the key signature and picked for you, which
+// meant the same note read F# in one key and Gb in another without anyone touching a control, and it
+// had to break the six-accidental tie (F# major and Gb major are one key) on somebody's taste.
+//
+// AUTO keeps its value of 0 rather than being removed: the number is on the wire, and renumbering
+// would disagree with any host that has not been updated in step. It still resolves — via
+// keyPrefersFlats() — so an older host that sends 0 still gets sensible spelling. Nothing SELECTS it.
 enum class ChromaSpelling : uint8_t { AUTO = 0, FLATS = 1, SHARPS = 2 };
 extern ChromaSpelling gChromaSpelling;
 

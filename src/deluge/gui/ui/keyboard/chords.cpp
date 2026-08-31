@@ -382,8 +382,14 @@ bool keyPrefersFlats(uint8_t keyRootPc, NoteSet scale) {
 	}
 }
 
-// Device-wide spelling lean (synced across surfaces). Defaults to AUTO = follow the key.
-ChromaSpelling gChromaSpelling = ChromaSpelling::AUTO;
+// Device-wide spelling (synced across surfaces). Two choices, and FLATS is the default; see the note
+// on the enum in chords.h for why AUTO still exists but is never selected.
+//
+// This also settles an inconsistency that was already here: the chord-state broadcast in
+// harmonic.cpp asks for flats whenever the value is not SHARPS, so it treated AUTO as flats, while
+// effectivePreferFlats() treated the same value as key-aware. One value, two behaviours. With a
+// two-way setting the two agree.
+ChromaSpelling gChromaSpelling = ChromaSpelling::FLATS;
 char gChromaChordName[16] = {0};
 
 bool effectivePreferFlats(uint8_t keyRootPc, NoteSet scale) {

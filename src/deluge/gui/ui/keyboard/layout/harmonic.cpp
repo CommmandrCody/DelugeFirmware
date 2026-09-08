@@ -857,8 +857,13 @@ void KeyboardLayoutHarmonic::pushChordState() {
 	}
 	char nameBuf[16] = {0};
 	nameChordFromNotes(nb, vn, nameBuf, gChromaSpelling != ChromaSpelling::SHARPS);
-	HIDSysex::sendChordState(curKeyRoot_, voiced, vn, curCtx_, getState().harmonic.voiceSpread,
-	                         getState().harmonic.voiceInversion, (uint8_t)currentSong->getCurrentScale(), nameBuf);
+	// ALL FIVE voice-shaping fields, not just spread and inversion. The dial, the voice it springs
+	// to, the octave stack and the register are what make the same chord speak differently - a
+	// surface that cannot see them cannot show what you are actually hearing.
+	KeyboardStateHarmonic& hs_ = getState().harmonic;
+	HIDSysex::sendChordState(curKeyRoot_, voiced, vn, curCtx_, hs_.voiceSpread, hs_.voiceInversion,
+	                         (uint8_t)currentSong->getCurrentScale(), nameBuf, hs_.voicingWalk, hs_.voicingHome,
+	                         hs_.voiceOctaves, (int8_t)hs_.octaveBase);
 }
 
 // Re-render continuously while the Calculator is suggesting (pulsing) or an inbound voicing-mod is queued
@@ -1688,22 +1693,33 @@ void KeyboardLayoutHarmonic::loadProgStep() {
 	recomputeSuggestions(keyRoot, iv, sc, rootPc);
 }
 
-// Spring-loaded voicing, vertical-encoder PRESS-DOWN: just arm. We don't spring yet — we wait for release, so we
-// can tell a clean click (spring to home) apart from a press-and-turn (dial the home, handled in the encoder).
+// Spring-loaded voicing, vertical-encoder PRESS-DOWN: just arm. We don't act yet — we wait for release, so we
+// can tell a clean click (HOLD the dialled voicing) apart from a press-and-turn (dial the home while turning,
+// handled in the encoder).
 bool KeyboardLayoutHarmonic::voicingPressBegin() {
 	voicingTurnedWhilePressed = false;
 	return true; // consume the press so a plain click doesn't fall through to other actions
 }
 
-// RELEASE: if you didn't turn while pressed, it was a clean click — spring the voicing back to home. If you did
-// press-and-turn, the home was already dialed, so leave it. (Releasing the CHORD also springs home; see evaluatePads.)
+// RELEASE: a clean click HOLDS the voicing you dialled — spin to taste, then click to keep it.
+//
+// This used to spring the voicing back to home instead, which meant there was no way to say "keep this
+// one": the only route to a new home was press-and-turn, holding the encoder in while turning, which is
+// the awkward hand position and has to be decided BEFORE you have heard the result. Spin-then-click lets
+// you dial it by ear with a free hand and commit afterwards.
+//
+// Nothing is lost by not springing here: releasing the CHORD pad still springs to home (see evaluatePads),
+// which is the gesture you are already making when you move on.
+//
+// At home there is nothing to hold, and a click must never THROW AWAY a voicing, so it does nothing.
+// (If you press-and-turn, the home was dialed during the turn, so this leaves it alone.)
 bool KeyboardLayoutHarmonic::voicingPressEnd() {
 	if (!voicingTurnedWhilePressed) {
 		KeyboardStateHarmonic& s = getState().harmonic;
 		if (s.voicingWalk != s.voicingHome) {
-			s.voicingWalk = s.voicingHome;
+			s.voicingHome = s.voicingWalk; // HOLD: the voice you dialled is now the spring-back voice
 			char buf[8];
-			sprintf(buf, "VOI%d", (int)s.voicingWalk);
+			sprintf(buf, "H%d", (int)s.voicingHome); // "H-24".."H24" — matches the press+turn readout
 			display->displayPopup(buf);
 			pushChordState();
 		}

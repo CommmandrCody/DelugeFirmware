@@ -22,7 +22,8 @@ void sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char* contextI
 // bitmask that already fits in 7 bits; octaveBase is small and positive.
 void sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId, int8_t spread = 0,
                     int8_t inversion = 0, uint8_t scale = 0, const char* chordName = nullptr, int8_t voicingWalk = 0,
-                    int8_t voicingHome = 0, uint8_t voiceOctaves = 0x08, int8_t octaveBase = 3);
+                    int8_t voicingHome = 0, uint8_t voiceOctaves = 0x08, int8_t octaveBase = 3,
+                    bool voicingSplitMode = false, int8_t voicingSplit = 0);
 // Chroma: outbound active-view push (0x45). Sent when the on-screen view changes, so the Companion's Learn tab can
 // auto-follow what the user is looking at. Payload is a short 7-bit-ASCII view slug (e.g. "clip", "song", "kit").
 // No-op until a host handshakes; last-value de-duped by the caller so it only fires on an actual change.

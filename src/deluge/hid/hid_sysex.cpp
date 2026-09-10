@@ -238,7 +238,8 @@ void HIDSysex::sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char
 // host renders the real chord regardless of what the 7-seg shows. No-op until a host handshakes.
 void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId,
                               int8_t spread, int8_t inversion, uint8_t scale, const char* chordName, int8_t voicingWalk,
-                              int8_t voicingHome, uint8_t voiceOctaves, int8_t octaveBase) {
+                              int8_t voicingHome, uint8_t voiceOctaves, int8_t octaveBase, bool voicingSplitMode,
+                              int8_t voicingSplit) {
 	if (lastHidCable == nullptr) {
 		return;
 	}
@@ -275,7 +276,9 @@ void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t num
 	// left the instrument, so no surface could show the voicing dial or the voice it springs to -
 	// even after a HOLD gesture was added for exactly that. Old hosts read the count and skip the
 	// tail, which is what this block was built for.
-	msg[i++] = 8;
+	// 8 = voicing MODE (0 octave/walk, 1 split), 9 = the split pivot in semitones above the chord's
+	// lowest note. A surface cannot draw the voicing without knowing WHICH mode produced it.
+	msg[i++] = 10;
 	msg[i++] = (uint8_t)spread & 0x7f;
 	msg[i++] = (uint8_t)inversion & 0x7f;
 	msg[i++] = scale & 0x7f;
@@ -286,6 +289,8 @@ void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t num
 	msg[i++] = (uint8_t)(voicingHome + 64) & 0x7f;
 	msg[i++] = voiceOctaves & 0x7f; // bits 0..6 = octave offsets -3..+3; already fits
 	msg[i++] = (uint8_t)octaveBase & 0x7f;
+	msg[i++] = voicingSplitMode ? 1 : 0;
+	msg[i++] = (uint8_t)voicingSplit & 0x7f; // 0..24, always positive - no bias needed
 	// Chroma "Delly is the truth": the Deluge's OWN chord-name string, appended after the extras as
 	// [len][ASCII...]. Every host renders this verbatim instead of re-deriving. Old hosts ignore the tail.
 	uint8_t nn = 0;

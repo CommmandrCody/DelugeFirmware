@@ -80,6 +80,12 @@ private:
 	void applyInboundMod(uint8_t modType, uint8_t value);
 	char curCtx_[40] = {};   // contextId of the last picked chord (degree + richness), reused on re-broadcast
 	uint8_t curKeyRoot_ = 0; // key root of the last picked chord
+	// The picked CHORD's root pitch class - not the key's. The bass voice sounds THIS, so it stays
+	// put while the voicing dial walks the chord up through inversions. Measured on the Telepathic
+	// Orchid: its bass held D#1 dead still across thirteen voicing positions. Deriving the bass from
+	// the voicing's lowest note instead (what we did) makes it drift every time you turn the dial.
+	uint8_t chordRootPc_ = 0;
+	bool bassOctPadHeld = false; // BASS OCTAVE pad down: the vertical wheel moves the bass voice
 	void recomputeSuggestions(uint8_t keyRoot, const uint8_t* iv, uint8_t sc, uint8_t homeRootPc);
 	void drawName(const char* roman, const char* abs);
 	void loadProgStep(); // PROG: latch the current preset's current step as the selected Harmonic Object
@@ -111,9 +117,8 @@ private:
 	int8_t topDeg = -1;        // the single strongest next degree; -1 = none
 
 	uint8_t palCtrlHeldMask = 0; // palette-control column rows held last frame (rising-edge detect)
-	uint8_t isoCtrlHeldMask = 0; // iso-control column rows held last frame (rising-edge detect)
 	uint64_t isoHeldMask = 0;    // iso pads held last frame (bit = localX*8+y) — rising-edge for voice edit
-	bool progPadHeld = false;    // PROG (purple row 2) held last frame — gates the encoder dial + step sustain
+	bool progPadHeld = false;    // PROG (control column row 4) held last frame — gates the dial + step sustain
 	/// Sound `note` on the bound bass track, releasing whatever it held. note<0 just releases.
 	void soundBassNote(int32_t note, uint8_t velocity);
 	void releaseExternalNotes() override; // the bass plays another track, so it can't self-release

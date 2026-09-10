@@ -56,7 +56,7 @@ inline int32_t floormod(int32_t a, int32_t b) {
 // ── Column model (the SINGLE source of truth for where each block lives) ───────────────────────────────
 // Layout is 16 wide: PALETTE(7) | palette-ctrl(1) | iso-ctrl(1) | ISO(7). The handedness SWAP mirrors the
 // two blocks AND their bound control columns, so each control column always sits next to the grid it drives.
-enum Region : uint8_t { REG_PAL, REG_PAL_CTRL, REG_ISO_CTRL, REG_ISO, REG_NONE };
+enum Region : uint8_t { REG_PAL, REG_PAL_CTRL, REG_ISO, REG_NONE };
 struct ColInfo {
 	Region region;
 	int32_t local; // index within a 7-wide block (0..6); 0 for control columns
@@ -396,24 +396,40 @@ void ensureProgsLoaded() {
 // ── Control columns ────────────────────────────────────────────────────────────────────────────────────
 // Each control column hosts toggles at the TOP; dark pads below act as CLEAR pads. Achromatic (white = on,
 // dim grey = off) so they never blend with the colourful palette. The modifiers adjust the VISUALS.
-//   ISO control (bound to the iso): in-key/chromatic view, show-chord, sticky-voicing.
+//   ISO control (bound to the iso): in-key/chromatic view, show-chord.
 //   PALETTE control (bound to the explorer): Calculator on/off, handedness swap.
-constexpr int32_t kBtnIsoView = kDisplayHeight - 1;   // iso-ctrl: in-key <-> chromatic
-constexpr int32_t kBtnShowChord = kDisplayHeight - 2; // iso-ctrl: show / hide the chord shape
-constexpr int32_t kBtnSticky = kDisplayHeight - 3;    // iso-ctrl: sticky chord voicing
-constexpr int32_t kBtnLattice = kDisplayHeight - 4;   // iso-ctrl: full chord lattice on/off
-constexpr int32_t kBtnSnap = 3;                       // iso-ctrl: SNAP — iso jumps to the chord's octave on pick
-constexpr int32_t kBtnProg = kDisplayHeight - 1;      // ctrl: PROGRESSION hold-to-dial
-constexpr int32_t kBtnEdit = kDisplayHeight - 3;      // ctrl: sculpt notes on the iso
-constexpr int32_t kBtnAudition = 0;      // iso-ctrl: AUDITION the voicing — momentary, hold to hear the chord
-constexpr uint8_t kIsoCtrlClearMask = 0; // iso-ctrl: row 2 free (for the Diff View); no clear pads here
+// THE ISO CONTROL COLUMN IS GONE, and took four settings with it. colInfoFor() maps column 8 to
+// the PALETTE control column and there is no second control column at all, so every pad that lived
+// here - in-key/chromatic, show-chord, the lattice/diff overlay, SNAP - stopped being pressable the
+// day the column was removed. The code kept compiling and kept looking correct, which is exactly
+// why it survived: an unreachable branch never fails a build.
+//
+// The comment above claiming those toggles "went to the settings menu" is not true. No menu item
+// was ever added. They are stuck at their defaults with no way to reach them. The defaults happen
+// to be the sensible ones (chord shown, in-key view, no overlay, snap on) so nothing is broken
+// today, but four settings are unreachable and they need real menu items, not a deleted pad.
+//
+// PROGRESSION was the worst of it. It read the iso column, so it could never fire - while the
+// control table advertised its name on palette row 7. Hold row 7 under LEARN and the Deluge said
+// "PROGRESSION (HOLD + DIAL)"; press it and you toggled the Calculator. The surface lied. It now
+// lives on palette row 4, which was the one empty row on the column, and reads palCtrlNow.
+constexpr int32_t kBtnProg = 4;                  // pal-ctrl: PROGRESSION hold-to-dial
+constexpr int32_t kBtnEdit = kDisplayHeight - 3; // pal-ctrl: sculpt notes on the iso
 
 // VOICING controls live on the pal-ctrl column (they shape the CHORD, not the surface).
 constexpr int32_t kBtnCalc = kDisplayHeight - 1; // pal-ctrl: next-chord Calculator on/off
-// How long an adjustment re-sounds for. Long enough to actually hear the chord, short enough that
-// it has clearly stopped before you reach for the next control. Tune by ear - this is a feel value,
-// not a derived one.
-constexpr uint8_t kAutoAuditionFrames = 22;
+// How long an adjustment re-sounds for, in RENDER FRAMES. This is a GATE: the notes are held for
+// this many frames and then released, so the patch's own envelope only shapes what happens after.
+//
+// 22 was tuned while the countdown could not complete - requestsContinuousRender() did not include
+// autoAuditionFrames, so the frames only advanced when something else caused a render. Nobody ever
+// heard the full 22. With the countdown ticking properly it is about a second of held key, which
+// makes a fast piano patch sound like it has a long release: the gate, not the patch.
+//
+// Short enough to be a STRIKE, not a sustain. You want to hear the chord land and then hear the
+// PATCH decay - if the audition is still holding the note, you are listening to this constant
+// instead of to your sound. Still a feel value: tune by ear.
+constexpr uint8_t kAutoAuditionFrames = 3;
 
 /// Which degree a palette column shows, given how far the palette is scrolled.
 /// Continuous: scroll far enough right and column 0 is showing the NEXT octave's tonic.
@@ -421,9 +437,17 @@ inline int32_t degreeAtColumn(int32_t localColumn, int32_t scrollSteps) {
 	return localColumn + scrollSteps;
 }
 
-constexpr int32_t kBtnBass = kDisplayHeight - 2;                // ctrl: BASS follow (hold+dial to bind)
-constexpr int32_t kBtnStack = 3;                                // pal-ctrl: octave STACK / picker
-constexpr int32_t kBtnSpread = 2;                               // pal-ctrl: SPREAD (drop-root open)
+constexpr int32_t kBtnBass = kDisplayHeight - 2; // ctrl: BASS follow (hold+dial to bind)
+constexpr int32_t kBtnStack = 3;                 // pal-ctrl: octave STACK / picker
+// Was SPREAD. Measured against the Orchid: our spread only ever pushed notes DOWN, which muddies,
+// and its top setting was a literal no-op on a triad (all three notes dropped an octave = the same
+// chord, transposed). The voicing dial already opens a chord properly - it lifts the lowest note
+// and cascades through inversions, which is EXACTLY the Orchid's chord dial, verified note-for-note
+// across thirteen positions. So spread had nothing left to do.
+//
+// What the Orchid has and we lacked is the second dial: a bass voice spanning five octaves. That is
+// what this pad is now. Hold it and turn the vertical wheel.
+constexpr int32_t kBtnBassOct = 2;                              // pal-ctrl: BASS OCTAVE (hold + dial)
 constexpr int32_t kBtnInversion = 1;                            // pal-ctrl: INVERSION (cycle 0..3)
 constexpr uint8_t kPalCtrlClearMask = (uint8_t)((1u << 1) - 1); // row 0 = clear pad
 
@@ -456,8 +480,12 @@ constexpr ControlPad kControlPads[] = {
     {REG_PAL_CTRL, kBtnBass, "BASS FOLLOW (HOLD + DIAL TO BIND)", "BASS"},
     {REG_PAL_CTRL, kBtnEdit, "EDIT NOTES", "EDIT"},
     {REG_PAL_CTRL, kBtnStack, "OCTAVE STACK PICKER", "STACK"},
-    {REG_PAL_CTRL, kBtnSpread, "SPREAD (DROP-ROOT)", "SPREAD"},
+    {REG_PAL_CTRL, kBtnBassOct, "BASS OCTAVE (HOLD + DIAL)", "BASS OCT"},
     {REG_PAL_CTRL, kBtnInversion, "INVERSION", "INV"},
+    // CALCULATOR was missing from this table, and that omission is what let row 7 lie: the table
+    // had PROGRESSION at row 7 and the press handler had the Calculator there, and because only one
+    // of the two was listed the uniqueness check below saw no collision. Every pad belongs here.
+    {REG_PAL_CTRL, kBtnCalc, "CALCULATOR (NEXT-CHORD SUGGESTIONS)", "CALC"},
 };
 
 // The point of the table is that it can be rearranged, so the compiler checks the rearrangement.
@@ -481,7 +509,7 @@ constexpr bool controlPadsAreInRange() {
 		if (p.y < 0 || p.y >= kDisplayHeight) {
 			return false;
 		}
-		if (p.region != REG_PAL_CTRL && p.region != REG_ISO_CTRL) {
+		if (p.region != REG_PAL_CTRL) {
 			return false;
 		}
 	}
@@ -671,7 +699,56 @@ uint8_t KeyboardLayoutHarmonic::buildVoicing(int16_t* out, uint8_t maxOut) {
 	// LOWEST note an octave; each -step drops the current HIGHEST — re-sorting between, so the chord cascades
 	// through inversions and opens across the range. Applied to the core voicing here, before STACK replicates
 	// it. Sticky across chord picks, so it reads as a persistent "voicing character" you dial in and leave.
-	int8_t walk = getState().harmonic.voicingWalk;
+	//
+	// SPLIT MODE is the OTHER half of the dial (click it to switch). Instead of walking the chord
+	// along the keyboard, it sets a PIVOT: notes at or above the split play an octave higher, notes
+	// below play an octave lower. The chord opens AROUND the point rather than travelling.
+	//
+	// This is the spread that works in both directions. The old SPREAD only pushed notes DOWN -
+	// energy piles up in the bass and the chord muddies, and dropping ALL of a triad's notes is just
+	// a transposition, which is why its top step did nothing. A pivot puts air BETWEEN the voices.
+	//
+	// The split is relative to the chord's own lowest note, so it means the same thing whatever
+	// chord you pick and wherever it sits. Below the bottom note every voice is "above" (the whole
+	// chord lifts); past the top note every voice is "below" (it drops); in between it splits.
+	if (getState().harmonic.voicingSplitMode && n > 1) {
+		for (uint8_t i = 1; i < n; i++) { // sort first - SPREAD above does not re-sort
+			int16_t v = tmp[i];
+			int32_t j = (int32_t)i - 1;
+			while (j >= 0 && tmp[j] > v) {
+				tmp[j + 1] = tmp[j];
+				j--;
+			}
+			tmp[j + 1] = v;
+		}
+		// The pivot counts VOICES, not semitones. A semitone pivot spends most of its travel in the
+		// gaps between chord tones, so the dial does nothing for several clicks at a time - the exact
+		// deadness that made the old SPREAD feel broken. By voice, every click moves something.
+		//
+		// The lowest `split` voices drop an octave and the rest rise one: a spread in BOTH
+		// directions. At 0 the whole chord lifts and at n it drops (both are transpositions), and
+		// everything in between is a genuine opening. A 9th chord gives six positions, a triad four.
+		int32_t k = getState().harmonic.voicingSplit;
+		if (k > (int32_t)n) {
+			k = (int32_t)n;
+		}
+		for (uint8_t i = 0; i < n; i++) {
+			int16_t moved = ((int32_t)i < k) ? (int16_t)(tmp[i] - 12) : (int16_t)(tmp[i] + 12);
+			if (moved >= 0 && moved <= 127) { // never push a voice off the end of MIDI
+				tmp[i] = moved;
+			}
+		}
+		for (uint8_t i = 1; i < n; i++) { // re-sort: voices crossed each other
+			int16_t v = tmp[i];
+			int32_t j = (int32_t)i - 1;
+			while (j >= 0 && tmp[j] > v) {
+				tmp[j + 1] = tmp[j];
+				j--;
+			}
+			tmp[j + 1] = v;
+		}
+	}
+	int8_t walk = getState().harmonic.voicingSplitMode ? 0 : getState().harmonic.voicingWalk;
 	if (walk != 0 && n > 1) {
 		for (uint8_t i = 1; i < n; i++) { // ensure sorted (SPREAD above doesn't re-sort)
 			int16_t v = tmp[i];
@@ -764,10 +841,20 @@ void KeyboardLayoutHarmonic::soundBassNote(int32_t note, uint8_t velocity) {
 	}
 
 	auto* instrument = static_cast<MelodicInstrument*>(target);
+	// THE CLIP'S param manager, not the instrument's.
+	//
+	// The live sound - filter, envelopes, reverb, delay - lives in the CLIP's ParamManager. Passing
+	// `instrument->getParamManager()` handed the note the instrument's backing params instead, so the
+	// bass played completely DRY: edit the bass track's release and delay and the harmonic bass
+	// ignored every bit of it. Every other caller of this in the firmware passes the clip's own
+	// `&paramManager`; we were the odd one out.
+	Clip* bassClip = target->getActiveClip();
+	if (bassClip == nullptr) {
+		return; // nothing to sound through, and no params to sound it with
+	}
 	char stackMemory[MODEL_STACK_MAX_SIZE];
 	ModelStackWithThreeMainThings* modelStack = setupModelStackWithThreeMainThingsButNoNoteRow(
-	    stackMemory, currentSong, instrument->toModControllable(), target->getActiveClip(),
-	    instrument->getParamManager(currentSong));
+	    stackMemory, currentSong, instrument->toModControllable(), bassClip, &bassClip->paramManager);
 
 	// mpeValues is nullptr: this is a plain note from a pad, with no expression to carry.
 	if (hs.bassLastNote >= 0) {
@@ -845,8 +932,15 @@ void KeyboardLayoutHarmonic::pushChordState() {
 				lo = voiced[i];
 			}
 		}
-		int32_t bassNote = (int32_t)lo - 12;
-		if (bassNote >= 0) { // an octave below the very bottom of MIDI isn't a note
+		// THE CHORD'S ROOT, in the octave you chose - not "an octave under whatever is lowest".
+		//
+		// Deriving it from the voicing meant the bass moved every time the voicing dial did, so the
+		// two controls fought: open the chord upward and the bass followed it up, losing the floor.
+		// Measured on the Orchid, its bass holds dead still while the chord walks - that is what
+		// makes it a foundation. MIDI octave n starts at (n+1)*12, so C1 is 24.
+		int32_t bassNote = (int32_t)chordRootPc_ + 12 * ((int32_t)getState().harmonic.bassOctave + 1);
+		(void)lo;
+		if (bassNote >= 0 && bassNote <= 127) {
 			soundBassNote(bassNote, 100);
 		}
 	}
@@ -863,13 +957,39 @@ void KeyboardLayoutHarmonic::pushChordState() {
 	KeyboardStateHarmonic& hs_ = getState().harmonic;
 	HIDSysex::sendChordState(curKeyRoot_, voiced, vn, curCtx_, hs_.voiceSpread, hs_.voiceInversion,
 	                         (uint8_t)currentSong->getCurrentScale(), nameBuf, hs_.voicingWalk, hs_.voicingHome,
-	                         hs_.voiceOctaves, (int8_t)hs_.octaveBase);
+	                         hs_.voiceOctaves, (int8_t)hs_.octaveBase, hs_.voicingSplitMode, hs_.voicingSplit);
 }
 
 // Re-render continuously while the Calculator is suggesting (pulsing) or an inbound voicing-mod is queued
 // (so renderPads gets a UI-thread tick to drain it). See requestsChordApply flow in hid_sysex.cpp.
 bool KeyboardLayoutHarmonic::requestsContinuousRender() {
-	return numSuggestions > 0 || HIDSysex::hasChordMod();
+	// autoAuditionFrames is a FRAME COUNT, so the frames have to actually arrive. Without this the
+	// countdown only advanced when something else happened to trigger a render: an adjustment armed
+	// the audition, the notes were re-enabled, and then - with nobody touching anything - the render
+	// stopped, the count never reached zero, and the notes were never released. The chord hung until
+	// your next input nudged a frame through, which is why CLEAR appeared to need several presses.
+	//
+	// A LOADED chord must be SILENT between adjustments. Loaded means selected and adjustable, not
+	// audible; you hear the pick, and you hear each change. Ticking here is what ends the sound.
+	// ...and while a BASS note is still sounding, or the frame that releases it never arrives.
+	//
+	// The bass release lives at the end of evaluatePads, which only runs while something requests a
+	// render. During the audition the chord notes are on, so the release does nothing; the instant
+	// the audition ends this went false, evaluatePads stopped being called, and the bass was left
+	// ringing forever - one frame short of being turned off. Rendering while a bass note is live
+	// guarantees that frame, and it is self-terminating: releasing it sets bassLastNote back to -1.
+	// ...and while ANY note is still sounding.
+	//
+	// This is the whole endless-sustain bug, and it bit twice. The audition ENABLES notes on its last
+	// frame and then this went false, so evaluatePads was never called again - nothing stopped
+	// enabling them, so the keyboard screen's diff never fired the note-off and the chord rang
+	// forever. The count reaching zero is not the end: there must be one more frame in which nothing
+	// is enabled. `currentNotesState.count > 0` guarantees it, and it is self-terminating - once the
+	// diff releases them the count is zero and rendering stops.
+	//
+	// I fixed exactly this for the bass and did not fix it for the chord. Same shape, same cause.
+	return numSuggestions > 0 || HIDSysex::hasChordMod() || autoAuditionFrames > 0 || currentNotesState.count > 0
+	       || getState().harmonic.bassLastNote >= 0;
 }
 
 // Chroma WRITE direction: apply a host voicing-mod (0x44) to the currently held chord. Mirrors what the
@@ -1087,7 +1207,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 	}
 
 	uint8_t palCtrlNow = 0;
-	uint8_t isoCtrlNow = 0;
 	// LEARN held = "what's this pad?" mode for the WHOLE surface: every pad (control, palette chord, iso note)
 	// names itself on the display and NOTHING sounds or changes — pure inspect. (Cody: "it's not just for the
 	// Deluge to learn, it's for YOU to learn.") Notes are off because currentNotesState was reset above and we
@@ -1178,10 +1297,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 						display->displayPopup(controlPadName(REG_PAL_CTRL, pressed.y));
 						snprintf(ctx, sizeof ctx, "control:%s", controlPadId(REG_PAL_CTRL, pressed.y));
 					}
-					else if (ci.region == REG_ISO_CTRL) {
-						display->displayPopup(controlPadName(REG_ISO_CTRL, pressed.y));
-						snprintf(ctx, sizeof ctx, "control:%s", controlPadId(REG_ISO_CTRL, pressed.y));
-					}
 					else if (ci.region == REG_PAL && ci.local < numCols) {
 						int16_t nbuf[kMaxChordKeyboardSize];
 						uint8_t rpc = 0;
@@ -1230,12 +1345,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			}
 			continue;
 		}
-		if (ci.region == REG_ISO_CTRL) {
-			if (pressed.y >= 0 && pressed.y < kDisplayHeight) {
-				isoCtrlNow |= (uint8_t)(1u << pressed.y);
-			}
-			continue;
-		}
 		if (ci.region == REG_ISO) {
 			// The iso panel. Sound the held note (free-play, or feedback while voice-editing). In EDIT mode a
 			// rising-edge press toggles this note in/out of the voicing (handled after the loop).
@@ -1263,6 +1372,7 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			char roman[32], abs[32];
 			uint8_t n =
 			    buildChordAtDegree(deg, pressed.y, iv, sc, keyRoot, notes, kMaxChordKeyboardSize, &rootPc, roman, abs);
+			chordRootPc_ = rootPc; // the BASS voice sounds this, so it holds still while the voicing walks
 			// Name the pick ONCE (or when the richness row changes under a held finger). evaluatePads runs every
 			// frame while the pad is held; re-calling drawName each frame restarts the scroll so the roman never
 			// reaches the 7-seg. namedDeg/namedRich reset to -1 on release (below), so a re-press re-shows it.
@@ -1340,7 +1450,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		learnHeldHi = learnCurHi;
 		learnSbHeld = learnSbCur;
 		palCtrlHeldMask = 0;
-		isoCtrlHeldMask = 0;
 		isoHeldMask = 0;
 		progPadHeld = false;
 		heldCols = 0;
@@ -1441,50 +1550,21 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			}
 		}
 	}
-	// Free play on the iso (without picking a chord) resets out of "chord mode" — unless sticky is on (or
-	// voice-edit, handled above, which never clears).
-	else if (isoPlayed && !leftPicked && !hs.stickyChord && !hs.stackPick) {
-		clearSelection();
-	}
+	// Free play on the iso does NOT clear the chord. It used to be able to (guarded by !stickyChord),
+	// but sticky was always on so the branch never fired, and keeping the pick loaded is the point:
+	// you noodle over a chord you are still shaping, and the voicing controls still have a target.
+	// Use CLEAR to drop it deliberately.
 	isoHeldMask = isoNowMask;
 
-	// ── ISO control column (rising-edge so holding doesn't repeat) ──
-	uint8_t risingIso = (uint8_t)(isoCtrlNow & ~isoCtrlHeldMask);
-	if (risingIso & (uint8_t)(1u << kBtnIsoView)) {
-		hs.isoChromatic = !hs.isoChromatic;
-		display->displayPopup(hs.isoChromatic ? "CHRO" : "KEY");
-	}
-	if (risingIso & (uint8_t)(1u << kBtnShowChord)) {
-		hs.showChord = !hs.showChord;
-		display->displayPopup(hs.showChord ? "SHOW" : "HIDE");
-	}
-	if (risingIso & (uint8_t)(1u << kBtnLattice)) {
-		// The overlay pad cycles: ONE (off) -> LATT (full lattice) -> DIFF (voice-leading) -> ONE.
-		if (!hs.latticeOn && !hs.diffOn) {
-			hs.latticeOn = true;
-			hs.showChord = true; // an overlay needs the chord shown so it can't silently do nothing
-			display->displayPopup("LATT");
-		}
-		else if (hs.latticeOn) {
-			hs.latticeOn = false;
-			hs.diffOn = true;
-			hs.showChord = true;
-			display->displayPopup("DIFF");
-		}
-		else {
-			hs.diffOn = false;
-			display->displayPopup("ONE");
-		}
-	}
-	if (risingIso & (uint8_t)(1u << kBtnSnap)) {
-		hs.isoFollowsChord = !hs.isoFollowsChord;
-		// SNAP = iso jumps to the chord on pick. STAY = iso holds where you left it (play chord low, riff high).
-		display->displayPopup(hs.isoFollowsChord ? "SNAP" : "STAY");
-	}
-	// PROGRESSION (hold-to-dial): while purple row 2 is HELD, the encoders dial the progression — vertical wheel
-	// picks WHICH progression, horizontal wheel WALKS the chords. Holding also SUSTAINS the current step so you
-	// hear it; release leaves the chord loaded. First press previews the current (or first) progression.
-	bool progNow = (isoCtrlNow & (uint8_t)(1u << kBtnProg)) != 0;
+	// PROGRESSION (hold-to-dial): while row 4 of the control column is HELD, the encoders dial the
+	// progression — vertical wheel picks WHICH progression, horizontal wheel WALKS the chords. Holding
+	// also SUSTAINS the current step so you hear it; release leaves the chord loaded. First press
+	// previews the current (or first) progression.
+	//
+	// This read palCtrlNow's counterpart on a column that does not exist, so it had never once run on
+	// hardware. Every path it takes is bounds-guarded (loadProgStep returns early when no chordpacks
+	// were found), so an empty CHORDS/ folder is a no-op rather than a crash.
+	bool progNow = (palCtrlNow & (uint8_t)(1u << kBtnProg)) != 0;
 	if (progNow && !progPadHeld) {
 		ensureProgsLoaded(); // lazy scan of CHORDS/*.chordpack on first use
 		if (hs.progPreset < 0 || hs.progPreset >= gNumProgs) {
@@ -1525,10 +1605,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			display->displayPopup(editNow ? "EDIT" : "PLAY");
 		}
 	}
-	if (risingIso & kIsoCtrlClearMask) {
-		clearSelection();
-		display->displayPopup("CLR");
-	}
 	// ADJUSTING IS AUDITIONING. Any change to the voicing re-sounds the stored chord for a moment,
 	// so you hear what you just did instead of hunting for a pad that plays it back. This is what
 	// the AUDITION pad used to be for; making it automatic means the pad isn't needed.
@@ -1542,7 +1618,6 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			}
 		}
 	}
-	isoCtrlHeldMask = isoCtrlNow;
 
 	// ── PALETTE control column ──
 	uint8_t risingPal = (uint8_t)(palCtrlNow & ~palCtrlHeldMask);
@@ -1578,13 +1653,8 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		display->displayPopup(hs.stackPick ? "PICK" : "STAK"); // "PICK" = octave picker open (distinct from OCT3)
 		pushChordState();                                      // dashboard tracks the change live
 	}
-	if (risingPal & (uint8_t)(1u << kBtnSpread)) {
-		hs.voiceSpread = (int8_t)((hs.voiceSpread + 1) % 4);
-		char sbuf[8];
-		sprintf(sbuf, "SPR%d", (int)hs.voiceSpread);
-		display->displayPopup(sbuf);
-		pushChordState(); // dashboard tracks the change live
-	}
+	// BASS OCTAVE is hold-and-dial, like every other shaping control here: hold the pad, then act.
+	bassOctPadHeld = (palCtrlNow & (uint8_t)(1u << kBtnBassOct)) != 0;
 	if (risingPal & (uint8_t)(1u << kBtnInversion)) {
 		hs.voiceInversion = (int8_t)((hs.voiceInversion + 1) % 4); // root → 1st → 2nd → 3rd → root
 		char ibuf[8];
@@ -1614,6 +1684,20 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		}
 	}
 	palCtrlHeldMask = palCtrlNow;
+
+	// THE BASS FOLLOWS THE CHORD'S GATE.
+	//
+	// The chord is released for free: the keyboard screen diffs currentNotesState against the last
+	// frame, so a note simply stops being enabled and gets its note-off. The BASS does not take part
+	// in that - it is a direct note-on to a bound track - so nothing ever turned it off. It rang on
+	// under a chord that had already stopped, and every turn of the octave wheel left another one
+	// hanging.
+	//
+	// Sounding when the chord sounds and stopping when it stops is also the right rule, not just the
+	// convenient one: loaded is not sounding, for the bass exactly as for the chord.
+	if (currentNotesState.count == 0 && hs.bassLastNote >= 0) {
+		soundBassNote(-1, 0);
+	}
 
 	// Spring-loaded voicing: the instant the last chord pad is released (heldCols falls to 0), the voicing dial
 	// springs back to HOME so the next chord starts from your set voice (or the plain default if none was set).
@@ -1714,15 +1798,34 @@ bool KeyboardLayoutHarmonic::voicingPressBegin() {
 // At home there is nothing to hold, and a click must never THROW AWAY a voicing, so it does nothing.
 // (If you press-and-turn, the home was dialed during the turn, so this leaves it alone.)
 bool KeyboardLayoutHarmonic::voicingPressEnd() {
-	if (!voicingTurnedWhilePressed) {
-		KeyboardStateHarmonic& s = getState().harmonic;
-		if (s.voicingWalk != s.voicingHome) {
-			s.voicingHome = s.voicingWalk; // HOLD: the voice you dialled is now the spring-back voice
-			char buf[8];
-			sprintf(buf, "H%d", (int)s.voicingHome); // "H-24".."H24" — matches the press+turn readout
-			display->displayPopup(buf);
-			pushChordState();
-		}
+	if (voicingTurnedWhilePressed) {
+		return true; // press-and-turn already dialled the home; the release means nothing
+	}
+	KeyboardStateHarmonic& s = getState().harmonic;
+
+	// A CLEAN CLICK HOLDS THE VOICING YOU DIALLED. Hold a chord, spin to taste, click to keep it -
+	// that is the working gesture, and it stays on the plain press where the hand already expects it.
+	//
+	// SHIFT + click switches the dial's MODE (Orchid puts this on a plain press, but parity is not
+	// worth taking the primary gesture away from the thing you do on every chord):
+	//
+	//   OCTAVE - walk the chord along the keyboard one note at a time, cascading inversions
+	//   SPLIT  - a voice pivot: the lowest N drop an octave, the rest rise one
+	if (Buttons::isButtonPressed(deluge::hid::button::SHIFT)) {
+		s.voicingSplitMode = !s.voicingSplitMode;
+		display->displayPopup(s.voicingSplitMode ? "SPLT" : "OCTV");
+		pushChordState();
+		return true;
+	}
+
+	// SHIFT + click: HOLD the voicing you dialled. At home there is nothing to hold, and a click must
+	// never THROW AWAY a voicing you dialled in, so it does nothing.
+	if (s.voicingWalk != s.voicingHome) {
+		s.voicingHome = s.voicingWalk;
+		char buf[8];
+		sprintf(buf, "H%d", (int)s.voicingHome);
+		display->displayPopup(buf);
+		pushChordState();
 	}
 	return true;
 }
@@ -1748,6 +1851,49 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 		display->displayPopup(gProgs[p].name);
 		return;
 	}
+	// A HELD CONTROL PAD WINS over the chord-held voicing dial.
+	//
+	// These used to sit BELOW the `heldCols != 0` gate, which returns as soon as a chord pad is
+	// down - so holding a chord made BASS binding and BASS OCTAVE unreachable, and the wheel silently
+	// went to the voicing instead. Holding a control pad is an explicit "I mean THIS control", and
+	// it has to beat the default. It also means you can move the bass while the chord is ringing,
+	// which is exactly when you want to hear where the bass sits under it.
+	// BASS OCTAVE: hold the pad, turn the wheel. Five positions, sub-bass up to inside the chord -
+	// measured off the Orchid, whose second dial does exactly this and is the control we lacked.
+	// The note is always the chord's ROOT; only the octave moves, so the floor stays put while the
+	// voicing dial walks the chord.
+	if (bassOctPadHeld) {
+		KeyboardStateHarmonic& hs = getState().harmonic;
+		hs.bassOctave = (int8_t)std::clamp((int32_t)hs.bassOctave + offset, 0_i32, 4_i32);
+		char buf[8];
+		sprintf(buf, "BAS%d", (int)hs.bassOctave);
+		display->displayPopup(buf);
+		// Re-sound at the new octave so you HEAR the move, the same way every other shaping control
+		// here auditions itself. Only if the bass is actually bound and on - it is inert until then.
+		if (hs.bassOn && bassTargetIsLive(hs.bassOutput) && chordNoteCount > 0) {
+			int32_t n = (int32_t)chordRootPc_ + 12 * ((int32_t)hs.bassOctave + 1);
+			if (n >= 0 && n <= 127) {
+				soundBassNote(-1, 0); // release the old octave before sounding the new one
+				soundBassNote(n, 100);
+			}
+		}
+		pushChordState();
+		return;
+	}
+	if (bassPadHeld) {
+		KeyboardStateHarmonic& hs = getState().harmonic;
+		Output* next = nextSynthOutput(bassTargetIsLive(hs.bassOutput) ? hs.bassOutput : nullptr);
+		if (next == nullptr) {
+			display->displayPopup("NONE"); // the song has no synth track to play a bass on
+			return;
+		}
+		soundBassNote(-1, 0); // release from the OLD track before pointing somewhere else
+		hs.bassOutput = next;
+		hs.bassOn = true;
+		display->displayPopup(next->name.get());
+		return;
+	}
+
 	// VOICING DIAL: while a chord pad is HELD, the vertical wheel walks the voicing one note at a time
 	// (Orchid-style) instead of scrolling the iso. The chord is ringing, so you HEAR each step — hold the
 	// pad, turn the wheel, sweep the voicing. heldCols is refreshed every evaluatePads, so it's set exactly
@@ -1775,6 +1921,20 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 			pushChordState();
 			return;
 		}
+		// SPLIT MODE: the wheel moves the PIVOT instead of walking the chord. 0 puts every voice
+		// above the split (the whole chord lifts); past the top note every voice is below it (the
+		// chord drops); the interesting range is in between, where it opens around the point.
+		if (s.voicingSplitMode) {
+			// 0..7 covers every voice count the palette can build; buildVoicing clamps to the chord's
+			// actual size, so the top of the range is simply "all voices down" on smaller chords.
+			int32_t sp = std::clamp((int32_t)s.voicingSplit + offset, 0_i32, 7_i32);
+			s.voicingSplit = (int8_t)sp;
+			char sbuf[8];
+			sprintf(sbuf, "SP%d", (int)s.voicingSplit);
+			display->displayPopup(sbuf);
+			pushChordState();
+			return;
+		}
 		int32_t w = (int32_t)s.voicingWalk + offset;
 		if (w < -24) {
 			w = -24;
@@ -1796,20 +1956,6 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 	// names each one, so you bind by ear and eye rather than by remembering track order. Binding
 	// arms the bass too - having to then find the pad again to switch it on would be a pointless
 	// second step when choosing a track plainly means "play the bass there".
-	if (bassPadHeld) {
-		KeyboardStateHarmonic& hs = getState().harmonic;
-		Output* next = nextSynthOutput(bassTargetIsLive(hs.bassOutput) ? hs.bassOutput : nullptr);
-		if (next == nullptr) {
-			display->displayPopup("NONE"); // the song has no synth track to play a bass on
-			return;
-		}
-		soundBassNote(-1, 0); // release from the OLD track before pointing somewhere else
-		hs.bassOutput = next;
-		hs.bassOn = true;
-		display->displayPopup(next->name.get());
-		return;
-	}
-
 	// OCTAVE follows the SHAPE of the thing it moves. Cody: "the palette is horizontal and the iso
 	// vertical - the octave should shift horizontal on the palette and vertical on the iso."
 	//
@@ -1819,9 +1965,11 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 	// what went wrong when this was a SHIFT gesture nobody could see.
 	KeyboardStateHarmonic& hs = getState().harmonic;
 	hs.isoOctave = std::clamp(hs.isoOctave + offset, 1_i32, 8_i32);
-	char buf[8];
-	sprintf(buf, "ISO%d", (int)hs.isoOctave);
-	display->displayPopup(buf);
+	// NO POPUP. The grid itself is the feedback - the whole iso panel visibly shifts an octave, which
+	// says more than a number does. "ISO4" was added back when this was an invisible SHIFT combo and
+	// something had to confirm it happened; that reason expired when it became a plain wheel turn.
+	// On a 4-character display a popup is not free either: it blanks whatever you were reading, so
+	// scrolling the iso kept wiping the chord name off the screen.
 	precalculate();
 }
 
@@ -1928,7 +2076,6 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 	uint8_t numCols = (uint8_t)std::min<int32_t>((int32_t)sc + 1, kPalWidth);
 	bool chromatic = getState().harmonic.isoChromatic;
 	bool showChord = getState().harmonic.showChord;
-	bool sticky = getState().harmonic.stickyChord;
 	bool calc = getState().harmonic.calculatorOn;
 	bool latticeOn = getState().harmonic.latticeOn;
 	bool diffOn = getState().harmonic.diffOn;
@@ -2068,40 +2215,25 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				else if (y == kBtnStack) {
 					c = kCtrlHue.adjustFractional(stackPick ? kCtrlOn : kCtrlOff, 255); // octave-picker mode
 				}
-				else if (y == kBtnSpread) {
-					c = kCtrlHue.adjustFractional(voiceSpread ? (uint8_t)(60 + voiceSpread * 58) : kCtrlOff, 255);
+				else if (y == kBtnBassOct) {
+					// Brightness = how high the bass sits, so the pad shows its position at a glance
+					// rather than only while a popup is up. Five octaves over the usable range.
+					int32_t bo = getState().harmonic.bassOctave;
+					c = kCtrlHue.adjustFractional((uint8_t)std::clamp<int32_t>(40 + bo * 50, 40, 255), 255);
 				}
 				else if (y == kBtnInversion) {
 					c = kCtrlHue.adjustFractional(voiceInversion ? (uint8_t)(60 + voiceInversion * 58) : kCtrlOff, 255);
 				}
-				image[y][x] = c;
-			}
-		}
-		else if (ci.region == REG_ISO_CTRL) {
-			// Iso-bound controls, banded SEE (rows 7-4) → SHAPE (3-1) → HEAR (0), each its own purple shade.
-			for (int32_t y = 0; y < kDisplayHeight; y++) {
-				RGB grp = (y >= 4) ? kHueSee : (y >= 1) ? kHueShape : kHueHear;
-				RGB c =
-				    grp.adjustFractional(kCtrlFaint, 255); // blank by default; an engaged control glows its band hue
-				if (y == kBtnIsoView) {
-					c = grp.adjustFractional(chromatic ? kCtrlOn : kCtrlOff, 255);
-				}
-				else if (y == kBtnShowChord) {
-					c = grp.adjustFractional(showChord ? kCtrlOn : kCtrlOff, 255);
-				}
-				else if (y == kBtnLattice) {
-					c = grp.adjustFractional(latticeOn ? kCtrlOn : kCtrlOff, 255);
-				}
-				else if (y == kBtnSnap) {
-					// A SEE/navigation toggle — tint it with the SEE hue so it groups with the lens controls.
-					c = kHueSee.adjustFractional(isoFollowsChord ? kCtrlOn : kCtrlOff, 255);
-				}
 				else if (y == kBtnProg) {
-					// PROGRESSION = momentary hold-to-dial button; faint ember, brighter while held.
-					c = grp.adjustFractional(progPadHeld ? kCtrlOn : kCtrlReady, 255);
+					// Momentary hold-to-dial: a ready ember when idle, bright while held.
+					c = kCtrlHue.adjustFractional(progPadHeld ? kCtrlOn : kCtrlReady, 255);
+				}
+				else if (y == kBtnBass) {
+					// BASS is also hold-to-dial, and was likewise invisible. Same ember, same meaning.
+					c = kCtrlHue.adjustFractional(bassPadHeld ? kCtrlOn : kCtrlReady, 255);
 				}
 				else if (y == kBtnEdit) {
-					c = grp.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);
+					c = kCtrlHue.adjustFractional(editVoicing ? kCtrlOn : kCtrlOff, 255);
 				}
 				image[y][x] = c;
 			}

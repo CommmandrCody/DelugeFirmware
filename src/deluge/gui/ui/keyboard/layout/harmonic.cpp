@@ -618,7 +618,16 @@ const RGB kHueShape = RGB{.r = 165, .g = 70, .b = 255}; // SHAPE band (voicing e
 const RGB kHueHear = RGB{.r = 215, .g = 65, .b = 235};  // HEAR  band (audition): warmer pink-purple
 // Control columns read as DARK negative space — only what's ENGAGED lights up. This keeps them visually
 // distinct from the colourful palette + the velocity/mod sidebar, and makes "what's on" instantly legible.
-constexpr uint8_t kCtrlOn = 235;   // a toggle that is ON — bright in its control hue
+constexpr uint8_t kCtrlOn = 235; // a toggle that is ON — bright in its control hue
+// Move a colour toward white WITHOUT washing out its hue: each channel travels `amount`/255 of the
+// way to full. Used for "lighter than it was" states - the root, and any pad under a finger - where
+// plain brightness is not enough because a dim hue at full brightness is still that hue, and the eye
+// reads lighter as nearer white rather than as more saturated.
+inline RGB lift(RGB c, uint8_t amount) {
+	return c.transform(
+	    [amount](uint8_t ch) -> uint8_t { return (uint8_t)(ch + (((255 - ch) * (uint32_t)amount) / 255)); });
+}
+
 constexpr uint8_t kCtrlReady = 50; // a momentary/action button (OCT, Audition) — faint ember so it's findable
 constexpr uint8_t kCtrlOff = 10;   // an OFF toggle / clear pad — near-black (the "blank unless toggled" floor)
 constexpr uint8_t kCtrlFaint = 10; // column base — blank
@@ -2357,14 +2366,31 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 					out = key.adjustFractional((hi >= 254) ? (hi == 255 ? 235 : 120) : 65, 255);
 				}
 				else if (within == 0) {
-					// ROOT/tonic: the BRIGHTEST expression of the key's own colour — pops in-hue, never white.
-					out = key.adjustFractional(150, 255);
+					// ROOT/tonic. Cody: "the root note should light up somehow ... maybe just a lighter colour
+					// of the orig". So: the key's own colour, brightened AND tinted toward white, which reads
+					// as lighter without becoming white - white stays reserved for the chord.
+					out = lift(key.adjustFractional(205, 255), 90);
 				}
 				else if (!chromatic || inScale) {
 					out = key.adjustFractional(8, 255); // faint scale backdrop (dim, to let the root pop)
 				}
 				else {
 					out = RGB{}; // chromatic off-scale: dark
+				}
+				// PRESS FEEDBACK, applied LAST so it lightens whatever the pad already is rather than
+				// replacing it. Cody: "I just want to see the note I hit ... maybe just a lighter colour of
+				// the orig and a way to see I hit that note."
+				//
+				// Last is the point. A chord tone stays the chord's colour, the root stays the key's, an
+				// off-scale pad stays dark - and every one of them goes visibly lighter under your finger.
+				// A dedicated "pressed" colour would have had to win over all of those and would have told
+				// you only that something was pressed, not what it was.
+				//
+				// isoHeldMask is the PHYSICAL pad, not a sounding note. A note can ring on after release
+				// (the audition holds it) and a held pad can be silent; this answers "is my finger on it",
+				// which is the question being asked.
+				if ((isoHeldMask & ((uint64_t)1u << (local * kDisplayHeight + y))) != 0) {
+					out = lift(out, 165);
 				}
 				image[y][x] = out;
 			}

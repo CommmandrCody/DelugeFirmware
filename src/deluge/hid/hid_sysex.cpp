@@ -29,6 +29,10 @@ static UIType lastSentView = UIType::NONE;
 // Chroma: whether we've pushed the "fx" context for the current gold-knob session (re-armed on any real view change).
 static bool fxContextSent = false;
 
+// Forward-declared: the resync handler below re-pushes the current view directly, and the table that
+// maps a UIType to its slug is defined further down with the rest of the view code.
+static const char* viewSlug(UIType t);
+
 void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 	lastHidCable = &cable;
 	if (len < 3) {
@@ -40,8 +44,30 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 			               (uint8_t)currentSong->getCurrentScale());
 		}
 		// Also re-push the current on-screen view so a just-connected Companion's Learn tab syncs at once.
-		lastSentView = UIType::NONE; // clear the de-dupe so the next line always sends
-		sendActiveViewIfChanged();
+		//
+		// This used to clear lastSentView and call sendActiveViewIfChanged(), which ALSO reset
+		// fxContextSent - and the bridge sends this handshake every ~5 seconds, not just on connect.
+		// So every five seconds, untouched, the Deluge announced its real view and then announced "fx"
+		// again the moment anything polled the knobs:
+		//
+		//     17:54:45  changed -> instrument_clip
+		//     17:54:45  changed -> fx
+		//     17:54:50  changed -> instrument_clip
+		//     17:54:50  changed -> fx
+		//
+		// A host that follows the view was being walked between two pages twice a minute while the
+		// instrument sat still. The firmware cannot tell a new host from a keepalive, so it must not
+		// treat every handshake as a fresh connection.
+		//
+		// Re-push the view DIRECTLY instead: the host gets its sync, the de-dupe survives, and the fx
+		// context stays armed until a REAL view change re-arms it.
+		{
+			UI* ui = getCurrentUI();
+			const char* slug = viewSlug(ui ? ui->getUIType() : UIType::NONE);
+			if (slug != nullptr) {
+				sendActiveView(slug);
+			}
+		}
 		return;
 	}
 	// first three bytes are already used, next is command

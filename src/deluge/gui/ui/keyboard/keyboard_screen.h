@@ -38,6 +38,11 @@ public:
 
 	ActionResult padAction(int32_t x, int32_t y, int32_t velocity) override;
 	ActionResult buttonAction(deluge::hid::Button b, bool on, bool inCardRoutine) override;
+	// Applied after whichever layout has drawn, so every layout gets it and none can disagree about
+	// what a pressed pad looks like. See the note in the .cpp - it lived in one layout for three
+	// firmware versions and therefore did nothing on the other two.
+	void applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidth]);
+
 	ActionResult verticalEncoderAction(int32_t offset, bool inCardRoutine) override;
 	ActionResult horizontalEncoderAction(int32_t offset) override;
 	void selectEncoderAction(int8_t offset) override;

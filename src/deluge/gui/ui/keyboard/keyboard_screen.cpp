@@ -1025,9 +1025,67 @@ bool KeyboardScreen::renderMainPads(uint32_t whichRows, RGB image[][kDisplayWidt
 
 	layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->renderPads(image);
 
+	applyPressFeedback(image);
+
 	PadLEDs::renderingLock = false;
 
 	return true;
+}
+
+
+// ── PRESS FEEDBACK, FOR EVERY LAYOUT ────────────────────────────────────────────────────────────
+//
+// Cody: "the delly doesn't really change - I want us to LOW light it when the root (already lit
+// note) is pressed." Then, three firmware versions later: "the dim isn't fixed, it's been multiple
+// iterations since I reported it, let's get it done."
+//
+// He was right and I was tuning the wrong thing. The feedback lived in harmonic.cpp, so it only ever
+// ran on the HARMONIC layout - in_key.cpp and isomorphic.cpp had none at all, and never had. Every
+// version I shipped was correct code in a file he was not looking at. I adjusted the amount twice
+// before checking whether the line ran, which is the whole lesson: verify it is reached before
+// tuning what it does.
+//
+// It lives HERE now, in the one place that renders every layout, applied after the layout has drawn.
+// One implementation, so the layouts cannot disagree about what a pressed pad looks like, and a new
+// layout gets it for free rather than going without until someone notices.
+//
+// IT MOVES AWAY FROM WHERE THE PAD ALREADY IS. Lifting alone did nothing for bright pads, and the
+// brightest pad on the surface - the root, deliberately lit to pop - is the one you press most. So a
+// bright pad goes DOWN and a dark pad goes UP. Either way it changes visibly, and either way it
+// keeps its own hue: a chord tone stays the chord's colour, the root stays the key's.
+namespace {
+// The largest channel, because that is what the eye reads as brightness: a saturated blue is bright
+// even though two of its channels are near zero, and an average would call it dark and lift it into
+// pastel.
+uint8_t padPeak(RGB c) {
+	uint8_t m = c.r > c.g ? c.r : c.g;
+	return m > c.b ? m : c.b;
+}
+RGB padLift(RGB c, uint8_t amount) {
+	return c.transform(
+	    [amount](uint8_t ch) -> uint8_t { return (uint8_t)(ch + (((255 - ch) * (uint32_t)amount) / 255)); });
+}
+RGB padDim(RGB c, uint8_t amount) {
+	return c.transform([amount](uint8_t ch) -> uint8_t { return (uint8_t)(ch - ((ch * (uint32_t)amount) / 255)); });
+}
+} // namespace
+
+void KeyboardScreen::applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidth]) {
+	for (int32_t i = 0; i < kMaxNumKeyboardPadPresses; i++) {
+		const PressedPad& p = pressedPads[i];
+		// The PHYSICAL pad, not a sounding note. A note can ring on after release and a held pad can be
+		// silent; this answers "is my finger on it", which is the question being asked.
+		if (!p.active) {
+			continue;
+		}
+		// Main grid only. The sidebar has its own meanings - mute, launch, audition - and recolouring
+		// those would be saying something different from what this says.
+		if (p.x < 0 || p.x >= kDisplayWidth || p.y < 0 || p.y >= kDisplayHeight) {
+			continue;
+		}
+		RGB& c = image[p.y][p.x];
+		c = (padPeak(c) > 150) ? padDim(c, 195) : padLift(c, 175);
+	}
 }
 
 bool KeyboardScreen::renderSidebar(uint32_t whichRows, RGB image[][kDisplayWidth + kSideBarWidth],

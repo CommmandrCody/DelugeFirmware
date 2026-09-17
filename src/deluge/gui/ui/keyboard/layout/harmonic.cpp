@@ -2429,8 +2429,19 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				//
 				// So a bright pad goes DOWN and a dark pad goes UP. Either way it visibly changes, and
 				// it still keeps its own hue - which was the point of applying this last.
+				//
+				// THE DIM IS DELIBERATELY LARGE. dim(120) halves a bright pad - the root goes from about
+				// (222,167,147) to (118,89,78) - which on paper is plenty and on the actual surface Cody
+				// could not see it: "dimming is not working from what I can tell", on 1.3.65, confirmed
+				// running.
+				//
+				// Halving a colour is a much smaller perceptual step than it looks like arithmetically,
+				// and these pads are bright diffused LEDs being glanced at, not swatches being compared.
+				// So it goes to roughly a quarter, which cannot be mistaken for "no change" - and if it
+				// STILL reads as nothing, the problem is not the amount and something is repainting the
+				// pad after this, which is a different hunt.
 				if ((isoHeldMask & ((uint64_t)1u << (local * kDisplayHeight + y))) != 0) {
-					out = (peak(out) > 150) ? dim(out, 120) : lift(out, 165);
+					out = (peak(out) > 150) ? dim(out, 195) : lift(out, 175);
 				}
 				image[y][x] = out;
 			}

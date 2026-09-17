@@ -11,6 +11,7 @@
 #include "io/midi/sysex.h"
 #include "memory/general_memory_allocator.h"
 #include "model/song/song.h" // Chroma: resync — read the live key/scale to push on handshake
+#include "playback/playback_handler.h" // Chroma: transport push - is it running, and where
 #include "processing/engines/audio_engine.h"
 #include "util/pack.h"
 #include <cstring>
@@ -71,6 +72,7 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		// ...and the gold knobs as they currently stand. A host that connected after the Deluge booted
 		// has never seen a knob move and would otherwise draw nothing until someone touched one.
 		pushGoldKnobs();
+		sendTransportIfChanged(true); // a host that connects mid-song must not be blank until the next beat
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -136,6 +138,7 @@ void HIDSysex::sendDisplayIfChanged() {
 	// redraws), it self-gates on lastHidCable + de-dupes, and it sits BEFORE the display-mirror gate below so it
 	// works even for hosts that never requested screen mirroring (the Companion arms lastHidCable on connect).
 	sendActiveViewIfChanged();
+	sendTransportIfChanged(); // Chroma: same piggyback, same reasoning - it self-gates and de-dupes
 	// NB: timer is only used for throttling, under good conditions sending
 	// is driven by the display subsystem only
 	uiTimerManager.unsetTimer(TimerName::SYSEX_DISPLAY);
@@ -558,6 +561,91 @@ static void emitGoldKnob(uint8_t whichKnob, uint8_t lv, bool bipolar, const char
 	}
 	msg[10 + n] = 0xf7;
 	lastHidCable->sendSysex(msg, 11 + n);
+}
+
+// Chroma (0x47): WHERE WE ARE.
+//
+// Cody: "I want all of it - where we are, what we're playing, and the levels and settings." Three of
+// those four already reach a host. This is the fourth, and it is the one a four-character display
+// genuinely cannot give you: is it running, how fast, and how far in.
+//
+//   F0 00 21 7B 01 47 <playing 0|1> <bpm hi> <bpm lo> <bar hi> <bar lo> <beat 0..3> F7
+//
+// bpm is BPM x 10 in two 7-bit halves (so 128.0 travels as 1280, which is 10,0). bar is 1-based and
+// also split across two 7-bit bytes, which covers 16383 bars - long enough for anything anyone will
+// play.
+//
+// DE-DUPED ON THE BEAT, not the tick. The playhead moves hundreds of times a second and a host wants
+// to know where you ARE, not to re-render at audio rate; four messages a bar is enough to show a
+// position and cheap enough to ignore. The same reasoning as the gold knobs: send when it changes,
+// and let "changes" mean something a person could see.
+static int32_t lastBar = -1;
+static int8_t lastBeat = -1;
+static int8_t lastPlaying = -1;
+static int32_t lastBpm10 = -1;
+
+void HIDSysex::sendTransportIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	const bool playing = playbackHandler.isEitherClockActive();
+	int32_t bpm10 = 0;
+	if (currentSong != nullptr) {
+		const float bpm = playbackHandler.calculateBPMForDisplay();
+		bpm10 = (int32_t)(bpm * 10.0f + 0.5f);
+		if (bpm10 < 0) {
+			bpm10 = 0;
+		}
+		if (bpm10 > 16383) {
+			bpm10 = 16383;
+		}
+	}
+
+	// Position, in bars and quarters, from the swung tick count. The bar length comes from the SONG
+	// rather than from a hardcoded four beats, so a song that is not in four still reports a position
+	// that matches what the player is counting.
+	//
+	// Stopped reports nothing rather than wherever it happened to halt: a stopped transport showing a
+	// position reads exactly like a running one, which is the wrong answer to "where are we".
+	int32_t bar = 0;
+	int8_t beat = 0;
+	if (playing && currentSong != nullptr) {
+		const uint32_t barLen = currentSong->getBarLength();
+		if (barLen > 0) {
+			const int64_t ticks = playbackHandler.getActualSwungTickCount();
+			const int64_t pos = ticks < 0 ? 0 : ticks;
+			bar = (int32_t)(pos / barLen) + 1;
+			beat = (int8_t)((pos % barLen) * 4 / barLen);
+			if (bar > 16383) {
+				bar = 16383;
+			}
+		}
+	}
+
+	if (!force && playing == (lastPlaying == 1) && bar == lastBar && beat == lastBeat
+	    && bpm10 == lastBpm10) {
+		return;
+	}
+	lastPlaying = playing ? 1 : 0;
+	lastBar = bar;
+	lastBeat = beat;
+	lastBpm10 = bpm10;
+
+	uint8_t msg[13];
+	msg[0] = 0xf0;
+	msg[1] = 0x00;
+	msg[2] = 0x21;
+	msg[3] = 0x7b;
+	msg[4] = 0x01;
+	msg[5] = SysEx::SysexCommands::Transport; // 0x47
+	msg[6] = playing ? 1 : 0;
+	msg[7] = (uint8_t)((bpm10 >> 7) & 0x7f);
+	msg[8] = (uint8_t)(bpm10 & 0x7f);
+	msg[9] = (uint8_t)((bar >> 7) & 0x7f);
+	msg[10] = (uint8_t)(bar & 0x7f);
+	msg[11] = (uint8_t)(beat & 0x7f);
+	msg[12] = 0xf7;
+	lastHidCable->sendSysex(msg, 13);
 }
 
 // Chroma WRITE direction (0x44): a one-slot inbox for an inbound voicing-mod. The MIDI-receive context stashes it;

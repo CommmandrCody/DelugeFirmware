@@ -44,6 +44,12 @@ void sendGoldKnob(uint8_t whichKnob, int32_t level, bool bipolar, const char* pa
 // host that connects long after the Deluge booted gets the real positions instead of two dark knobs
 // waiting for someone to touch the instrument.
 void pushGoldKnobs();
+// Chroma: outbound transport push (0x47) - whether the clock is running, the tempo, and the
+// playhead's bar and beat. De-duped on the BEAT rather than the tick, so a host gets a message four
+// times a bar instead of hundreds: a second screen wants to know where you are, not to re-render at
+// audio rate. Forced on the handshake so a Cockpit that connects mid-song is not blank until the
+// next beat.
+void sendTransportIfChanged(bool force = false);
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

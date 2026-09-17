@@ -59,6 +59,9 @@ enum SysexCommands : uint8_t {
 	ChordState = 0x43, // Chroma: outbound chord-state push on every NORMAL palette pick (key + voiced notes + ctx)
 	ChordApply = 0x44, // Chroma: INBOUND voicing-mod apply (host -> Deluge). Write direction; see hid_sysex.cpp.
 	ActiveView = 0x45, // Chroma: outbound active-view push on UI change (host auto-follows: Learn jumps to the screen)
+	Transport = 0x47,  // Chroma: outbound transport push - playing, tempo, and where the playhead is.
+	                   // "Show me where we are" is the one question a 4-character display cannot
+	                   // answer and a second screen exists to.
 	GoldKnob = 0x46,   // Chroma: outbound gold-knob push — which knob, the level its LED column shows, and the
 	                   // parameter's name. The host's panel header draws the real knobs; without this it had
 	                   // nothing to draw them FROM and sat dark on every page but Design.

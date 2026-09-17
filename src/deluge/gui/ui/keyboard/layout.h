@@ -66,6 +66,20 @@ public:
 	/// Handle output
 	virtual void renderPads(RGB image[][kDisplayWidth + kSideBarWidth]) {}
 
+	/// Which MIDI note this main-grid pad plays, or -1 if it plays none.
+	///
+	/// Every layout already knows this - each has its own noteFromCoords - but there was no way to ASK
+	/// from outside, so anything that wanted to light "all the pads that are this note" had to be
+	/// written inside a layout, and therefore in only one of them.
+	///
+	/// Cody: "the octaves (the C1-C5) aren't lighting if I press any C when C is the root ... light
+	/// all the octaves like you do with other notes, not just the pressed one." That is one behaviour
+	/// across every keyboard, so it needs one place to live, and this is the hook that lets it.
+	///
+	/// Default -1: a layout that has no notes (the chord library, Norns) opts out by saying nothing
+	/// rather than by being special-cased somewhere else.
+	virtual int32_t noteAtPad(int32_t x, int32_t y) { return -1; }
+
 	virtual void renderSidebarPads(RGB image[][kDisplayWidth + kSideBarWidth]) {
 		// Clean sidebar if function is not overwritten
 		for (int32_t y = 0; y < kDisplayHeight; y++) {

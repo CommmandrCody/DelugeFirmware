@@ -1025,7 +1025,7 @@ bool KeyboardScreen::renderMainPads(uint32_t whichRows, RGB image[][kDisplayWidt
 
 	layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->renderPads(image);
 
-	applyPressFeedback(image);
+	applyPressFeedback(image, 0, kDisplayWidth);
 
 	PadLEDs::renderingLock = false;
 
@@ -1070,7 +1070,8 @@ RGB padDim(RGB c, uint8_t amount) {
 }
 } // namespace
 
-void KeyboardScreen::applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidth]) {
+void KeyboardScreen::applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidth], int32_t fromX,
+                                       int32_t toX) {
 	for (int32_t i = 0; i < kMaxNumKeyboardPadPresses; i++) {
 		const PressedPad& p = pressedPads[i];
 		// The PHYSICAL pad, not a sounding note. A note can ring on after release and a held pad can be
@@ -1078,14 +1079,49 @@ void KeyboardScreen::applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidt
 		if (!p.active) {
 			continue;
 		}
-		// Main grid only. The sidebar has its own meanings - mute, launch, audition - and recolouring
-		// those would be saying something different from what this says.
-		if (p.x < 0 || p.x >= kDisplayWidth || p.y < 0 || p.y >= kDisplayHeight) {
+		// The range is passed in because the grid and the sidebar are drawn by two SEPARATE calls, and
+		// the sidebar is drawn second. Doing the whole width in the first call painted the sidebar and
+		// then had it painted over - which is exactly what Cody saw: "it works in the grid, it does NOT
+		// work in the column where the audition pads are".
+		if (p.x < fromX || p.x >= toX || p.y < 0 || p.y >= kDisplayHeight) {
 			continue;
 		}
-		RGB& c = image[p.y][p.x];
-		c = (padPeak(c) > 150) ? padDim(c, 195) : padLift(c, 175);
+		markPressed(image, p.x, p.y);
+
+		// EVERY PAD THAT PLAYS THE SAME NOTE, not just the one under your finger. Cody: "light all the
+		// octaves like you do with other notes, not just the pressed one ... the C1-C5 aren't lighting
+		// if I press any C when C is the root."
+		//
+		// He means the pitch CLASS: pressing any C should show you every C on the surface. That is
+		// what makes the keyboard teach you something - you see the shape the note makes across the
+		// whole grid rather than the one pad you happened to hit - and on an isomorphic layout the
+		// same note appears in several places anyway.
+		//
+		// Main grid only: the sidebar's pads are mute, launch and audition, not notes, and asking a
+		// layout for the note at one would be asking the wrong question.
+		KeyboardLayout* layout = layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout];
+		const int32_t pressedNote = (p.x < kDisplayWidth) ? layout->noteAtPad(p.x, p.y) : -1;
+		if (pressedNote < 0) {
+			continue; // a layout with no notes, or a sidebar pad: the pressed pad alone is all we can say
+		}
+		const int32_t pc = pressedNote % 12;
+		for (int32_t x = 0; x < kDisplayWidth; x++) {
+			for (int32_t y = 0; y < kDisplayHeight; y++) {
+				if (x == p.x && y == p.y) {
+					continue; // already done, and doing it twice would dim it twice
+				}
+				const int32_t n = layout->noteAtPad(x, y);
+				if (n >= 0 && (n % 12) == pc) {
+					markPressed(image, x, y);
+				}
+			}
+		}
 	}
+}
+
+void KeyboardScreen::markPressed(RGB image[][kDisplayWidth + kSideBarWidth], int32_t x, int32_t y) {
+	RGB& c = image[y][x];
+	c = (padPeak(c) > 150) ? padDim(c, 195) : padLift(c, 175);
 }
 
 bool KeyboardScreen::renderSidebar(uint32_t whichRows, RGB image[][kDisplayWidth + kSideBarWidth],
@@ -1099,6 +1135,12 @@ bool KeyboardScreen::renderSidebar(uint32_t whichRows, RGB image[][kDisplayWidth
 	}
 
 	layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->renderSidebarPads(image);
+
+	// AND THE SIDEBAR GETS IT TOO, here, because it is drawn by this call rather than the one above.
+	// Mute, launch and audition are pads you press like any other, and "my finger is on this" is just
+	// as true of them - excluding them was a judgement I made about what the sidebar MEANS, when the
+	// feedback is not about meaning at all.
+	applyPressFeedback(image, kDisplayWidth, kDisplayWidth + kSideBarWidth);
 
 	return true;
 }

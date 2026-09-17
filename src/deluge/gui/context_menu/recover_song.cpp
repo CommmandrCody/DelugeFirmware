@@ -49,12 +49,14 @@ bool RecoverSong::acceptCurrentOption() {
 
 	// The card is not a promise. Between boot and this button press the user could have pulled it,
 	// so re-check rather than trusting the existence test that put this prompt on screen.
-	if (!StorageManager::fileExists("SYSTEM/RECOVER.XML")) {
+	// RECOVER.OLD.XML: the file was moved aside the moment this prompt went up, so that it is offered
+	// exactly once however the prompt is dismissed. Accepting loads it from where it was put.
+	if (!StorageManager::fileExists("SYSTEM/RECOVER.OLD.XML")) {
 		display->displayPopup(l10n::get(l10n::String::STRING_FOR_ERROR_FILE_NOT_FOUND));
 		return true;
 	}
 
-	currentSong->setSongFullPath("SYSTEM/RECOVER.XML");
+	currentSong->setSongFullPath("SYSTEM/RECOVER.OLD.XML");
 	if (openUI(&loadSongUI)) {
 		loadSongUI.performLoad();
 		// Loaded out of SYSTEM/, so without this the Deluge would call the song "RECOVER" and try to

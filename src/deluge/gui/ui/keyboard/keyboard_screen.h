@@ -41,7 +41,14 @@ public:
 	// Applied after whichever layout has drawn, so every layout gets it and none can disagree about
 	// what a pressed pad looks like. See the note in the .cpp - it lived in one layout for three
 	// firmware versions and therefore did nothing on the other two.
-	void applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidth]);
+	// Ranged, because the grid and the sidebar are drawn by two separate calls and the sidebar is
+	// drawn second - feeding back over the whole width in the first call gets the sidebar painted
+	// over by the second.
+	void applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidth], int32_t fromX, int32_t toX);
+	/// Move one pad away from whatever it already is. Factored out because the pressed pad and every
+	/// other pad of the same pitch class have to be marked identically - two copies of the rule would
+	/// drift, and then your finger's pad and its octaves would look subtly different.
+	void markPressed(RGB image[][kDisplayWidth + kSideBarWidth], int32_t x, int32_t y);
 
 	ActionResult verticalEncoderAction(int32_t offset, bool inCardRoutine) override;
 	ActionResult horizontalEncoderAction(int32_t offset) override;

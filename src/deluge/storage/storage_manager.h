@@ -369,6 +369,11 @@ Error writeRecoveryFile();
 // Delete the recovery file + clear the dirty flag. Call after a manual Save / on load-away — this
 // is what makes "RECOVER exists ⟺ unsaved work" hold without a clean-shutdown signal.
 void clearRecoveryFile();
+// Declining is not discarding: move the recovery file aside so it is KEPT but no longer offered.
+// Without this, "the file exists" is the whole test, so the same jam is offered on every boot
+// forever - a prompt you dismiss every time you switch the instrument on, which is a toll rather
+// than a safety net and trains you to dismiss the one that matters.
+void setRecoveryAside();
 Error createXMLFile(char const* pathName, XMLSerializer& writer, bool mayOverwrite = false, bool displayErrors = true);
 Error createJsonFile(char const* pathName, JsonSerializer& writer, bool mayOverwrite = false,
                      bool displayErrors = true);

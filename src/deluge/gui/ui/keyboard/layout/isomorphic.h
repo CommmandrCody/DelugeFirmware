@@ -43,6 +43,14 @@ private:
 	// Chroma: name the chord currently held on the grid and show it on the display (the harmonic layout
 	// does this on a pick; the iso grid never did). Only redraws when the held pitch-class set changes.
 	void nameHeldChordOnDisplay();
+	int32_t noteAtPad(int32_t x, int32_t y) override {
+		if (x < 0 || x >= kDisplayWidth || y < 0 || y >= kDisplayHeight) {
+			return -1;
+		}
+		const int32_t n = noteFromCoords(x, y);
+		return (n >= 0 && n <= 127) ? n : -1;
+	}
+
 	inline uint8_t noteFromCoords(int32_t x, int32_t y) {
 		return getState().isomorphic.scrollOffset + x + y * getState().isomorphic.rowInterval;
 	}

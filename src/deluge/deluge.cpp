@@ -606,6 +606,20 @@ void setupStartupSong() {
 	    StorageManager::fileExists("SYSTEM/RECOVER.XML")
 	    && runtimeFeatureSettings.get(RuntimeFeatureSettingType::AutosaveRecovery) == RuntimeFeatureStateToggle::On;
 
+	// OFFERED ONCE. Moving it aside here rather than when the prompt is declined means it is offered
+	// exactly once however the prompt goes away - BACK, a power cut, or simply being ignored - and
+	// there is no "declined" hook to miss. Declining is not discarding: the jam is still on the card
+	// as SYSTEM/RECOVER.OLD.XML and can be loaded by hand.
+	//
+	// Before this, "the file exists" was the whole test and nothing but a manual save or load ever
+	// cleared it, so the same jam came back on every boot forever. Cody: "it will ALWAYS want to
+	// recover the last track ... I like recovery but it's always doing it now." A prompt you dismiss
+	// every time you switch an instrument on is a toll, not a safety net, and it teaches you to
+	// dismiss the one that matters.
+	if (offerRecovery) {
+		StorageManager::setRecoveryAside();
+	}
+
 	loadStartupSong();
 
 	// Recovery: an unsaved song was left behind by a power loss. Offer it, don't impose it.

@@ -45,6 +45,14 @@ public:
 
 private:
 	void offsetPads(int32_t offset, bool shiftEnabled);
+	int32_t noteAtPad(int32_t x, int32_t y) override {
+		if (x < 0 || x >= kDisplayWidth || y < 0 || y >= kDisplayHeight) {
+			return -1;
+		}
+		const int32_t n = noteFromCoords(x, y);
+		return (n >= 0 && n <= 127) ? n : -1;
+	}
+
 	inline uint16_t noteFromCoords(int32_t x, int32_t y) { return noteFromPadIndex(padIndexFromCoords(x, y)); }
 
 	inline uint16_t padIndexFromCoords(int32_t x, int32_t y) {

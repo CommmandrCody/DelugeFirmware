@@ -233,6 +233,8 @@ bool StorageManager::fileExists(char const* pathName) {
 // appear in the song list and can't collide with a user's song name (e.g. their own "Recovery").
 char const* const kRecoveryFinalPath = "SYSTEM/RECOVER.XML";
 char const* const kRecoveryTempPath = "SYSTEM/RECOVER.TMP";
+// Where a declined recovery goes: kept, loadable by hand, never offered again.
+char const* const kRecoveryDeclinedPath = "SYSTEM/RECOVER.OLD.XML";
 
 Error StorageManager::writeRecoveryFile() {
 	if (currentSong == nullptr) {
@@ -256,6 +258,28 @@ Error StorageManager::writeRecoveryFile() {
 // Clear the recovery file and the dirty flag. Called after a manual Save (work is now safe) and on
 // load-away. This is the invariant that makes presence-at-boot mean "unsaved work was lost":
 // RECOVER exists ⟺ there is unsaved work. Save is the "work is safe" event that clears it.
+// DECLINED, NOT DISCARDED. Cody: "if I have a loaded song and I haven't made a change at all, when
+// I turn off the Deluge it wants to recover ... seems it will ALWAYS want to recover the last track.
+// How do we avoid this without removing the actual use case? I like recovery but it's always doing
+// it now."
+//
+// The loop was by design and the design was half right. Declining deliberately left RECOVER.XML
+// alone, so nothing was ever destroyed - but "exists" is the only test for whether to offer it, so
+// the same jam came back on every single boot until you happened to save or load something by hand.
+// A prompt you have to dismiss every time you turn an instrument on is not a safety net, it is a
+// toll, and it trains you to dismiss the one that matters.
+//
+// So declining moves it aside instead. The work stays on the card under a name you can load by hand,
+// and it stops being offered. Any NEW unsaved work writes a fresh RECOVER.XML and is offered
+// normally, which is the case the feature exists for.
+//
+// Only one is kept. A folder filling with RECOVER.OLD.1, .2, .3 would be its own kind of mess, and
+// the older a declined jam gets the less likely anyone is to want it.
+void StorageManager::setRecoveryAside() {
+	f_unlink(kRecoveryDeclinedPath);                    // last declined one makes way for this one
+	f_rename(kRecoveryFinalPath, kRecoveryDeclinedPath); // harmless if there is nothing to move
+}
+
 void StorageManager::clearRecoveryFile() {
 	songNeedsRecoverySave = false; // so the autosave task won't immediately re-create it
 	f_unlink(kRecoveryFinalPath);  // harmless if it doesn't exist

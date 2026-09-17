@@ -68,6 +68,9 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 				sendActiveView(slug);
 			}
 		}
+		// ...and the gold knobs as they currently stand. A host that connected after the Deluge booted
+		// has never seen a knob move and would otherwise draw nothing until someone touched one.
+		pushGoldKnobs();
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -456,11 +459,27 @@ void HIDSysex::sendFxContext() {
 //
 // De-duped on (knob, level, name): setKnobIndicatorLevel is called on redraws as well as turns, and
 // re-sending an unchanged value at redraw rate would be a stream of nothing.
-static uint8_t lastKnobLevel[2] = {0xff, 0xff};
-static char lastKnobName[2][32] = {{0}, {0}};
+// TWO caches, and the difference between them is the whole bug Cody found: "gold knobs work, but
+// only after you start turning them."
+//
+//   cur*  - what the knob IS. Updated on every indicator change, INCLUDING while no host is
+//           connected, because the instrument has been sitting at some position since boot and that
+//           is the truth a host needs the moment it arrives.
+//   sent* - what was last put on the wire. Only for de-duping.
+//
+// Keeping one cache meant the value was only recorded when it was sent, and it was only sent when a
+// host was already listening - so a Cockpit that connected after the Deluge booted had nothing to
+// receive and the knobs stayed dark until someone touched one. A mirror that only works once you
+// move is not a mirror, it is an echo.
+static uint8_t curKnobLevel[2] = {0xff, 0xff};
+static char curKnobName[2][32] = {{0}, {0}};
+static uint8_t sentKnobLevel[2] = {0xff, 0xff};
+static char sentKnobName[2][32] = {{0}, {0}};
+
+static void emitGoldKnob(uint8_t whichKnob, uint8_t lv, bool bipolar, const char* name);
 
 void HIDSysex::sendGoldKnob(uint8_t whichKnob, int32_t level, bool bipolar, const char* paramName) {
-	if (lastHidCable == nullptr || whichKnob > 1) {
+	if (whichKnob > 1) {
 		return;
 	}
 	// The indicator level is 0..128; 128 would set the 8th bit and corrupt the frame, so it is clamped
@@ -480,12 +499,48 @@ void HIDSysex::sendGoldKnob(uint8_t whichKnob, int32_t level, bool bipolar, cons
 		}
 	}
 	name[n] = 0;
-	if (lastKnobLevel[whichKnob] == (uint8_t)lv && strncmp(lastKnobName[whichKnob], name, 32) == 0) {
+
+	// Record what the knob IS first, whether or not anyone is listening. This is the line that makes
+	// a late-connecting host able to be told anything at all.
+	curKnobLevel[whichKnob] = (uint8_t)lv;
+	strncpy(curKnobName[whichKnob], name, 31);
+	curKnobName[whichKnob][31] = 0;
+
+	if (lastHidCable == nullptr) {
+		return; // nobody to tell yet - but we now know what to tell them when they turn up
+	}
+	if (sentKnobLevel[whichKnob] == (uint8_t)lv && strncmp(sentKnobName[whichKnob], name, 32) == 0) {
 		return; // nothing moved and nothing was reassigned
 	}
-	lastKnobLevel[whichKnob] = (uint8_t)lv;
-	strncpy(lastKnobName[whichKnob], name, 31);
-	lastKnobName[whichKnob][31] = 0;
+	emitGoldKnob(whichKnob, (uint8_t)lv, bipolar, name);
+}
+
+// Push BOTH knobs as they currently stand, ignoring the de-dupe. Called from the handshake, which
+// fires when a host connects and every few seconds after - so a Cockpit started at any point gets
+// the real positions without anyone having to touch the instrument first.
+void HIDSysex::pushGoldKnobs() {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	for (uint8_t k = 0; k < 2; k++) {
+		if (curKnobLevel[k] == 0xff) {
+			continue; // this knob has never reported a level; saying nothing beats inventing one
+		}
+		emitGoldKnob(k, curKnobLevel[k], false, curKnobName[k]);
+	}
+}
+
+static void emitGoldKnob(uint8_t whichKnob, uint8_t lv, bool bipolar, const char* name) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	uint8_t n = 0;
+	while (name[n] != 0 && n < 31) {
+		n++;
+	}
+	sentKnobLevel[whichKnob] = lv;
+	strncpy(sentKnobName[whichKnob], name, 31);
+	sentKnobName[whichKnob][31] = 0;
 
 	uint8_t msg[10 + 32];
 	msg[0] = 0xf0;
@@ -495,7 +550,7 @@ void HIDSysex::sendGoldKnob(uint8_t whichKnob, int32_t level, bool bipolar, cons
 	msg[4] = 0x01;
 	msg[5] = SysEx::SysexCommands::GoldKnob; // 0x46
 	msg[6] = whichKnob;
-	msg[7] = (uint8_t)lv;
+	msg[7] = lv;
 	msg[8] = bipolar ? 1 : 0;
 	msg[9] = n;
 	for (uint8_t i = 0; i < n; i++) {

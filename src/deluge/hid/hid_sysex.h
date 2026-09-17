@@ -40,6 +40,10 @@ void sendFxContext();
 // context change, so a host that has just connected gets the current positions rather than waiting for a turn.
 // De-duped on (knob, level, name) so a redraw does not flood the wire.
 void sendGoldKnob(uint8_t whichKnob, int32_t level, bool bipolar, const char* paramName);
+// Push both gold knobs as they currently stand, ignoring the de-dupe. Called from the handshake, so a
+// host that connects long after the Deluge booted gets the real positions instead of two dark knobs
+// waiting for someone to touch the instrument.
+void pushGoldKnobs();
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

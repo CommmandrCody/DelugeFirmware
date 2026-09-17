@@ -628,6 +628,20 @@ inline RGB lift(RGB c, uint8_t amount) {
 	    [amount](uint8_t ch) -> uint8_t { return (uint8_t)(ch + (((255 - ch) * (uint32_t)amount) / 255)); });
 }
 
+// The other direction. Pulls each channel toward black by the same proportion lift() pulls it toward
+// white, so the two are symmetrical and a pad can be moved either way by the same amount.
+inline RGB dim(RGB c, uint8_t amount) {
+	return c.transform([amount](uint8_t ch) -> uint8_t { return (uint8_t)(ch - ((ch * (uint32_t)amount) / 255)); });
+}
+
+// How bright is this pad already? Deciding which way to move a pad under a finger needs to know
+// where it is starting from, and the largest channel is what the eye actually reads as brightness -
+// a saturated blue is bright even though two of its channels are near zero.
+inline uint8_t peak(RGB c) {
+	uint8_t m = c.r > c.g ? c.r : c.g;
+	return m > c.b ? m : c.b;
+}
+
 constexpr uint8_t kCtrlReady = 50; // a momentary/action button (OCT, Audition) — faint ember so it's findable
 constexpr uint8_t kCtrlOff = 10;   // an OFF toggle / clear pad — near-black (the "blank unless toggled" floor)
 constexpr uint8_t kCtrlFaint = 10; // column base — blank
@@ -2404,8 +2418,19 @@ void KeyboardLayoutHarmonic::renderPads(RGB image[][kDisplayWidth + kSideBarWidt
 				// isoHeldMask is the PHYSICAL pad, not a sounding note. A note can ring on after release
 				// (the audition holds it) and a held pad can be silent; this answers "is my finger on it",
 				// which is the question being asked.
+				//
+				// AND IT MOVES AWAY FROM WHERE THE PAD ALREADY IS. Cody: "the delly doesn't really
+				// change - I want us to LOW light it when the root (already lit note) is pressed."
+				//
+				// Lifting worked for the dim pads it was designed against and did almost nothing for
+				// the bright ones. The root is already lifted to make it pop, so lifting it again had
+				// barely anywhere to go: the brightest pad on the surface, the one you press most, was
+				// the one that gave the least feedback. A pad near white cannot get usefully whiter.
+				//
+				// So a bright pad goes DOWN and a dark pad goes UP. Either way it visibly changes, and
+				// it still keeps its own hue - which was the point of applying this last.
 				if ((isoHeldMask & ((uint64_t)1u << (local * kDisplayHeight + y))) != 0) {
-					out = lift(out, 165);
+					out = (peak(out) > 150) ? dim(out, 120) : lift(out, 165);
 				}
 				image[y][x] = out;
 			}

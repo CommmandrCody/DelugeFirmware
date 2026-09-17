@@ -1708,10 +1708,12 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 		soundBassNote(-1, 0);
 	}
 
-	// Spring-loaded voicing: the instant the last chord pad is released (heldCols falls to 0), the voicing dial
-	// springs back to HOME so the next chord starts from your set voice (or the plain default if none was set).
-	// Sweep it while you hold, let go and it settles home — no button needed. (Press resets without releasing;
-	// Shift+press sets the current voice as home.)
+	// Spring-loaded SWEEP: the instant the last chord pad is released (heldCols falls to 0), the voicing dial
+	// springs back to HOME so the next chord starts from your set voice.
+	//
+	// Only a SWEEP springs - press-and-turn, the momentary one. A plain turn moves home with it, so walk and
+	// home are equal and this does nothing: dial a voicing and it stays, which is how the Orchid's chord dial
+	// behaves and what you want on every chord. The spring is the performance move, not the default.
 	if (prevHeldCols != 0 && heldCols == 0 && hs.voicingWalk != hs.voicingHome) {
 		hs.voicingWalk = hs.voicingHome;
 	}
@@ -1794,15 +1796,15 @@ bool KeyboardLayoutHarmonic::voicingPressBegin() {
 	return true; // consume the press so a plain click doesn't fall through to other actions
 }
 
-// RELEASE: a clean click HOLDS the voicing you dialled — spin to taste, then click to keep it.
+// RELEASE: a clean click KEEPS a momentary sweep.
 //
-// This used to spring the voicing back to home instead, which meant there was no way to say "keep this
-// one": the only route to a new home was press-and-turn, holding the encoder in while turning, which is
-// the awkward hand position and has to be decided BEFORE you have heard the result. Spin-then-click lets
-// you dial it by ear with a free hand and commit afterwards.
+// A plain turn already keeps itself - it moves home with the walk - so after one of those this click has
+// nothing to do, and correctly does nothing. Its job is the press-and-turn SWEEP, which is deliberately
+// temporary: sweep a chord open by ear, and if you like where it ended up, click to make that the voice
+// every chord starts at from now on.
 //
-// Nothing is lost by not springing here: releasing the CHORD pad still springs to home (see evaluatePads),
-// which is the gesture you are already making when you move on.
+// Nothing is lost by not springing here: releasing the CHORD pad still springs a sweep home (see
+// evaluatePads), which is the gesture you are already making when you move on.
 //
 // At home there is nothing to hold, and a click must never THROW AWAY a voicing, so it does nothing.
 // (If you press-and-turn, the home was dialed during the turn, so this leaves it alone.)
@@ -1812,8 +1814,9 @@ bool KeyboardLayoutHarmonic::voicingPressEnd() {
 	}
 	KeyboardStateHarmonic& s = getState().harmonic;
 
-	// A CLEAN CLICK HOLDS THE VOICING YOU DIALLED. Hold a chord, spin to taste, click to keep it -
-	// that is the working gesture, and it stays on the plain press where the hand already expects it.
+	// A CLEAN CLICK KEEPS THE SWEEP YOU DIALLED. After a plain turn walk and home are already equal, so
+	// there is nothing to keep and this is a no-op - which is right: a click must never change a voicing
+	// you did not ask it to change.
 	//
 	// SHIFT + click switches the dial's MODE (Orchid puts this on a plain press, but parity is not
 	// worth taking the primary gesture away from the thing you do on every chord):
@@ -1910,22 +1913,30 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 	// (keyboard_screen re-runs it after this call while auditioning), so no note-triggering is needed here.
 	if (heldCols != 0) {
 		KeyboardStateHarmonic& s = getState().harmonic;
-		// PRESS + TURN: hold the encoder in and turn to dial the HOME the voicing springs back to. The home
-		// tracks the walk as you turn, so you hear it settle where you leave it. A plain turn (encoder not
-		// pressed) just sweeps the voicing away from home as before.
+		// PRESS + TURN: a MOMENTARY SWEEP. The voicing moves while you hold the chord and springs back to
+		// home the instant you let the pad go, so you can throw a chord open mid-phrase and have the next
+		// one land where you left it set.
+		//
+		// This used to be the other way round - a plain turn swept and sprang back, and dialling a voicing
+		// that STAYED needed the encoder held in. Cody, off the hardware: "I thought our voicings were gonna
+		// better match the orchid and not just move up or down octaves." The Orchid's chord dial is a
+		// persistent setting - you set it, and every chord after that is voiced that way. Ours put that on
+		// the awkward hand position and gave the easy gesture to the one that undoes itself, so a voicing
+		// you dialled was gone before you could use it, and the wheel was back on octave duty.
+		//
+		// So the DEFAULT is now the thing you do all the time, and the modifier is the performance move.
 		if (Buttons::isButtonPressed(deluge::hid::button::Y_ENC)) {
-			voicingTurnedWhilePressed = true; // so releasing the click won't spring it away
-			int32_t h = (int32_t)s.voicingWalk + offset;
-			if (h < -24) {
-				h = -24;
+			voicingTurnedWhilePressed = true; // a sweep is not a commit: releasing the click must not keep it
+			int32_t sw = (int32_t)s.voicingWalk + offset;
+			if (sw < -24) {
+				sw = -24;
 			}
-			if (h > 24) {
-				h = 24;
+			if (sw > 24) {
+				sw = 24;
 			}
-			s.voicingWalk = (int8_t)h;
-			s.voicingHome = s.voicingWalk; // home follows — this is now the spring-back voice
+			s.voicingWalk = (int8_t)sw; // home untouched: this is where it springs back TO
 			char buf[8];
-			sprintf(buf, "H%d", (int)s.voicingHome); // "H-24".."H24" fits the 4-char 7-seg
+			sprintf(buf, "S%d", (int)s.voicingWalk); // "S-24".."S24" fits the 4-char 7-seg
 			display->displayPopup(buf);
 			pushChordState();
 			return;
@@ -1944,6 +1955,9 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 			pushChordState();
 			return;
 		}
+		// PLAIN TURN: dial the voicing and KEEP it. Home moves with the walk, so there is nothing to spring
+		// back from - let the pad go and the next chord is voiced the same way. This is the Orchid's dial:
+		// a persistent character you set once and play through, not a gesture you have to hold.
 		int32_t w = (int32_t)s.voicingWalk + offset;
 		if (w < -24) {
 			w = -24;
@@ -1952,6 +1966,7 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 			w = 24;
 		}
 		s.voicingWalk = (int8_t)w;
+		s.voicingHome = s.voicingWalk; // it STAYS - this is the voice every chord from here starts at
 		char buf[8];
 		sprintf(buf, "V%d", (int)s.voicingWalk); // "V-24".."V24" fits the 4-char 7-seg (VOI%d overflowed)
 		display->displayPopup(buf);

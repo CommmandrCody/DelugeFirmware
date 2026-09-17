@@ -34,6 +34,12 @@ void sendActiveViewIfChanged();
 // Chroma: push the "fx" context (0x45) when a gold knob is turned, so a following host jumps to FX. Throttled to
 // once per fx-session (re-armed when the real view changes) and doesn't disturb the view de-dupe.
 void sendFxContext();
+// Chroma: outbound gold-knob push (0x46) — whichKnob (0=upper, 1=lower), the LED level (0..128, the SAME number
+// the physical four-LED column is showing, so the host cannot disagree with the hardware), whether the parameter
+// is bipolar, and its display name. Sent whenever the indicator level is set, which covers both a turn and a
+// context change, so a host that has just connected gets the current positions rather than waiting for a turn.
+// De-duped on (knob, level, name) so a redraw does not flood the wire.
+void sendGoldKnob(uint8_t whichKnob, int32_t level, bool bipolar, const char* paramName);
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

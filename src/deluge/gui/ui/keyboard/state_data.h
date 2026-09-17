@@ -142,7 +142,15 @@ struct KeyboardStateHarmonic {
 	bool bassOn = false;       // does the bass sound? only meaningful once bound
 	int32_t bassLastNote = -1; // note currently sounding, so it can be turned off before the next
 	int8_t progStep = 0;       // current step in the loaded progression
-	bool progVoiced = true;    // VOICED = load each step with its baked-in voicing; BARE = plain chord (CLEAR toggles)
+	// BARE by default. VOICED loads each step with the spread, inversion and octave stack baked into
+	// the progression file; BARE loads the plain chord and lets you shape it. Cody: "harmonic mode
+	// starts in spread above 0, it's too big. I want to default to no spread and voice 0."
+	//
+	// Someone else's baked voicing is a strong opinion to arrive at before you have played a note,
+	// and it is not YOUR opinion - it came out of a file. Starting bare means the first thing you
+	// hear is the chord, and every bit of shape on top of it is one you put there. CLEAR toggles it
+	// back for the progressions that were voiced on purpose.
+	bool progVoiced = false; // VOICED = load each step with its baked-in voicing; BARE = plain chord (CLEAR toggles)
 };
 /// Please note that saving and restoring currently needs to be added manually in instrument_clip.cpp and all layouts
 /// share one struct for storage

@@ -1442,6 +1442,17 @@ void View::setKnobIndicatorLevel(uint8_t whichModEncoder) {
 	}
 
 	indicator_leds::setKnobIndicatorLevel(whichModEncoder, knobPos, isBipolar);
+
+	// Chroma: tell a following host what this knob is now showing. Sent from HERE, the one place that
+	// knows the final level, so the app's knob is drawing the SAME number as the LED column beside the
+	// real one. Hooking the turn instead would have missed every context change - switching clip,
+	// changing the mod row - and a host that connected mid-session would have had to wait for a turn
+	// before it could show anything at all.
+	{
+		char paramName[32] = {0};
+		getParameterNameFromModEncoder(whichModEncoder, paramName);
+		HIDSysex::sendGoldKnob(whichModEncoder, knobPos, isBipolar, paramName);
+	}
 }
 
 /// if you're dealing with a patch cable which has a -128 to +128 range

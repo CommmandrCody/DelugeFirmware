@@ -442,6 +442,69 @@ void HIDSysex::sendFxContext() {
 	}
 }
 
+// Chroma (0x46): what the gold knobs are actually doing.
+//
+// Cody, on the app's header: "the gold knobs still don't work, look bigger, or provide ANY feedback."
+// They could not. Nothing on the wire carried a gold-knob position, so the host had nothing to draw
+// them from and they sat dark on every page but Design, where a local event happened to exist.
+//
+// The level sent is the one the PHYSICAL four-LED column is showing - the same number, from the same
+// place, at the same moment - so the app's knob and the instrument's knob cannot disagree. That is
+// the whole point of mirroring a control rather than modelling it.
+//
+//   F0 00 21 7B 01 46 <knob 0|1> <level 0..127> <bipolar 0|1> <nameLen> <ascii name...> F7
+//
+// De-duped on (knob, level, name): setKnobIndicatorLevel is called on redraws as well as turns, and
+// re-sending an unchanged value at redraw rate would be a stream of nothing.
+static uint8_t lastKnobLevel[2] = {0xff, 0xff};
+static char lastKnobName[2][32] = {{0}, {0}};
+
+void HIDSysex::sendGoldKnob(uint8_t whichKnob, int32_t level, bool bipolar, const char* paramName) {
+	if (lastHidCable == nullptr || whichKnob > 1) {
+		return;
+	}
+	// The indicator level is 0..128; 128 would set the 8th bit and corrupt the frame, so it is clamped
+	// into 7 bits here rather than being allowed to become a different number somewhere downstream.
+	int32_t lv = level;
+	if (lv < 0) {
+		lv = 0;
+	}
+	if (lv > 127) {
+		lv = 127;
+	}
+	char name[32];
+	uint8_t n = 0;
+	if (paramName != nullptr) {
+		for (const char* c = paramName; *c && n < 31; c++) {
+			name[n++] = (char)((uint8_t)(*c) & 0x7f);
+		}
+	}
+	name[n] = 0;
+	if (lastKnobLevel[whichKnob] == (uint8_t)lv && strncmp(lastKnobName[whichKnob], name, 32) == 0) {
+		return; // nothing moved and nothing was reassigned
+	}
+	lastKnobLevel[whichKnob] = (uint8_t)lv;
+	strncpy(lastKnobName[whichKnob], name, 31);
+	lastKnobName[whichKnob][31] = 0;
+
+	uint8_t msg[10 + 32];
+	msg[0] = 0xf0;
+	msg[1] = 0x00;
+	msg[2] = 0x21;
+	msg[3] = 0x7b;
+	msg[4] = 0x01;
+	msg[5] = SysEx::SysexCommands::GoldKnob; // 0x46
+	msg[6] = whichKnob;
+	msg[7] = (uint8_t)lv;
+	msg[8] = bipolar ? 1 : 0;
+	msg[9] = n;
+	for (uint8_t i = 0; i < n; i++) {
+		msg[10 + i] = (uint8_t)name[i];
+	}
+	msg[10 + n] = 0xf7;
+	lastHidCable->sendSysex(msg, 11 + n);
+}
+
 // Chroma WRITE direction (0x44): a one-slot inbox for an inbound voicing-mod. The MIDI-receive context stashes it;
 // the Harmonic layout drains it on the UI/graphics thread (KeyboardLayoutHarmonic::renderPads), where re-voicing
 // and the 0x43 re-broadcast already run safely. Last-write-wins; a single bool flag, no lock needed — both producer

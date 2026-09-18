@@ -1032,7 +1032,6 @@ bool KeyboardScreen::renderMainPads(uint32_t whichRows, RGB image[][kDisplayWidt
 	return true;
 }
 
-
 // ── PRESS FEEDBACK, FOR EVERY LAYOUT ────────────────────────────────────────────────────────────
 //
 // Cody: "the delly doesn't really change - I want us to LOW light it when the root (already lit
@@ -1053,25 +1052,8 @@ bool KeyboardScreen::renderMainPads(uint32_t whichRows, RGB image[][kDisplayWidt
 // brightest pad on the surface - the root, deliberately lit to pop - is the one you press most. So a
 // bright pad goes DOWN and a dark pad goes UP. Either way it changes visibly, and either way it
 // keeps its own hue: a chord tone stays the chord's colour, the root stays the key's.
-namespace {
-// The largest channel, because that is what the eye reads as brightness: a saturated blue is bright
-// even though two of its channels are near zero, and an average would call it dark and lift it into
-// pastel.
-uint8_t padPeak(RGB c) {
-	uint8_t m = c.r > c.g ? c.r : c.g;
-	return m > c.b ? m : c.b;
-}
-RGB padLift(RGB c, uint8_t amount) {
-	return c.transform(
-	    [amount](uint8_t ch) -> uint8_t { return (uint8_t)(ch + (((255 - ch) * (uint32_t)amount) / 255)); });
-}
-RGB padDim(RGB c, uint8_t amount) {
-	return c.transform([amount](uint8_t ch) -> uint8_t { return (uint8_t)(ch - ((ch * (uint32_t)amount) / 255)); });
-}
-} // namespace
 
-void KeyboardScreen::applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidth], int32_t fromX,
-                                       int32_t toX) {
+void KeyboardScreen::applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidth], int32_t fromX, int32_t toX) {
 	for (int32_t i = 0; i < kMaxNumKeyboardPadPresses; i++) {
 		const PressedPad& p = pressedPads[i];
 		// The PHYSICAL pad, not a sounding note. A note can ring on after release and a held pad can be
@@ -1086,7 +1068,9 @@ void KeyboardScreen::applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidt
 		if (p.x < fromX || p.x >= toX || p.y < 0 || p.y >= kDisplayHeight) {
 			continue;
 		}
-		markPressed(image, p.x, p.y, 255); // the pad under the finger: full strength
+		// The pad under the finger is NOT marked here any more - PadLEDs::prepareColour does it, for
+		// every view at once. Doing it here too would move the same pad twice and make the keyboard's
+		// pressed pad look different from the piano roll's.
 
 		// EVERY PAD THAT PLAYS THE SAME NOTE, not just the one under your finger. Cody: "light all the
 		// octaves like you do with other notes, not just the pressed one ... the C1-C5 aren't lighting
@@ -1119,42 +1103,18 @@ void KeyboardScreen::applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidt
 	}
 }
 
-// How far apart two colours are, summed across the channels. Crude on purpose: the question is only
-// "would anyone notice the difference", and a sum of the three distances answers exactly that.
-namespace {
-uint32_t padGap(RGB a, RGB b) {
-	const int32_t dr = (int32_t)a.r - b.r, dg = (int32_t)a.g - b.g, db = (int32_t)a.b - b.b;
-	return (uint32_t)((dr < 0 ? -dr : dr) + (dg < 0 ? -dg : dg) + (db < 0 ? -db : db));
-}
-} // namespace
-
-void KeyboardScreen::markPressed(RGB image[][kDisplayWidth + kSideBarWidth], int32_t x, int32_t y,
-                                 uint8_t strength) {
-	RGB& c = image[y][x];
-
-	// WHICHEVER DIRECTION ACTUALLY CHANGES THE PAD. No brightness threshold, because every threshold
-	// I picked was wrong about some layout's palette and I had no way to check without the hardware.
-	//
-	// Cody: "column presses only light up the unlit pads - the solid one at the root, no change is
-	// seen whatsoever." The rule was "peak > 150 dims, otherwise lifts", and in-key draws its
-	// INACTIVE root with adjust(255, 2) - half brightness, so peak tops out at 127. It fell in the
-	// lift branch, and lifting a pad that is already more than half lit does nearly nothing. My third
-	// guess at a constant, wrong for the third time.
-	//
-	// So it stops guessing: work out both candidates, and take whichever lands further from where the
-	// pad already is. A near-black pad has nowhere to go but up, a bright one nowhere but down, and
-	// everything in between picks the side with more room - without anyone having to know what any
-	// layout's palette looks like.
+void KeyboardScreen::markPressed(RGB image[][kDisplayWidth + kSideBarWidth], int32_t x, int32_t y, uint8_t strength) {
 	// STRENGTH separates the pad under your finger from its octaves. Cody: "the lit keys going up the
 	// octave are way too bright - the ones we hit should be brightest, the others half as bright."
 	//
-	// He is right and it is the difference between a readout and a decoration: if every C on the
+	// He is right, and it is the difference between a readout and a decoration: if every C on the
 	// surface changes by the same amount, the surface tells you the pitch class and loses the one
 	// thing you already knew - which note you actually played. Half the movement keeps the octaves as
 	// context and keeps your finger's pad as the subject.
-	const RGB up = padLift(c, (uint8_t)(175 * strength / 255));
-	const RGB down = padDim(c, (uint8_t)(195 * strength / 255));
-	c = (padGap(down, c) > padGap(up, c)) ? down : up;
+	//
+	// The movement itself is PadLEDs::pressedColour, shared with the all-views feedback in
+	// prepareColour, so an octave and the pad you hit shift the same way by different amounts.
+	image[y][x] = PadLEDs::pressedColour(image[y][x], strength);
 }
 
 bool KeyboardScreen::renderSidebar(uint32_t whichRows, RGB image[][kDisplayWidth + kSideBarWidth],

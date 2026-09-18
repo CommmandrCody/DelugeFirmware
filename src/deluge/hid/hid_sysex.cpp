@@ -10,7 +10,7 @@
 #include "io/midi/midi_engine.h"
 #include "io/midi/sysex.h"
 #include "memory/general_memory_allocator.h"
-#include "model/song/song.h" // Chroma: resync — read the live key/scale to push on handshake
+#include "model/song/song.h"           // Chroma: resync — read the live key/scale to push on handshake
 #include "playback/playback_handler.h" // Chroma: transport push - is it running, and where
 #include "processing/engines/audio_engine.h"
 #include "util/pack.h"
@@ -622,8 +622,7 @@ void HIDSysex::sendTransportIfChanged(bool force) {
 		}
 	}
 
-	if (!force && playing == (lastPlaying == 1) && bar == lastBar && beat == lastBeat
-	    && bpm10 == lastBpm10) {
+	if (!force && playing == (lastPlaying == 1) && bar == lastBar && beat == lastBeat && bpm10 == lastBpm10) {
 		return;
 	}
 	lastPlaying = playing ? 1 : 0;
@@ -691,7 +690,15 @@ void HIDSysex::sendPadGrid(MIDICable& cable) {
 	int32_t p = 0;
 	for (int32_t y = 0; y < H; y++) {
 		for (int32_t x = 0; x < W; x++) {
-			RGB c = PadLEDs::image[y][x];
+			// prepareColour, NOT the raw image: this is the same function every pad passes through on
+			// its way to the PIC, so the Cockpit receives the colour the pad is ACTUALLY showing -
+			// flash cursor, press feedback and greyout included.
+			//
+			// Cody: "I want device to EXACTLY reflect the current state of the Deluge ... this is the
+			// cockpit of a plane, you can't have speeds misrepresented, attitudes off - you will
+			// crash." Reading `image` here was a second, quieter rendering of the grid that agreed
+			// with the hardware only for as long as nothing was happening.
+			RGB c = PadLEDs::prepareColour(x, y, PadLEDs::image[y][x]);
 			raw[p++] = c.r;
 			raw[p++] = c.g;
 			raw[p++] = c.b;

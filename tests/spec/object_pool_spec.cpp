@@ -1,10 +1,20 @@
 #include "../tracking_allocator.h"
 #include "memory/object_pool.h"
 
-#include "cppspec.hpp"
+// STANDARD HEADERS FIRST, and it is not a style preference. cppspec.hpp does `#define _` (its
+// block-body macro), and newer libc++ uses a bare `_` token of its own inside <__memory/compressed_pair.h>,
+// which <future> and <thread> pull in. Included in the other order, cppspec rewrites libc++'s own
+// source and the SDK headers fail to compile - eight errors that all point into /usr/include and
+// none of which are about this file.
+//
+// That is what took the whole firmware suite down: every `./dbt test` died at compile, so the suite
+// reported a FAILURE that looked like the SDK being broken and gave us zero coverage either way.
+// See tools/build-doctor.sh, which now checks for exactly this before the suite runs.
 #include <cassert>
 #include <future>
 #include <thread>
+
+#include "cppspec.hpp"
 
 using namespace deluge::memory;
 

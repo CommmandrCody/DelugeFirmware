@@ -102,6 +102,23 @@ extern int8_t scrollDirection;
 extern bool scrollingToNothing;
 } // namespace vertical
 
+/**
+ * The press-feedback movement: shift a pad's colour whichever way is MORE VISIBLE, by `strength`.
+ *
+ * Canonical here rather than in a screen because pressing a pad is not a keyboard idea - it is true
+ * of the piano roll, the session grid, the arranger and the sidebar alike. See prepareColour().
+ */
+RGB pressedColour(RGB c, uint8_t strength);
+
+/**
+ * The colour a pad is ACTUALLY showing: `colourSource` plus the flash cursor, press feedback and
+ * greyout. Every pad on the hardware passes through here on its way to the PIC.
+ *
+ * Anything mirroring the grid (the Cockpit's Device tab, via HIDSysex::sendPadGrid) must send THIS,
+ * not the raw `image`. Cody: "I want device to EXACTLY reflect the current state of the Deluge ...
+ * this is the cockpit of a plane, you can't have speeds misrepresented, attitudes off - you will
+ * crash." A mirror that reads `image` shows a pad the instrument is not showing.
+ */
 RGB prepareColour(int32_t x, int32_t y, RGB colourSource);
 void clearTickSquares(bool shouldSend = true);
 void setTickSquares(const uint8_t* squares, const uint8_t* colours);

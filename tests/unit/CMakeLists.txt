@@ -57,6 +57,9 @@ file(GLOB_RECURSE deluge_SOURCES
         ../../src/deluge/model/song/clip_iterators.cpp
         # For sync tests
         ../../src/deluge/model/sync.cpp
+        # For press feedback tests. Deliberately dependency-free (RGB only) so that the one piece
+        # that was got wrong four times on hardware can be tested on the host at all.
+        ../../src/deluge/gui/colour/press_feedback.cpp
         # For chord tests
         ../../src/deluge/gui/ui/keyboard/chords.cpp
         # chords.cpp formats names with sprintf, which the firmware redirects to its own
@@ -75,6 +78,7 @@ add_executable(UnitTests
         sync_tests.cpp
         chord_tests.cpp
         harmonic_bench_tests.cpp
+        press_feedback_tests.cpp
         time_tests.cpp
 )
 add_test(NAME UnitTests

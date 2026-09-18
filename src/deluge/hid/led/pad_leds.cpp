@@ -18,6 +18,7 @@
 #include "hid/led/pad_leds.h"
 #include "definitions_cxx.hpp"
 #include "gui/colour/colour.h"
+#include "gui/colour/press_feedback.h"
 #include "gui/menu_item/colour.h"
 #include "gui/ui/keyboard/keyboard_screen.h"
 #include "gui/ui/ui.h"
@@ -275,36 +276,6 @@ const RGB flashColours[3] = {
     gui::colours::red,
 };
 
-namespace {
-RGB padLift(RGB c, uint8_t amount) {
-	return c.transform(
-	    [amount](uint8_t ch) -> uint8_t { return (uint8_t)(ch + (((255 - ch) * (uint32_t)amount) / 255)); });
-}
-RGB padDim(RGB c, uint8_t amount) {
-	return c.transform([amount](uint8_t ch) -> uint8_t { return (uint8_t)(ch - ((ch * (uint32_t)amount) / 255)); });
-}
-// How far apart two colours are, summed across the channels. Crude on purpose: the question is only
-// "would anyone notice the difference", and a sum of the three distances answers exactly that.
-uint32_t padGap(RGB a, RGB b) {
-	const int32_t dr = (int32_t)a.r - b.r, dg = (int32_t)a.g - b.g, db = (int32_t)a.b - b.b;
-	return (uint32_t)((dr < 0 ? -dr : dr) + (dg < 0 ? -dg : dg) + (db < 0 ? -db : db));
-}
-} // namespace
-
-RGB pressedColour(RGB c, uint8_t strength) {
-	// WHICHEVER DIRECTION ACTUALLY CHANGES THE PAD. No brightness threshold, because every threshold
-	// picked here was wrong about some layout's palette: in-key draws its INACTIVE root at half
-	// brightness, so "bright pads dim, dark pads lift" put the root in the lift branch and lifting a
-	// half-lit pad does nearly nothing. Cody: "column presses only light up the unlit pads - the solid
-	// one at the root, no change is seen whatsoever."
-	//
-	// So it stops guessing: work out both candidates and take whichever lands further from where the
-	// pad already is. Nobody has to know what any view's palette looks like.
-	const RGB up = padLift(c, (uint8_t)(175 * strength / 255));
-	const RGB down = padDim(c, (uint8_t)(195 * strength / 255));
-	return (padGap(down, c) > padGap(up, c)) ? down : up;
-}
-
 RGB prepareColour(int32_t x, int32_t y, RGB colourSource) {
 	if (flashCursor == FLASH_CURSOR_SLOW && slowFlashSquares[y] == x && currentUIMode != UI_MODE_HORIZONTAL_SCROLL) {
 		if (slowFlashColours[y] == 1) { // If it's to be the "muted" colour, get that
@@ -327,7 +298,7 @@ RGB prepareColour(int32_t x, int32_t y, RGB colourSource) {
 	// The PHYSICAL pad, not a sounding note: a note can ring on after release and a held pad can be
 	// silent. "Is my finger on it" is the question being asked.
 	if (x >= 0 && x < kDisplayWidth + kSideBarWidth && y >= 0 && y < kDisplayHeight && matrixDriver.padStates[x][y]) {
-		colourSource = pressedColour(colourSource, 255);
+		colourSource = deluge::gui::colour::pressedColour(colourSource, 255);
 	}
 
 	if ((greyoutRows || greyoutCols)

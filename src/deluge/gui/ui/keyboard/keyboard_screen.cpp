@@ -17,6 +17,7 @@
 #include "gui/ui/keyboard/keyboard_screen.h"
 #include "definitions_cxx.hpp"
 #include "extern.h"
+#include "gui/colour/press_feedback.h"
 #include "gui/menu_item/multi_range.h"
 #include "gui/ui/audio_recorder.h"
 #include "gui/ui/sound_editor.h"
@@ -1114,7 +1115,7 @@ void KeyboardScreen::markPressed(RGB image[][kDisplayWidth + kSideBarWidth], int
 	//
 	// The movement itself is PadLEDs::pressedColour, shared with the all-views feedback in
 	// prepareColour, so an octave and the pad you hit shift the same way by different amounts.
-	image[y][x] = PadLEDs::pressedColour(image[y][x], strength);
+	image[y][x] = deluge::gui::colour::pressedColour(image[y][x], strength);
 }
 
 bool KeyboardScreen::renderSidebar(uint32_t whichRows, RGB image[][kDisplayWidth + kSideBarWidth],

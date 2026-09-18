@@ -103,14 +103,6 @@ extern bool scrollingToNothing;
 } // namespace vertical
 
 /**
- * The press-feedback movement: shift a pad's colour whichever way is MORE VISIBLE, by `strength`.
- *
- * Canonical here rather than in a screen because pressing a pad is not a keyboard idea - it is true
- * of the piano roll, the session grid, the arranger and the sidebar alike. See prepareColour().
- */
-RGB pressedColour(RGB c, uint8_t strength);
-
-/**
  * The colour a pad is ACTUALLY showing: `colourSource` plus the flash cursor, press feedback and
  * greyout. Every pad on the hardware passes through here on its way to the PIC.
  *

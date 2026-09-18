@@ -1025,18 +1025,6 @@ bool KeyboardScreen::renderMainPads(uint32_t whichRows, RGB image[][kDisplayWidt
 
 	layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->renderPads(image);
 
-	// A FLOOR UNDER THE DARK PADS, before the press feedback so a pressed one still lifts off it.
-	//
-	// Cody: "the unit pads need a faint tone so it's not so dark." On a keyboard every pad in the main
-	// grid is a playable note, so showing that it EXISTS is information - you can see the shape of the
-	// instrument in a dark room instead of hunting for edges between black squares.
-	//
-	// Keyboard grid only, and deliberately so. In a clip view a dark pad means "no note here", and
-	// lighting those would be inventing content; here it means "a note you have not played yet".
-	//
-	// Very low: this has to read as the surface being THERE, never as a pad being on. Anything bright
-	// enough to be mistaken for lit would cost more than the darkness did.
-	applyPadFloor(image);
 	applyPressFeedback(image, 0, kDisplayWidth);
 
 	PadLEDs::renderingLock = false;
@@ -1131,23 +1119,34 @@ void KeyboardScreen::applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidt
 	}
 }
 
-void KeyboardScreen::applyPadFloor(RGB image[][kDisplayWidth + kSideBarWidth]) {
-	for (int32_t y = 0; y < kDisplayHeight; y++) {
-		for (int32_t x = 0; x < kDisplayWidth; x++) {
-			RGB& c = image[y][x];
-			// Only pads that are essentially off. A pad the layout has deliberately drawn dim - the
-			// scale backdrop, a faded lattice - is already saying something, and raising it would
-			// flatten a distinction someone chose to make.
-			if (padPeak(c) <= 3) {
-				c = RGB{.r = 7, .g = 9, .b = 12};
-			}
-		}
-	}
+// How far apart two colours are, summed across the channels. Crude on purpose: the question is only
+// "would anyone notice the difference", and a sum of the three distances answers exactly that.
+namespace {
+uint32_t padGap(RGB a, RGB b) {
+	const int32_t dr = (int32_t)a.r - b.r, dg = (int32_t)a.g - b.g, db = (int32_t)a.b - b.b;
+	return (uint32_t)((dr < 0 ? -dr : dr) + (dg < 0 ? -dg : dg) + (db < 0 ? -db : db));
 }
+} // namespace
 
 void KeyboardScreen::markPressed(RGB image[][kDisplayWidth + kSideBarWidth], int32_t x, int32_t y) {
 	RGB& c = image[y][x];
-	c = (padPeak(c) > 150) ? padDim(c, 195) : padLift(c, 175);
+
+	// WHICHEVER DIRECTION ACTUALLY CHANGES THE PAD. No brightness threshold, because every threshold
+	// I picked was wrong about some layout's palette and I had no way to check without the hardware.
+	//
+	// Cody: "column presses only light up the unlit pads - the solid one at the root, no change is
+	// seen whatsoever." The rule was "peak > 150 dims, otherwise lifts", and in-key draws its
+	// INACTIVE root with adjust(255, 2) - half brightness, so peak tops out at 127. It fell in the
+	// lift branch, and lifting a pad that is already more than half lit does nearly nothing. My third
+	// guess at a constant, wrong for the third time.
+	//
+	// So it stops guessing: work out both candidates, and take whichever lands further from where the
+	// pad already is. A near-black pad has nowhere to go but up, a bright one nowhere but down, and
+	// everything in between picks the side with more room - without anyone having to know what any
+	// layout's palette looks like.
+	const RGB up = padLift(c, 175);
+	const RGB down = padDim(c, 195);
+	c = (padGap(down, c) > padGap(up, c)) ? down : up;
 }
 
 bool KeyboardScreen::renderSidebar(uint32_t whichRows, RGB image[][kDisplayWidth + kSideBarWidth],

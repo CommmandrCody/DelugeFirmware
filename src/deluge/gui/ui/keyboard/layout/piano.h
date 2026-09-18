@@ -54,6 +54,26 @@ public:
 	bool supportsInstrument() override { return true; }
 	bool supportsKit() override { return false; }
 
+	/// Which note this pad plays, so pressing one C lights every other C on the surface.
+	///
+	/// Cody: "the octaves on piano mode, the C0 and C1 don't highlight like the others on the iso."
+	/// They could not: the hook that tells the screen what a pad plays was added to the isomorphic
+	/// and in-key layouts and this one was missed, so it fell back to the base -1 and the octave
+	/// lighting silently did nothing here. Correct code, never reached, in a third file - the same
+	/// shape as the press feedback that lived in one layout for three firmware versions.
+	///
+	/// noteFromCoords is unsigned and its arithmetic subtracts 1, so a pad at the very bottom-left
+	/// can wrap instead of going negative. Range-checked into a signed value before it leaves here,
+	/// because the caller compares pitch classes and a wrapped 65535 would light a scattering of
+	/// unrelated pads.
+	int32_t noteAtPad(int32_t x, int32_t y) override {
+		if (x < 0 || x >= kDisplayWidth || y < 0 || y >= kDisplayHeight) {
+			return -1;
+		}
+		const int32_t n = (int32_t)noteFromCoords(x, y);
+		return (n >= 0 && n <= 127) ? n : -1;
+	}
+
 private:
 	/* intervalFromCoords return a current note interval from 0 to 12 without an octave
 	 * depending on x and y. Used for color-coding and detecting noteFromCoords.

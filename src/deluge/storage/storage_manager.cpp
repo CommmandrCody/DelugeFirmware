@@ -233,8 +233,7 @@ bool StorageManager::fileExists(char const* pathName) {
 // appear in the song list and can't collide with a user's song name (e.g. their own "Recovery").
 char const* const kRecoveryFinalPath = "SYSTEM/RECOVER.XML";
 char const* const kRecoveryTempPath = "SYSTEM/RECOVER.TMP";
-// Where a declined recovery goes: kept, loadable by hand, never offered again.
-char const* const kRecoveryDeclinedPath = "SYSTEM/RECOVER.OLD.XML";
+
 
 Error StorageManager::writeRecoveryFile() {
 	if (currentSong == nullptr) {
@@ -258,26 +257,61 @@ Error StorageManager::writeRecoveryFile() {
 // Clear the recovery file and the dirty flag. Called after a manual Save (work is now safe) and on
 // load-away. This is the invariant that makes presence-at-boot mean "unsaved work was lost":
 // RECOVER exists ⟺ there is unsaved work. Save is the "work is safe" event that clears it.
-// DECLINED, NOT DISCARDED. Cody: "if I have a loaded song and I haven't made a change at all, when
-// I turn off the Deluge it wants to recover ... seems it will ALWAYS want to recover the last track.
-// How do we avoid this without removing the actual use case? I like recovery but it's always doing
-// it now."
+// DECLINED, NOT DISCARDED — AND KEPT, NOT OVERWRITTEN.
 //
-// The loop was by design and the design was half right. Declining deliberately left RECOVER.XML
-// alone, so nothing was ever destroyed - but "exists" is the only test for whether to offer it, so
-// the same jam came back on every single boot until you happened to save or load something by hand.
-// A prompt you have to dismiss every time you turn an instrument on is not a safety net, it is a
-// toll, and it trains you to dismiss the one that matters.
+// Cody: "if I have a loaded song and I haven't made a change at all, when I turn off the Deluge it
+// wants to recover ... seems it will ALWAYS want to recover the last track. How do we avoid this
+// without removing the actual use case? I like recovery but it's always doing it now."
 //
-// So declining moves it aside instead. The work stays on the card under a name you can load by hand,
-// and it stops being offered. Any NEW unsaved work writes a fresh RECOVER.XML and is offered
-// normally, which is the case the feature exists for.
+// The loop was by design and the design was half right. "The file exists" was the whole test for
+// whether to offer, and declining deliberately left the file alone so nothing was destroyed - which
+// meant the same jam came back on every boot until you happened to save or load by hand. A prompt
+// you dismiss every time you switch an instrument on is a toll rather than a safety net, and it
+// trains you to dismiss the one that matters.
 //
-// Only one is kept. A folder filling with RECOVER.OLD.1, .2, .3 would be its own kind of mess, and
-// the older a declined jam gets the less likely anyone is to want it.
+// The first fix kept ONE declined jam, overwriting it each time. Cody, better: "we could leave those
+// offered tracks there and clean them once in a while, but you may have fun pulling them up someday
+// lol." He is right - a jam you did not think was worth saving in the moment is exactly the kind of
+// thing that turns out to be worth hearing a year later, and the cost of keeping it is a few hundred
+// kilobytes on a card with a terabyte.
+//
+// So they go to SONGS/RECOVERED/ and they stack up. SONGS/ deliberately, not SYSTEM/: the Deluge's
+// own song browser looks there, so "pulling them up someday" is just loading a song rather than a
+// salvage operation. Its own folder, so it is never mixed in with the songs he meant to keep - the
+// same rule as never writing generated patches into his synth library.
+//
+// Numbered rather than dated, because the Deluge has no reliable clock and a file stamped 2106 is
+// worse than one numbered 007.
+char const* const kRecoveredDir = "SONGS/RECOVERED";
+// Where this boot's declined jam was put, so accepting the prompt can load it back.
+static char lastRecovered[64] = {0};
+
 void StorageManager::setRecoveryAside() {
-	f_unlink(kRecoveryDeclinedPath);                    // last declined one makes way for this one
-	f_rename(kRecoveryFinalPath, kRecoveryDeclinedPath); // harmless if there is nothing to move
+	f_mkdir(kRecoveredDir); // harmless if it is already there
+
+	// The first free number. Capped so a card that somehow fills with these cannot turn a boot into
+	// a thousand stat calls - past the cap the oldest slot is reused, which still keeps 999 of them.
+	char path[64];
+	int32_t n = 1;
+	for (; n < 1000; n++) {
+		snprintf(path, sizeof path, "%s/JAM%03d.XML", kRecoveredDir, (int)n);
+		if (!fileExists(path)) {
+			break;
+		}
+	}
+	if (n >= 1000) {
+		snprintf(path, sizeof path, "%s/JAM001.XML", kRecoveredDir);
+		f_unlink(path);
+	}
+	f_rename(kRecoveryFinalPath, path); // harmless if there is nothing to move
+	// Remembered for this boot so accepting the prompt can load it back. The rename has already
+	// happened by the time the user decides, and the prompt must not have to guess where it went.
+	strncpy(lastRecovered, path, sizeof lastRecovered - 1);
+	lastRecovered[sizeof lastRecovered - 1] = 0;
+}
+
+char const* StorageManager::lastRecoveredPath() {
+	return lastRecovered[0] ? lastRecovered : nullptr;
 }
 
 void StorageManager::clearRecoveryFile() {

@@ -369,11 +369,13 @@ Error writeRecoveryFile();
 // Delete the recovery file + clear the dirty flag. Call after a manual Save / on load-away — this
 // is what makes "RECOVER exists ⟺ unsaved work" hold without a clean-shutdown signal.
 void clearRecoveryFile();
-// Declining is not discarding: move the recovery file aside so it is KEPT but no longer offered.
-// Without this, "the file exists" is the whole test, so the same jam is offered on every boot
-// forever - a prompt you dismiss every time you switch the instrument on, which is a toll rather
-// than a safety net and trains you to dismiss the one that matters.
+// Declining is not discarding. Moves the recovery file into SONGS/RECOVERED/ as the next numbered
+// JAM, so it is KEPT, loadable from the Deluge's own song browser, and never offered again. Without
+// this, "the file exists" is the whole test and the same jam is offered on every boot forever.
 void setRecoveryAside();
+/// Where setRecoveryAside() put this boot's recovery file, or nullptr if it did not run. The rename
+/// happens when the prompt goes UP, so accepting it later must not have to guess where the file went.
+char const* lastRecoveredPath();
 Error createXMLFile(char const* pathName, XMLSerializer& writer, bool mayOverwrite = false, bool displayErrors = true);
 Error createJsonFile(char const* pathName, JsonSerializer& writer, bool mayOverwrite = false,
                      bool displayErrors = true);

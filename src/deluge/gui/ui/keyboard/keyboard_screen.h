@@ -44,6 +44,10 @@ public:
 	// Ranged, because the grid and the sidebar are drawn by two separate calls and the sidebar is
 	// drawn second - feeding back over the whole width in the first call gets the sidebar painted
 	// over by the second.
+	/// A faint floor under pads that are otherwise black, so the grid is visible as a surface. Main
+	/// grid only: on a keyboard every pad is a playable note, whereas in a clip view a dark pad means
+	/// there is nothing there. Runs BEFORE press feedback so a pressed dark pad still lifts off it.
+	void applyPadFloor(RGB image[][kDisplayWidth + kSideBarWidth]);
 	void applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidth], int32_t fromX, int32_t toX);
 	/// Move one pad away from whatever it already is. Factored out because the pressed pad and every
 	/// other pad of the same pitch class have to be marked identically - two copies of the rule would

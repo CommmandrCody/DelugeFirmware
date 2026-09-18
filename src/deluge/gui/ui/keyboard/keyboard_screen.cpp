@@ -1025,6 +1025,18 @@ bool KeyboardScreen::renderMainPads(uint32_t whichRows, RGB image[][kDisplayWidt
 
 	layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->renderPads(image);
 
+	// A FLOOR UNDER THE DARK PADS, before the press feedback so a pressed one still lifts off it.
+	//
+	// Cody: "the unit pads need a faint tone so it's not so dark." On a keyboard every pad in the main
+	// grid is a playable note, so showing that it EXISTS is information - you can see the shape of the
+	// instrument in a dark room instead of hunting for edges between black squares.
+	//
+	// Keyboard grid only, and deliberately so. In a clip view a dark pad means "no note here", and
+	// lighting those would be inventing content; here it means "a note you have not played yet".
+	//
+	// Very low: this has to read as the surface being THERE, never as a pad being on. Anything bright
+	// enough to be mistaken for lit would cost more than the darkness did.
+	applyPadFloor(image);
 	applyPressFeedback(image, 0, kDisplayWidth);
 
 	PadLEDs::renderingLock = false;
@@ -1114,6 +1126,20 @@ void KeyboardScreen::applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidt
 				if (n >= 0 && (n % 12) == pc) {
 					markPressed(image, x, y);
 				}
+			}
+		}
+	}
+}
+
+void KeyboardScreen::applyPadFloor(RGB image[][kDisplayWidth + kSideBarWidth]) {
+	for (int32_t y = 0; y < kDisplayHeight; y++) {
+		for (int32_t x = 0; x < kDisplayWidth; x++) {
+			RGB& c = image[y][x];
+			// Only pads that are essentially off. A pad the layout has deliberately drawn dim - the
+			// scale backdrop, a faded lattice - is already saying something, and raising it would
+			// flatten a distinction someone chose to make.
+			if (padPeak(c) <= 3) {
+				c = RGB{.r = 7, .g = 9, .b = 12};
 			}
 		}
 	}

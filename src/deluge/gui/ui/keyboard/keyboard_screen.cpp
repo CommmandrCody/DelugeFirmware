@@ -1086,7 +1086,7 @@ void KeyboardScreen::applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidt
 		if (p.x < fromX || p.x >= toX || p.y < 0 || p.y >= kDisplayHeight) {
 			continue;
 		}
-		markPressed(image, p.x, p.y);
+		markPressed(image, p.x, p.y, 255); // the pad under the finger: full strength
 
 		// EVERY PAD THAT PLAYS THE SAME NOTE, not just the one under your finger. Cody: "light all the
 		// octaves like you do with other notes, not just the pressed one ... the C1-C5 aren't lighting
@@ -1112,7 +1112,7 @@ void KeyboardScreen::applyPressFeedback(RGB image[][kDisplayWidth + kSideBarWidt
 				}
 				const int32_t n = layout->noteAtPad(x, y);
 				if (n >= 0 && (n % 12) == pc) {
-					markPressed(image, x, y);
+					markPressed(image, x, y, 128); // its octaves: context, at half the movement
 				}
 			}
 		}
@@ -1128,7 +1128,8 @@ uint32_t padGap(RGB a, RGB b) {
 }
 } // namespace
 
-void KeyboardScreen::markPressed(RGB image[][kDisplayWidth + kSideBarWidth], int32_t x, int32_t y) {
+void KeyboardScreen::markPressed(RGB image[][kDisplayWidth + kSideBarWidth], int32_t x, int32_t y,
+                                 uint8_t strength) {
 	RGB& c = image[y][x];
 
 	// WHICHEVER DIRECTION ACTUALLY CHANGES THE PAD. No brightness threshold, because every threshold
@@ -1144,8 +1145,15 @@ void KeyboardScreen::markPressed(RGB image[][kDisplayWidth + kSideBarWidth], int
 	// pad already is. A near-black pad has nowhere to go but up, a bright one nowhere but down, and
 	// everything in between picks the side with more room - without anyone having to know what any
 	// layout's palette looks like.
-	const RGB up = padLift(c, 175);
-	const RGB down = padDim(c, 195);
+	// STRENGTH separates the pad under your finger from its octaves. Cody: "the lit keys going up the
+	// octave are way too bright - the ones we hit should be brightest, the others half as bright."
+	//
+	// He is right and it is the difference between a readout and a decoration: if every C on the
+	// surface changes by the same amount, the surface tells you the pitch class and loses the one
+	// thing you already knew - which note you actually played. Half the movement keeps the octaves as
+	// context and keeps your finger's pad as the subject.
+	const RGB up = padLift(c, (uint8_t)(175 * strength / 255));
+	const RGB down = padDim(c, (uint8_t)(195 * strength / 255));
 	c = (padGap(down, c) > padGap(up, c)) ? down : up;
 }
 

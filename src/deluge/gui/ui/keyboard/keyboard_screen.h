@@ -48,7 +48,10 @@ public:
 	/// Move one pad away from whatever it already is. Factored out because the pressed pad and every
 	/// other pad of the same pitch class have to be marked identically - two copies of the rule would
 	/// drift, and then your finger's pad and its octaves would look subtly different.
-	void markPressed(RGB image[][kDisplayWidth + kSideBarWidth], int32_t x, int32_t y);
+	/// `strength` is 255 for the pad under the finger and half that for its octaves elsewhere on the
+	/// surface. If every pad of the same pitch class moved by the same amount, the grid would tell you
+	/// the pitch class and lose the one thing you already knew - which note you actually played.
+	void markPressed(RGB image[][kDisplayWidth + kSideBarWidth], int32_t x, int32_t y, uint8_t strength);
 
 	ActionResult verticalEncoderAction(int32_t offset, bool inCardRoutine) override;
 	ActionResult horizontalEncoderAction(int32_t offset) override;

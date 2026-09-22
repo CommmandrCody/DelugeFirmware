@@ -76,6 +76,11 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		// has never seen a knob move and would otherwise draw nothing until someone touched one.
 		pushGoldKnobs();
 		sendTransportIfChanged(true); // a host that connects mid-song must not be blank until the next beat
+		// ...and which keyboard, in what key, showing which notes. Same reason, and the report that
+		// produced it: "it didn't draw - I toggled to piano roll and back and it showed". The push is
+		// de-duped, so a host that connects while the instrument sits still is told nothing until
+		// something happens to change. A state signal has to go in the hello as well as on change.
+		sendKeyboardStateIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command

@@ -1,6 +1,7 @@
 #include "hid/hid_sysex.h"
 #include "gui/l10n/l10n.h"
-#include "gui/ui/keyboard/chords.h" // Chroma: the synced spelling lean (gChromaSpelling) packed into 0x43
+#include "gui/ui/keyboard/chords.h"          // Chroma: the synced spelling lean (gChromaSpelling) packed into 0x43
+#include "gui/ui/keyboard/keyboard_screen.h" // Chroma (0x48): keyboardScreen.noteRange()
 #include "gui/ui/ui.h"
 #include "gui/ui_timer_manager.h"
 #include "hid/display/oled.h"
@@ -10,8 +11,10 @@
 #include "io/midi/midi_engine.h"
 #include "io/midi/sysex.h"
 #include "memory/general_memory_allocator.h"
-#include "model/song/song.h"           // Chroma: resync — read the live key/scale to push on handshake
-#include "playback/playback_handler.h" // Chroma: transport push - is it running, and where
+#include "model/clip/instrument_clip.h" // Chroma (0x48): keyboardState.currentLayout
+#include "model/scale/preset_scales.h"  // Chroma (0x48): getScaleName
+#include "model/song/song.h"            // Chroma: resync — read the live key/scale to push on handshake
+#include "playback/playback_handler.h"  // Chroma: transport push - is it running, and where
 #include "processing/engines/audio_engine.h"
 #include "util/pack.h"
 #include <cstring>
@@ -138,7 +141,8 @@ void HIDSysex::sendDisplayIfChanged() {
 	// redraws), it self-gates on lastHidCable + de-dupes, and it sits BEFORE the display-mirror gate below so it
 	// works even for hosts that never requested screen mirroring (the Companion arms lastHidCable on connect).
 	sendActiveViewIfChanged();
-	sendTransportIfChanged(); // Chroma: same piggyback, same reasoning - it self-gates and de-dupes
+	sendTransportIfChanged();     // Chroma: same piggyback, same reasoning - it self-gates and de-dupes
+	sendKeyboardStateIfChanged(); // Chroma (0x48): layout, key and note range - same piggyback again
 	// NB: timer is only used for throttling, under good conditions sending
 	// is driven by the display subsystem only
 	uiTimerManager.unsetTimer(TimerName::SYSEX_DISPLAY);
@@ -645,6 +649,99 @@ void HIDSysex::sendTransportIfChanged(bool force) {
 	msg[11] = (uint8_t)(beat & 0x7f);
 	msg[12] = 0xf7;
 	lastHidCable->sendSysex(msg, 13);
+}
+
+// Chroma (0x48): WHICH KEYBOARD, IN WHAT KEY, SHOWING WHICH NOTES.
+//
+// Three things a host could not previously know, all of which a player reads off the instrument at a
+// glance and had no way to see on a second screen:
+//
+//   the LAYOUT   all eight keyboard layouts report as the one view slug "keyboard" over 0x45, so
+//                isomorphic, in-key, piano and the rest were indistinguishable.
+//   the KEY      root note and scale escaped only via 0x43, which fires on a harmonic palette pick.
+//                In an ordinary keyboard layout nothing ever said what key you were in.
+//   the RANGE    the span of notes the grid is currently showing. It moves as you scroll and is the
+//                thing that tells you where on the instrument you are.
+//
+// Cody: "I want the mode of the keyboard displayed clearly and the current root note/scale selected
+// ... also note the range of notes C1-N".
+//
+// De-duped like the transport push: this is called on every redraw, and a surface does not need to
+// be told the same thing sixty times a second.
+void HIDSysex::sendKeyboardStateIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	InstrumentClip* clip = getCurrentInstrumentClip();
+	if (clip == nullptr || currentSong == nullptr) {
+		return;
+	}
+
+	// ONLY WHEN THE KEYBOARD IS ACTUALLY ON SCREEN.
+	//
+	// `keyboardState.currentLayout` is a property of the CLIP, not of what you are looking at - it
+	// remembers whichever layout you last chose in the keyboard. Reading it unconditionally meant the
+	// Cockpit announced "Isomorphic" while Cody was in the piano roll, which is the same fault this
+	// whole push was written to fix: a plausible value reported for something that is not the case.
+	//
+	// 127 says "no keyboard here", and the host hides the panel rather than showing a stale layout.
+	// It cannot collide with a real layout: the enum has eight entries.
+	UI* activeUI = getCurrentUI();
+	const bool onKeyboard = activeUI != nullptr && activeUI->getUIType() == UIType::KEYBOARD_SCREEN;
+	const uint8_t layout = onKeyboard ? (uint8_t)clip->keyboardState.currentLayout : 127;
+	const uint8_t root = (uint8_t)(currentSong->key.rootNote % 12);
+	const Scale scale = currentSong->getCurrentScale();
+	const char* scaleName = getScaleName(scale);
+
+	// THE RANGE, asked of the layout itself rather than computed here. Only the layout knows how its
+	// pads map to notes - that is the whole difference between these layouts - and duplicating any of
+	// that arithmetic would be a second, drifting copy of the thing this message exists to report.
+	//
+	// A layout with no notes (drums, the chord library) answers -1, and then there is no range to
+	// send rather than a made-up one.
+	int32_t lo = -1, hi = -1;
+	if (onKeyboard) {
+		keyboardScreen.noteRange(lo, hi);
+	}
+
+	static uint8_t lastLayout = 0xff;
+	static uint8_t lastRoot = 0xff;
+	static int32_t lastLo = -2, lastHi = -2;
+	static uint8_t lastScaleLen = 0xff;
+	uint8_t nameLen = 0;
+	while (scaleName != nullptr && scaleName[nameLen] != 0 && nameLen < 20) {
+		nameLen++;
+	}
+	if (!force && layout == lastLayout && root == lastRoot && lo == lastLo && hi == lastHi && nameLen == lastScaleLen) {
+		return;
+	}
+	lastLayout = layout;
+	lastRoot = root;
+	lastLo = lo;
+	lastHi = hi;
+	lastScaleLen = nameLen;
+
+	uint8_t msg[32];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02; // the longer frame form, which is what new tags use
+	msg[i++] = SysEx::SysexCommands::KeyboardState;
+	msg[i++] = layout;
+	msg[i++] = root;
+	// A note is 0..127 and fits a single 7-bit byte; 127 means "no range", which is distinct from any
+	// real note because a layout that HAS notes always reports a low below its high.
+	msg[i++] = (uint8_t)(lo < 0 ? 127 : (lo & 0x7f));
+	msg[i++] = (uint8_t)(hi < 0 ? 127 : (hi & 0x7f));
+	msg[i++] = nameLen;
+	for (uint8_t k = 0; k < nameLen; k++) {
+		msg[i++] = (uint8_t)(scaleName[k]) & 0x7f; // scale names are ASCII by contract
+	}
+	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
 }
 
 // Chroma WRITE direction (0x44): a one-slot inbox for an inbound voicing-mod. The MIDI-receive context stashes it;

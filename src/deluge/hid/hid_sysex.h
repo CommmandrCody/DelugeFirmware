@@ -50,6 +50,16 @@ void pushGoldKnobs();
 // audio rate. Forced on the handshake so a Cockpit that connects mid-song is not blank until the
 // next beat.
 void sendTransportIfChanged(bool force = false);
+
+/**
+ * Which keyboard layout, what key and scale, and the span of notes on the grid.
+ *
+ * All eight keyboard layouts collapse to the single view slug "keyboard" over 0x45, so a host could
+ * not tell isomorphic from in-key from piano; and the key escaped only through 0x43, which fires on
+ * a harmonic palette pick and never in an ordinary layout. De-duped internally - safe to call on
+ * every redraw.
+ */
+void sendKeyboardStateIfChanged(bool force = false);
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

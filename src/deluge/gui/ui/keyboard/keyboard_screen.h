@@ -53,6 +53,15 @@ public:
 	/// the pitch class and lose the one thing you already knew - which note you actually played.
 	void markPressed(RGB image[][kDisplayWidth + kSideBarWidth], int32_t x, int32_t y, uint8_t strength);
 
+	/// The span of notes the grid is currently showing, as MIDI note numbers. False when this layout
+	/// has no notes at all (drums, the chord library), in which case there is no range to report
+	/// rather than a made-up one.
+	///
+	/// Asked of the LAYOUT, because only the layout knows how its pads map to notes - that is the
+	/// whole difference between isomorphic, in-key and piano. Any copy of that arithmetic elsewhere
+	/// would be a second version of the thing drifting away from the first.
+	bool noteRange(int32_t& lo, int32_t& hi);
+
 	ActionResult verticalEncoderAction(int32_t offset, bool inCardRoutine) override;
 	ActionResult horizontalEncoderAction(int32_t offset) override;
 	void selectEncoderAction(int8_t offset) override;

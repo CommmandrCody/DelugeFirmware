@@ -32,9 +32,21 @@ constexpr uint32_t kNoticeable = 30;
 
 // The two candidate directions, restated here as the SPEC rather than borrowed from the code. These
 // are what the implementation has to choose between, and the choice is the thing worth pinning.
+// BRIGHTEN, do not whiten. Restated here as the spec: raise the brightest channel by `amount` of
+// its remaining headroom, and carry the others up in proportion so the ratio between them - the hue -
+// is unchanged. Pure black has no ratio and no hue, so it alone gets a neutral lift.
+//
+// The first version added towards 255 on each channel independently, which brightens by destroying
+// the colour: a mute pad at (40,0,0) became (187,175,175), white with a red cast. Cody, on the
+// audition column: "I thought it muted, it turns white ... it really confuses the user."
 RGB lift(RGB c, uint8_t amount) {
-	return c.transform(
-	    [amount](uint8_t ch) -> uint8_t { return (uint8_t)(ch + (((255 - ch) * (uint32_t)amount) / 255)); });
+	const uint8_t peak = c.r > c.g ? (c.r > c.b ? c.r : c.b) : (c.g > c.b ? c.g : c.b);
+	if (peak == 0) {
+		const uint8_t v = (uint8_t)((uint32_t)amount * 160 / 255);
+		return RGB(v, v, v);
+	}
+	const uint32_t target = peak + ((255u - peak) * (uint32_t)amount) / 255u;
+	return c.transform([peak, target](uint8_t ch) -> uint8_t { return (uint8_t)((uint32_t)ch * target / peak); });
 }
 RGB dim(RGB c, uint8_t amount) {
 	return c.transform([amount](uint8_t ch) -> uint8_t { return (uint8_t)(ch - ((ch * (uint32_t)amount) / 255)); });
@@ -166,4 +178,39 @@ TEST(PressFeedbackTest, neverWrapsAround) {
 			CHECK_EQUAL(lifted, out.b >= c.b);
 		}
 	}
+}
+
+// A PRESSED PAD STILL LOOKS LIKE ITSELF.
+//
+// The complaint that produced this: pressing a pad in the audition column turned it white, so it
+// read as a mode change rather than as a press - "I thought it muted". Two fixes came out of it.
+// The sidebar no longer gets feedback at all (it is controls, and their colour already means
+// something). And the lift brightens the pad's own colour instead of adding white to it, which is
+// what these check.
+TEST(PressFeedbackTest, aPressedPadKeepsItsColour) {
+	struct {
+		uint8_t r, g, b;
+	} cases[] = {{40, 0, 0}, {0, 80, 0}, {0, 0, 200}, {120, 30, 0}};
+	for (const auto& c : cases) {
+		const RGB in = RGB{c.r, c.g, c.b};
+		const RGB out = pressedColour(in, 255);
+		// A channel that was off stays off. Adding white lit all three and turned a red pad pink.
+		if (c.r == 0) {
+			CHECK_EQUAL(0, out.r);
+		}
+		if (c.g == 0) {
+			CHECK_EQUAL(0, out.g);
+		}
+		if (c.b == 0) {
+			CHECK_EQUAL(0, out.b);
+		}
+	}
+}
+
+TEST(PressFeedbackTest, aMutePadGoesBrightRedNotWhite) {
+	// The exact pad from the report. Under the old rule this was (187,175,175).
+	const RGB out = pressedColour(RGB{40, 0, 0}, 255);
+	CHECK(out.r > 150);
+	CHECK_EQUAL(0, out.g);
+	CHECK_EQUAL(0, out.b);
 }

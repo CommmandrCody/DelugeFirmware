@@ -21,9 +21,27 @@ namespace deluge::gui::colour {
 
 namespace {
 
+// BRIGHTEN THE COLOUR THE PAD ALREADY HAS - do not add white to it.
+//
+// The first version added `amount` towards 255 on every channel independently, which brightens by
+// destroying the hue: a mute pad at (40,0,0) pressed became (187,175,175), white with a faint red
+// cast, and an unlit pad became flat grey. Cody, on the audition column: "I thought it muted, it
+// turns white ... it really confuses the user." He was right - the pad stopped looking like itself.
+//
+// Scaling preserves the ratio between channels, so a red pad goes bright RED and a green one bright
+// green. Pure black has no ratio to preserve and no hue to keep, so it alone gets a neutral lift -
+// and that is the unlit pad, which is the one case that always read correctly anyway.
 RGB padLift(RGB c, uint8_t amount) {
-	return c.transform(
-	    [amount](uint8_t ch) -> uint8_t { return (uint8_t)(ch + (((255 - ch) * (uint32_t)amount) / 255)); });
+	const uint8_t peak = c.r > c.g ? (c.r > c.b ? c.r : c.b) : (c.g > c.b ? c.g : c.b);
+	if (peak == 0) {
+		const uint8_t v = (uint8_t)((uint32_t)amount * 160 / 255); // an unlit pad, lifted to legible
+		return RGB(v, v, v);
+	}
+	// How far the brightest channel can still travel, shared out in proportion.
+	const uint32_t headroom = 255u - peak;
+	const uint32_t add = (headroom * (uint32_t)amount) / 255u;
+	const uint32_t target = peak + add;
+	return c.transform([peak, target](uint8_t ch) -> uint8_t { return (uint8_t)((uint32_t)ch * target / peak); });
 }
 
 RGB padDim(RGB c, uint8_t amount) {

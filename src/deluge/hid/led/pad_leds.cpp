@@ -297,7 +297,14 @@ RGB prepareColour(int32_t x, int32_t y, RGB colourSource) {
 	//
 	// The PHYSICAL pad, not a sounding note: a note can ring on after release and a held pad can be
 	// silent. "Is my finger on it" is the question being asked.
-	if (x >= 0 && x < kDisplayWidth + kSideBarWidth && y >= 0 && y < kDisplayHeight && matrixDriver.padStates[x][y]) {
+	// THE MAIN GRID ONLY. The sidebar is mute, launch and audition - CONTROLS, whose colour already
+	// carries meaning (armed, muted, soloed, which section). Overwriting that while a finger is down
+	// tells you something you already know and hides something you do not. Cody: "I thought it muted,
+	// it turns white ... it really confuses the user."
+	//
+	// On the grid the pads are notes and "which one am I holding" is the whole question, so feedback
+	// belongs there and nowhere else.
+	if (x >= 0 && x < kDisplayWidth && y >= 0 && y < kDisplayHeight && matrixDriver.padStates[x][y]) {
 		colourSource = deluge::gui::colour::pressedColour(colourSource, 255);
 	}
 

@@ -1491,6 +1491,22 @@ void View::setKnobIndicatorLevel(uint8_t whichModEncoder) {
 	}
 
 	indicator_leds::setKnobIndicatorLevel(whichModEncoder, knobPos, isBipolar);
+
+	// Chroma (0x46): tell a following host what this knob is now showing. Sent from HERE, the one
+	// place that knows the FINAL level, so the app's knob draws the same number as the LED column
+	// beside the real one. Hooking the turn instead would miss every context change - switching clip,
+	// changing the mod row - and a host that connected mid-session would wait for a turn before it
+	// could show anything at all.
+	//
+	// This call site was the piece missed when hid_sysex.cpp was carried over wholesale: the SENDER
+	// came across and nothing ever called it, so curKnobLevel stayed 0xff and pushGoldKnobs() skipped
+	// both knobs forever. On the wire that looked like the encoders were dead - 0x43, 0x45, 0x47 and
+	// 0x48 all arriving on the 5-second resync and 0x46 absent even from the handshake.
+	{
+		char paramName[32] = {0};
+		getParameterNameFromModEncoder(whichModEncoder, paramName);
+		HIDSysex::sendGoldKnob(whichModEncoder, knobPos, isBipolar, paramName);
+	}
 }
 
 /// if you're dealing with a patch cable which has a -128 to +128 range

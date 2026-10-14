@@ -1187,4 +1187,32 @@ void KeyboardScreen::graphicsRoutine() {
 	}
 }
 
+bool KeyboardScreen::noteRange(int32_t& lo, int32_t& hi) {
+	lo = -1;
+	hi = -1;
+	InstrumentClip* clip = getCurrentInstrumentClip();
+	if (clip == nullptr) {
+		return false;
+	}
+	KeyboardLayout* layout = layout_list[clip->keyboardState.currentLayout];
+	if (layout == nullptr) {
+		return false;
+	}
+	for (int32_t x = 0; x < kDisplayWidth; x++) {
+		for (int32_t y = 0; y < kDisplayHeight; y++) {
+			const int32_t n = layout->noteAtPad(x, y);
+			if (n < 0) {
+				continue;
+			}
+			if (lo < 0 || n < lo) {
+				lo = n;
+			}
+			if (n > hi) {
+				hi = n;
+			}
+		}
+	}
+	return lo >= 0;
+}
+
 } // namespace deluge::gui::ui::keyboard

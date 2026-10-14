@@ -54,6 +54,17 @@ public:
 	bool supportsInstrument() override { return true; }
 	bool supportsKit() override { return false; }
 
+	/// noteFromCoords is unsigned and its arithmetic subtracts 1, so a pad at the very bottom-left can
+	/// wrap instead of going negative. Range-checked into a signed value before it leaves here, because
+	/// the caller compares pitch classes and a wrapped 65535 would light a scattering of unrelated pads.
+	int32_t noteAtPad(int32_t x, int32_t y) override {
+		if (x < 0 || x >= kDisplayWidth || y < 0 || y >= kDisplayHeight) {
+			return -1;
+		}
+		const int32_t n = (int32_t)noteFromCoords(x, y);
+		return (n >= 0 && n <= 127) ? n : -1;
+	}
+
 private:
 	/* intervalFromCoords return a current note interval from 0 to 12 without an octave
 	 * depending on x and y. Used for color-coding and detecting noteFromCoords.

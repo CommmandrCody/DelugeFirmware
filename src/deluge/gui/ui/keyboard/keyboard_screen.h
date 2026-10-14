@@ -38,6 +38,14 @@ public:
 
 	ActionResult padAction(int32_t x, int32_t y, int32_t velocity) override;
 	ActionResult buttonAction(deluge::hid::Button b, bool on, bool inCardRoutine) override;
+	/// The lowest and highest MIDI notes the grid is currently showing, or false if there is none to
+	/// report. Chroma (0x48) sends this so a host can say "C1-C4" instead of guessing.
+	///
+	/// Asked of the LAYOUT, because only the layout knows how its pads map to notes - that is the
+	/// whole difference between isomorphic, in-key and piano. Any copy of that arithmetic elsewhere
+	/// would be a second version of the thing drifting away from the first.
+	bool noteRange(int32_t& lo, int32_t& hi);
+
 	ActionResult verticalEncoderAction(int32_t offset, bool inCardRoutine) override;
 	ActionResult horizontalEncoderAction(int32_t offset) override;
 	void selectEncoderAction(int8_t offset) override;

@@ -1,6 +1,7 @@
 #include "hid/hid_sysex.h"
 #include "gui/l10n/l10n.h"
-#include "gui/ui/keyboard/chords.h" // Chroma: the synced spelling lean (gChromaSpelling) packed into 0x43
+#include "gui/ui/keyboard/chords.h"          // Chroma: the synced spelling lean (gChromaSpelling) packed into 0x43
+#include "gui/ui/keyboard/keyboard_screen.h" // Chroma (0x48): keyboardScreen.noteRange()
 #include "gui/ui/ui.h"
 #include "gui/ui_timer_manager.h"
 #include "hid/display/oled.h"
@@ -10,7 +11,10 @@
 #include "io/midi/midi_engine.h"
 #include "io/midi/sysex.h"
 #include "memory/general_memory_allocator.h"
-#include "model/song/song.h" // Chroma: resync — read the live key/scale to push on handshake
+#include "model/clip/instrument_clip.h" // Chroma (0x48): keyboardState.currentLayout
+#include "model/scale/preset_scales.h"  // Chroma (0x48): getScaleName
+#include "model/song/song.h"            // Chroma: resync — read the live key/scale to push on handshake
+#include "playback/playback_handler.h"  // Chroma: transport push - is it running, and where
 #include "processing/engines/audio_engine.h"
 #include "util/pack.h"
 #include <cstring>
@@ -29,6 +33,10 @@ static UIType lastSentView = UIType::NONE;
 // Chroma: whether we've pushed the "fx" context for the current gold-knob session (re-armed on any real view change).
 static bool fxContextSent = false;
 
+// Forward-declared: the resync handler below re-pushes the current view directly, and the table that
+// maps a UIType to its slug is defined further down with the rest of the view code.
+static const char* viewSlug(UIType t);
+
 void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 	lastHidCable = &cable;
 	if (len < 3) {
@@ -40,8 +48,39 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 			               (uint8_t)currentSong->getCurrentScale());
 		}
 		// Also re-push the current on-screen view so a just-connected Companion's Learn tab syncs at once.
-		lastSentView = UIType::NONE; // clear the de-dupe so the next line always sends
-		sendActiveViewIfChanged();
+		//
+		// This used to clear lastSentView and call sendActiveViewIfChanged(), which ALSO reset
+		// fxContextSent - and the bridge sends this handshake every ~5 seconds, not just on connect.
+		// So every five seconds, untouched, the Deluge announced its real view and then announced "fx"
+		// again the moment anything polled the knobs:
+		//
+		//     17:54:45  changed -> instrument_clip
+		//     17:54:45  changed -> fx
+		//     17:54:50  changed -> instrument_clip
+		//     17:54:50  changed -> fx
+		//
+		// A host that follows the view was being walked between two pages twice a minute while the
+		// instrument sat still. The firmware cannot tell a new host from a keepalive, so it must not
+		// treat every handshake as a fresh connection.
+		//
+		// Re-push the view DIRECTLY instead: the host gets its sync, the de-dupe survives, and the fx
+		// context stays armed until a REAL view change re-arms it.
+		{
+			UI* ui = getCurrentUI();
+			const char* slug = viewSlug(ui ? ui->getUIType() : UIType::NONE);
+			if (slug != nullptr) {
+				sendActiveView(slug);
+			}
+		}
+		// ...and the gold knobs as they currently stand. A host that connected after the Deluge booted
+		// has never seen a knob move and would otherwise draw nothing until someone touched one.
+		pushGoldKnobs();
+		sendTransportIfChanged(true); // a host that connects mid-song must not be blank until the next beat
+		// ...and which keyboard, in what key, showing which notes. Same reason, and the report that
+		// produced it: "it didn't draw - I toggled to piano roll and back and it showed". The push is
+		// de-duped, so a host that connects while the instrument sits still is told nothing until
+		// something happens to change. A state signal has to go in the hello as well as on change.
+		sendKeyboardStateIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -107,6 +146,8 @@ void HIDSysex::sendDisplayIfChanged() {
 	// redraws), it self-gates on lastHidCable + de-dupes, and it sits BEFORE the display-mirror gate below so it
 	// works even for hosts that never requested screen mirroring (the Companion arms lastHidCable on connect).
 	sendActiveViewIfChanged();
+	sendTransportIfChanged();     // Chroma: same piggyback, same reasoning - it self-gates and de-dupes
+	sendKeyboardStateIfChanged(); // Chroma (0x48): layout, key and note range - same piggyback again
 	// NB: timer is only used for throttling, under good conditions sending
 	// is driven by the display subsystem only
 	uiTimerManager.unsetTimer(TimerName::SYSEX_DISPLAY);
@@ -237,7 +278,9 @@ void HIDSysex::sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char
 // Pushed on every NORMAL palette pick. Carries the runtime truth (voiced MIDI notes) + the graph key, so the
 // host renders the real chord regardless of what the 7-seg shows. No-op until a host handshakes.
 void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId,
-                              int8_t spread, int8_t inversion, uint8_t scale) {
+                              int8_t spread, int8_t inversion, uint8_t scale, const char* chordName, int8_t voicingWalk,
+                              int8_t voicingHome, uint8_t voiceOctaves, int8_t octaveBase, bool voicingSplitMode,
+                              int8_t voicingSplit) {
 	if (lastHidCable == nullptr) {
 		return;
 	}
@@ -267,11 +310,40 @@ void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t num
 	}
 	// Chroma complete-sync: extensible voicing-params block after the contextId (old hosts ignore the
 	// tail). Format: [count][p0][p1]... positional: 0=spread, 1=inversion. Add more by bumping count.
-	msg[i++] = 4; // extras count. positional: 0=spread, 1=inversion, 2=scale/mode index, 3=spelling lean
+	// extras count. positional: 0=spread, 1=inversion, 2=scale/mode index, 3=spelling lean,
+	// 4=voicingWalk, 5=voicingHome, 6=voiceOctaves bitmask, 7=octaveBase.
+	//
+	// 4..7 complete the FIVE voice-shaping fields. Spread and inversion were the only two that ever
+	// left the instrument, so no surface could show the voicing dial or the voice it springs to -
+	// even after a HOLD gesture was added for exactly that. Old hosts read the count and skip the
+	// tail, which is what this block was built for.
+	// 8 = voicing MODE (0 octave/walk, 1 split), 9 = the split pivot in semitones above the chord's
+	// lowest note. A surface cannot draw the voicing without knowing WHICH mode produced it.
+	msg[i++] = 10;
 	msg[i++] = (uint8_t)spread & 0x7f;
 	msg[i++] = (uint8_t)inversion & 0x7f;
 	msg[i++] = scale & 0x7f;
 	msg[i++] = (uint8_t)deluge::gui::ui::keyboard::gChromaSpelling & 0x7f; // 0=Auto,1=Flats,2=Sharps (synced spelling)
+	// BIAS-64: these two are signed (-24..24) and every other extra is raw 7-bit unsigned. Biasing
+	// keeps them positive on the wire instead of relying on a sign-extend the reader must guess at.
+	msg[i++] = (uint8_t)(voicingWalk + 64) & 0x7f;
+	msg[i++] = (uint8_t)(voicingHome + 64) & 0x7f;
+	msg[i++] = voiceOctaves & 0x7f; // bits 0..6 = octave offsets -3..+3; already fits
+	msg[i++] = (uint8_t)octaveBase & 0x7f;
+	msg[i++] = voicingSplitMode ? 1 : 0;
+	msg[i++] = (uint8_t)voicingSplit & 0x7f; // 0..24, always positive - no bias needed
+	// Chroma "Delly is the truth": the Deluge's OWN chord-name string, appended after the extras as
+	// [len][ASCII...]. Every host renders this verbatim instead of re-deriving. Old hosts ignore the tail.
+	uint8_t nn = 0;
+	if (chordName != nullptr) {
+		for (const char* c = chordName; *c && nn < 16; c++) {
+			nn++;
+		}
+	}
+	msg[i++] = nn;
+	for (uint8_t k = 0; k < nn; k++) {
+		msg[i++] = (uint8_t)(chordName[k]) & 0x7f;
+	}
 	msg[i++] = 0xf7;
 	lastHidCable->sendSysex(msg, i);
 }
@@ -385,6 +457,298 @@ void HIDSysex::sendFxContext() {
 	}
 }
 
+// Chroma (0x46): what the gold knobs are actually doing.
+//
+// Cody, on the app's header: "the gold knobs still don't work, look bigger, or provide ANY feedback."
+// They could not. Nothing on the wire carried a gold-knob position, so the host had nothing to draw
+// them from and they sat dark on every page but Design, where a local event happened to exist.
+//
+// The level sent is the one the PHYSICAL four-LED column is showing - the same number, from the same
+// place, at the same moment - so the app's knob and the instrument's knob cannot disagree. That is
+// the whole point of mirroring a control rather than modelling it.
+//
+//   F0 00 21 7B 01 46 <knob 0|1> <level 0..127> <bipolar 0|1> <nameLen> <ascii name...> F7
+//
+// De-duped on (knob, level, name): setKnobIndicatorLevel is called on redraws as well as turns, and
+// re-sending an unchanged value at redraw rate would be a stream of nothing.
+// TWO caches, and the difference between them is the whole bug Cody found: "gold knobs work, but
+// only after you start turning them."
+//
+//   cur*  - what the knob IS. Updated on every indicator change, INCLUDING while no host is
+//           connected, because the instrument has been sitting at some position since boot and that
+//           is the truth a host needs the moment it arrives.
+//   sent* - what was last put on the wire. Only for de-duping.
+//
+// Keeping one cache meant the value was only recorded when it was sent, and it was only sent when a
+// host was already listening - so a Cockpit that connected after the Deluge booted had nothing to
+// receive and the knobs stayed dark until someone touched one. A mirror that only works once you
+// move is not a mirror, it is an echo.
+static uint8_t curKnobLevel[2] = {0xff, 0xff};
+static char curKnobName[2][32] = {{0}, {0}};
+static uint8_t sentKnobLevel[2] = {0xff, 0xff};
+static char sentKnobName[2][32] = {{0}, {0}};
+
+static void emitGoldKnob(uint8_t whichKnob, uint8_t lv, bool bipolar, const char* name);
+
+void HIDSysex::sendGoldKnob(uint8_t whichKnob, int32_t level, bool bipolar, const char* paramName) {
+	if (whichKnob > 1) {
+		return;
+	}
+	// The indicator level is 0..128; 128 would set the 8th bit and corrupt the frame, so it is clamped
+	// into 7 bits here rather than being allowed to become a different number somewhere downstream.
+	int32_t lv = level;
+	if (lv < 0) {
+		lv = 0;
+	}
+	if (lv > 127) {
+		lv = 127;
+	}
+	char name[32];
+	uint8_t n = 0;
+	if (paramName != nullptr) {
+		for (const char* c = paramName; *c && n < 31; c++) {
+			name[n++] = (char)((uint8_t)(*c) & 0x7f);
+		}
+	}
+	name[n] = 0;
+
+	// Record what the knob IS first, whether or not anyone is listening. This is the line that makes
+	// a late-connecting host able to be told anything at all.
+	curKnobLevel[whichKnob] = (uint8_t)lv;
+	strncpy(curKnobName[whichKnob], name, 31);
+	curKnobName[whichKnob][31] = 0;
+
+	if (lastHidCable == nullptr) {
+		return; // nobody to tell yet - but we now know what to tell them when they turn up
+	}
+	if (sentKnobLevel[whichKnob] == (uint8_t)lv && strncmp(sentKnobName[whichKnob], name, 32) == 0) {
+		return; // nothing moved and nothing was reassigned
+	}
+	emitGoldKnob(whichKnob, (uint8_t)lv, bipolar, name);
+}
+
+// Push BOTH knobs as they currently stand, ignoring the de-dupe. Called from the handshake, which
+// fires when a host connects and every few seconds after - so a Cockpit started at any point gets
+// the real positions without anyone having to touch the instrument first.
+void HIDSysex::pushGoldKnobs() {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	for (uint8_t k = 0; k < 2; k++) {
+		if (curKnobLevel[k] == 0xff) {
+			continue; // this knob has never reported a level; saying nothing beats inventing one
+		}
+		emitGoldKnob(k, curKnobLevel[k], false, curKnobName[k]);
+	}
+}
+
+static void emitGoldKnob(uint8_t whichKnob, uint8_t lv, bool bipolar, const char* name) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	uint8_t n = 0;
+	while (name[n] != 0 && n < 31) {
+		n++;
+	}
+	sentKnobLevel[whichKnob] = lv;
+	strncpy(sentKnobName[whichKnob], name, 31);
+	sentKnobName[whichKnob][31] = 0;
+
+	uint8_t msg[10 + 32];
+	msg[0] = 0xf0;
+	msg[1] = 0x00;
+	msg[2] = 0x21;
+	msg[3] = 0x7b;
+	msg[4] = 0x01;
+	msg[5] = SysEx::SysexCommands::GoldKnob; // 0x46
+	msg[6] = whichKnob;
+	msg[7] = lv;
+	msg[8] = bipolar ? 1 : 0;
+	msg[9] = n;
+	for (uint8_t i = 0; i < n; i++) {
+		msg[10 + i] = (uint8_t)name[i];
+	}
+	msg[10 + n] = 0xf7;
+	lastHidCable->sendSysex(msg, 11 + n);
+}
+
+// Chroma (0x47): WHERE WE ARE.
+//
+// Cody: "I want all of it - where we are, what we're playing, and the levels and settings." Three of
+// those four already reach a host. This is the fourth, and it is the one a four-character display
+// genuinely cannot give you: is it running, how fast, and how far in.
+//
+//   F0 00 21 7B 01 47 <playing 0|1> <bpm hi> <bpm lo> <bar hi> <bar lo> <beat 0..3> F7
+//
+// bpm is BPM x 10 in two 7-bit halves (so 128.0 travels as 1280, which is 10,0). bar is 1-based and
+// also split across two 7-bit bytes, which covers 16383 bars - long enough for anything anyone will
+// play.
+//
+// DE-DUPED ON THE BEAT, not the tick. The playhead moves hundreds of times a second and a host wants
+// to know where you ARE, not to re-render at audio rate; four messages a bar is enough to show a
+// position and cheap enough to ignore. The same reasoning as the gold knobs: send when it changes,
+// and let "changes" mean something a person could see.
+static int32_t lastBar = -1;
+static int8_t lastBeat = -1;
+static int8_t lastPlaying = -1;
+static int32_t lastBpm10 = -1;
+
+void HIDSysex::sendTransportIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	const bool playing = playbackHandler.isEitherClockActive();
+	int32_t bpm10 = 0;
+	if (currentSong != nullptr) {
+		const float bpm = playbackHandler.calculateBPMForDisplay();
+		bpm10 = (int32_t)(bpm * 10.0f + 0.5f);
+		if (bpm10 < 0) {
+			bpm10 = 0;
+		}
+		if (bpm10 > 16383) {
+			bpm10 = 16383;
+		}
+	}
+
+	// Position, in bars and quarters, from the swung tick count. The bar length comes from the SONG
+	// rather than from a hardcoded four beats, so a song that is not in four still reports a position
+	// that matches what the player is counting.
+	//
+	// Stopped reports nothing rather than wherever it happened to halt: a stopped transport showing a
+	// position reads exactly like a running one, which is the wrong answer to "where are we".
+	int32_t bar = 0;
+	int8_t beat = 0;
+	if (playing && currentSong != nullptr) {
+		const uint32_t barLen = currentSong->getBarLength();
+		if (barLen > 0) {
+			const int64_t ticks = playbackHandler.getActualSwungTickCount();
+			const int64_t pos = ticks < 0 ? 0 : ticks;
+			bar = (int32_t)(pos / barLen) + 1;
+			beat = (int8_t)((pos % barLen) * 4 / barLen);
+			if (bar > 16383) {
+				bar = 16383;
+			}
+		}
+	}
+
+	if (!force && playing == (lastPlaying == 1) && bar == lastBar && beat == lastBeat && bpm10 == lastBpm10) {
+		return;
+	}
+	lastPlaying = playing ? 1 : 0;
+	lastBar = bar;
+	lastBeat = beat;
+	lastBpm10 = bpm10;
+
+	uint8_t msg[13];
+	msg[0] = 0xf0;
+	msg[1] = 0x00;
+	msg[2] = 0x21;
+	msg[3] = 0x7b;
+	msg[4] = 0x01;
+	msg[5] = SysEx::SysexCommands::Transport; // 0x47
+	msg[6] = playing ? 1 : 0;
+	msg[7] = (uint8_t)((bpm10 >> 7) & 0x7f);
+	msg[8] = (uint8_t)(bpm10 & 0x7f);
+	msg[9] = (uint8_t)((bar >> 7) & 0x7f);
+	msg[10] = (uint8_t)(bar & 0x7f);
+	msg[11] = (uint8_t)(beat & 0x7f);
+	msg[12] = 0xf7;
+	lastHidCable->sendSysex(msg, 13);
+}
+
+// Chroma (0x48): WHICH KEYBOARD, IN WHAT KEY, SHOWING WHICH NOTES.
+//
+// Three things a host could not previously know, all of which a player reads off the instrument at a
+// glance and had no way to see on a second screen:
+//
+//   the LAYOUT   all eight keyboard layouts report as the one view slug "keyboard" over 0x45, so
+//                isomorphic, in-key, piano and the rest were indistinguishable.
+//   the KEY      root note and scale escaped only via 0x43, which fires on a harmonic palette pick.
+//                In an ordinary keyboard layout nothing ever said what key you were in.
+//   the RANGE    the span of notes the grid is currently showing. It moves as you scroll and is the
+//                thing that tells you where on the instrument you are.
+//
+// Cody: "I want the mode of the keyboard displayed clearly and the current root note/scale selected
+// ... also note the range of notes C1-N".
+//
+// De-duped like the transport push: this is called on every redraw, and a surface does not need to
+// be told the same thing sixty times a second.
+void HIDSysex::sendKeyboardStateIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	InstrumentClip* clip = getCurrentInstrumentClip();
+	if (clip == nullptr || currentSong == nullptr) {
+		return;
+	}
+
+	// ONLY WHEN THE KEYBOARD IS ACTUALLY ON SCREEN.
+	//
+	// `keyboardState.currentLayout` is a property of the CLIP, not of what you are looking at - it
+	// remembers whichever layout you last chose in the keyboard. Reading it unconditionally meant the
+	// Cockpit announced "Isomorphic" while Cody was in the piano roll, which is the same fault this
+	// whole push was written to fix: a plausible value reported for something that is not the case.
+	//
+	// 127 says "no keyboard here", and the host hides the panel rather than showing a stale layout.
+	// It cannot collide with a real layout: the enum has eight entries.
+	UI* activeUI = getCurrentUI();
+	const bool onKeyboard = activeUI != nullptr && activeUI->getUIType() == UIType::KEYBOARD_SCREEN;
+	const uint8_t layout = onKeyboard ? (uint8_t)clip->keyboardState.currentLayout : 127;
+	const uint8_t root = (uint8_t)(currentSong->key.rootNote % 12);
+	const Scale scale = currentSong->getCurrentScale();
+	const char* scaleName = getScaleName(scale);
+
+	// THE RANGE, asked of the layout itself rather than computed here. Only the layout knows how its
+	// pads map to notes - that is the whole difference between these layouts - and duplicating any of
+	// that arithmetic would be a second, drifting copy of the thing this message exists to report.
+	//
+	// A layout with no notes (drums, the chord library) answers -1, and then there is no range to
+	// send rather than a made-up one.
+	int32_t lo = -1, hi = -1;
+	if (onKeyboard) {
+		keyboardScreen.noteRange(lo, hi);
+	}
+
+	static uint8_t lastLayout = 0xff;
+	static uint8_t lastRoot = 0xff;
+	static int32_t lastLo = -2, lastHi = -2;
+	static uint8_t lastScaleLen = 0xff;
+	uint8_t nameLen = 0;
+	while (scaleName != nullptr && scaleName[nameLen] != 0 && nameLen < 20) {
+		nameLen++;
+	}
+	if (!force && layout == lastLayout && root == lastRoot && lo == lastLo && hi == lastHi && nameLen == lastScaleLen) {
+		return;
+	}
+	lastLayout = layout;
+	lastRoot = root;
+	lastLo = lo;
+	lastHi = hi;
+	lastScaleLen = nameLen;
+
+	uint8_t msg[32];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02; // the longer frame form, which is what new tags use
+	msg[i++] = SysEx::SysexCommands::KeyboardState;
+	msg[i++] = layout;
+	msg[i++] = root;
+	// A note is 0..127 and fits a single 7-bit byte; 127 means "no range", which is distinct from any
+	// real note because a layout that HAS notes always reports a low below its high.
+	msg[i++] = (uint8_t)(lo < 0 ? 127 : (lo & 0x7f));
+	msg[i++] = (uint8_t)(hi < 0 ? 127 : (hi & 0x7f));
+	msg[i++] = nameLen;
+	for (uint8_t k = 0; k < nameLen; k++) {
+		msg[i++] = (uint8_t)(scaleName[k]) & 0x7f; // scale names are ASCII by contract
+	}
+	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
+}
+
 // Chroma WRITE direction (0x44): a one-slot inbox for an inbound voicing-mod. The MIDI-receive context stashes it;
 // the Harmonic layout drains it on the UI/graphics thread (KeyboardLayoutHarmonic::renderPads), where re-voicing
 // and the 0x43 re-broadcast already run safely. Last-write-wins; a single bool flag, no lock needed — both producer
@@ -428,7 +792,15 @@ void HIDSysex::sendPadGrid(MIDICable& cable) {
 	int32_t p = 0;
 	for (int32_t y = 0; y < H; y++) {
 		for (int32_t x = 0; x < W; x++) {
-			RGB c = PadLEDs::image[y][x];
+			// prepareColour, NOT the raw image: this is the same function every pad passes through on
+			// its way to the PIC, so the Cockpit receives the colour the pad is ACTUALLY showing -
+			// flash cursor, press feedback and greyout included.
+			//
+			// Cody: "I want device to EXACTLY reflect the current state of the Deluge ... this is the
+			// cockpit of a plane, you can't have speeds misrepresented, attitudes off - you will
+			// crash." Reading `image` here was a second, quieter rendering of the grid that agreed
+			// with the hardware only for as long as nothing was happening.
+			RGB c = PadLEDs::prepareColour(x, y, PadLEDs::image[y][x]);
 			raw[p++] = c.r;
 			raw[p++] = c.g;
 			raw[p++] = c.b;

@@ -17,8 +17,13 @@ void readBlock(MIDICable& cable);
 void sendLearnContext(uint8_t region, uint8_t x, uint8_t y, const char* contextId);
 // Chroma: outbound chord-state push on every NORMAL palette pick — host renders the chord (key + voiced
 // notes + ctx), immune to the note-name overwrite that defeats the text mirror. No-op until a host handshakes.
+// voicingWalk/voicingHome are BIAS-64 encoded on the wire (value + 64), because they are signed
+// (-24..24) and everything else in the extras block is a raw 7-bit unsigned byte. voiceOctaves is a
+// bitmask that already fits in 7 bits; octaveBase is small and positive.
 void sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t numNotes, const char* contextId, int8_t spread = 0,
-                    int8_t inversion = 0, uint8_t scale = 0);
+                    int8_t inversion = 0, uint8_t scale = 0, const char* chordName = nullptr, int8_t voicingWalk = 0,
+                    int8_t voicingHome = 0, uint8_t voiceOctaves = 0x08, int8_t octaveBase = 3,
+                    bool voicingSplitMode = false, int8_t voicingSplit = 0);
 // Chroma: outbound active-view push (0x45). Sent when the on-screen view changes, so the Companion's Learn tab can
 // auto-follow what the user is looking at. Payload is a short 7-bit-ASCII view slug (e.g. "clip", "song", "kit").
 // No-op until a host handshakes; last-value de-duped by the caller so it only fires on an actual change.
@@ -29,6 +34,32 @@ void sendActiveViewIfChanged();
 // Chroma: push the "fx" context (0x45) when a gold knob is turned, so a following host jumps to FX. Throttled to
 // once per fx-session (re-armed when the real view changes) and doesn't disturb the view de-dupe.
 void sendFxContext();
+// Chroma: outbound gold-knob push (0x46) — whichKnob (0=upper, 1=lower), the LED level (0..128, the SAME number
+// the physical four-LED column is showing, so the host cannot disagree with the hardware), whether the parameter
+// is bipolar, and its display name. Sent whenever the indicator level is set, which covers both a turn and a
+// context change, so a host that has just connected gets the current positions rather than waiting for a turn.
+// De-duped on (knob, level, name) so a redraw does not flood the wire.
+void sendGoldKnob(uint8_t whichKnob, int32_t level, bool bipolar, const char* paramName);
+// Push both gold knobs as they currently stand, ignoring the de-dupe. Called from the handshake, so a
+// host that connects long after the Deluge booted gets the real positions instead of two dark knobs
+// waiting for someone to touch the instrument.
+void pushGoldKnobs();
+// Chroma: outbound transport push (0x47) - whether the clock is running, the tempo, and the
+// playhead's bar and beat. De-duped on the BEAT rather than the tick, so a host gets a message four
+// times a bar instead of hundreds: a second screen wants to know where you are, not to re-render at
+// audio rate. Forced on the handshake so a Cockpit that connects mid-song is not blank until the
+// next beat.
+void sendTransportIfChanged(bool force = false);
+
+/**
+ * Which keyboard layout, what key and scale, and the span of notes on the grid.
+ *
+ * All eight keyboard layouts collapse to the single view slug "keyboard" over 0x45, so a host could
+ * not tell isomorphic from in-key from piano; and the key escaped only through 0x43, which fires on
+ * a harmonic palette pick and never in an ordinary layout. De-duped internally - safe to call on
+ * every redraw.
+ */
+void sendKeyboardStateIfChanged(bool force = false);
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

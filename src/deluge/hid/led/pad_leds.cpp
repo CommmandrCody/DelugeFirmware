@@ -41,6 +41,13 @@
 #include <cstring>
 #include <limits>
 
+// These are C++ and must NOT go inside the extern "C" block below. Putting them there gives every
+// declaration in them C linkage, so the call to pressedColour() is emitted as an unmangled symbol
+// that the C++ definition never provides - it links as `undefined reference to 'pressedColour'`
+// while nm shows the function present and correct in its own object.
+#include "gui/colour/press_feedback.h"
+#include "hid/matrix/matrix_driver.h"
+
 extern "C" {
 #include "RZA1/uart/sio_char.h"
 }
@@ -289,6 +296,26 @@ RGB prepareColour(int32_t x, int32_t y, RGB colourSource) {
 		else { // Otherwise, pull from a referenced table line
 			colourSource = flashColours[slowFlashColours[y]];
 		}
+	}
+
+	// EVERY VIEW, not just the keyboard. matrixDriver.padStates is the hardware's own record of which
+	// pads are physically held - it is written in padAction() for the whole surface, so it is true in
+	// the piano roll, the session grid and the arranger exactly as it is in a keyboard layout.
+	//
+	// This is why it lives here. Cody, after the fourth attempt: "how freaking hard is it to dimly lit
+	// or otherwise let me know I am pressing the octave root note on the piano mode - we have tried to
+	// get this done how many times?" Every previous attempt lived in KeyboardScreen, which the piano
+	// roll (InstrumentClipView) never runs. Patching one more screen would have left the next one out.
+	//
+	// The PHYSICAL pad, not a sounding note: a note can ring on after release and a held pad can be
+	// silent. "Is my finger on it" is the question being asked.
+	//
+	// THE MAIN GRID ONLY. The sidebar is mute, launch and audition - CONTROLS, whose colour already
+	// carries meaning (armed, muted, soloed, which section). Overwriting that while a finger is down
+	// tells you something you already know and hides something you do not. Cody: "I thought it muted,
+	// it turns white ... it really confuses the user."
+	if (x >= 0 && x < kDisplayWidth && y >= 0 && y < kDisplayHeight && matrixDriver.padStates[x][y]) {
+		colourSource = deluge::gui::colour::pressedColour(colourSource, 255);
 	}
 
 	if ((greyoutRows || greyoutCols)

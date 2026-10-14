@@ -87,6 +87,22 @@ void CStringArray::sortForStrings() {
 	quickSortForStrings(0, numElements - 1);
 }
 
+// Descending sort by a uint32 key embedded keyOffset bytes into each element. Used by the "sort songs by recents"
+// load list (key = FileItem::dateModified). The list is always small (windowed), so insertion sort is plenty and
+// avoids the recursion of the string quicksort. swapElements does a safe byte-wise move, so String members survive.
+void CStringArray::sortByU32KeyDescending(uint32_t keyOffset) {
+	for (int32_t i = 1; i < numElements; i++) {
+		for (int32_t j = i; j > 0; j--) {
+			uint32_t a = *(uint32_t*)((char*)getElementAddress(j - 1) + keyOffset);
+			uint32_t b = *(uint32_t*)((char*)getElementAddress(j) + keyOffset);
+			if (a >= b) {
+				break; // already newest-first at this position
+			}
+			swapElements(j - 1, j);
+		}
+	}
+}
+
 // Array must be sorted before you call this.
 // You must set shouldInterpretNoteNames and octaveStartsFromA before calling this.
 int32_t CStringArray::search(char const* searchString, bool* foundExact) {

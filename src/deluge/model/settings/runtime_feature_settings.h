@@ -68,6 +68,18 @@ enum RuntimeFeatureSettingType : uint32_t {
 	ShowBatteryLevel,
 	RoundedCorners,
 	ShortcutOverlay,
+	// Chroma's, appended AFTER upstream's on purpose. This enum's order is the on-flash layout of the
+	// runtime feature settings, so inserting anything above an existing entry silently reassigns every
+	// setting below it to a different stored byte. That has bitten this instrument before: after a big
+	// firmware jump, stale bytes at moved offsets broke every encoder and survived four wrong code
+	// fixes before anyone suspected the settings rather than the code.
+	//
+	// Keeping upstream's entries first also means a future rebase onto upstream appends rather than
+	// re-shuffles. FACTORY-RESET SETTINGS after flashing across this change.
+	RepairSongDates,
+	ChordBrush,
+	KeyboardNotePreview,
+	RetrospectiveCapture,
 	MaxElement // Keep as boundary
 };
 

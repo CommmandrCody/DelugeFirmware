@@ -24,6 +24,9 @@ class CStringArray : public ResizeableArray {
 public:
 	CStringArray(int32_t newElementSize) : ResizeableArray(newElementSize) {}
 	void sortForStrings();
+	// Sort descending by a uint32 key stored at keyOffset bytes into each element (e.g. FileItem::dateModified).
+	// Plain insertion sort — only used on the small, windowed load list, so it's never hot.
+	void sortByU32KeyDescending(uint32_t keyOffset);
 	int32_t search(char const* searchString, bool* foundExact = nullptr);
 
 private:

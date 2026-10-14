@@ -66,6 +66,7 @@ EmulatedDisplay menuEmulatedDisplay{};
 SettingToggle menuEnableKeyboardViewSidebarMenuExit(RuntimeFeatureSettingType::EnableKeyboardViewSidebarMenuExit);
 SettingToggle menuEnableLaunchEventPlayhead(RuntimeFeatureSettingType::EnableLaunchEventPlayhead);
 SettingToggle menuDisplayChordLayout(RuntimeFeatureSettingType::DisplayChordKeyboard);
+SettingToggle menuChordBrush(RuntimeFeatureSettingType::ChordBrush);
 SettingToggle menuAlternativePlaybackStartBehaviour(RuntimeFeatureSettingType::AlternativePlaybackStartBehaviour);
 SettingToggle menuEnableGridViewLoopPads(RuntimeFeatureSettingType::EnableGridViewLoopPads);
 SettingToggle menuAlternativeTapTempoBehaviour(RuntimeFeatureSettingType::AlternativeTapTempoBehaviour);
@@ -74,33 +75,20 @@ SettingToggle menuTrimFromStartOfAudioClip(RuntimeFeatureSettingType::TrimFromSt
 SettingToggle menuShowBatteryLevel(RuntimeFeatureSettingType::ShowBatteryLevel);
 RoundedCornersSettingToggle menuRoundedCorners(RuntimeFeatureSettingType::RoundedCorners);
 SettingToggle menuShortcutOverlay(RuntimeFeatureSettingType::ShortcutOverlay);
+SettingToggle menuRepairSongDates(RuntimeFeatureSettingType::RepairSongDates);
+SettingToggle menuRetrospectiveCapture(RuntimeFeatureSettingType::RetrospectiveCapture);
 
 std::array<MenuItem*, RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettings> subMenuEntries{
-    &menuDrumRandomizer,
-    &menuFineTempo,
-    &menuQuantize,
-    &menuCatchNotes,
-    &menuDeleteUnusedKitRows,
-    &menuAltGoldenKnobDelayParams,
-    &menuDevSysexAllowed,
-    &menuSyncScalingAction,
-    &menuHighlightIncomingNotes,
-    &menuDisplayNornsLayout,
-    &menuShiftIsSticky,
-    &menuLightShiftLed,
-    &menuEnableDX7Engine,
-    &menuEmulatedDisplay,
-    &menuEnableKeyboardViewSidebarMenuExit,
-    &menuEnableLaunchEventPlayhead,
-    &menuDisplayChordLayout,
-    &menuAlternativePlaybackStartBehaviour,
-    &menuEnableGridViewLoopPads,
-    &menuAlternativeTapTempoBehaviour,
-    &menuHorizontalMenus,
-    &menuRoundedCorners,
-    &menuTrimFromStartOfAudioClip,
+    &menuDrumRandomizer, &menuFineTempo, &menuQuantize, &menuCatchNotes, &menuDeleteUnusedKitRows,
+    &menuAltGoldenKnobDelayParams, &menuDevSysexAllowed, &menuSyncScalingAction, &menuHighlightIncomingNotes,
+    &menuDisplayNornsLayout, &menuShiftIsSticky, &menuLightShiftLed, &menuEnableDX7Engine, &menuEmulatedDisplay,
+    &menuEnableKeyboardViewSidebarMenuExit, &menuEnableLaunchEventPlayhead, &menuDisplayChordLayout, &menuChordBrush,
+    &menuRetrospectiveCapture, &menuAlternativePlaybackStartBehaviour, &menuEnableGridViewLoopPads,
+    &menuAlternativeTapTempoBehaviour, &menuHorizontalMenus, &menuRoundedCorners, &menuTrimFromStartOfAudioClip,
     &menuShowBatteryLevel,
-    &menuShortcutOverlay};
+    // menuRetrospectiveCapture is already listed above, with the other Chroma entries - it came
+    // through the clean half of the merge. Listing it twice puts the same menu item on screen twice.
+    &menuShortcutOverlay, &menuRepairSongDates};
 
 Settings::Settings(l10n::String name, l10n::String title) : menu_item::Submenu(name, title, subMenuEntries) {
 }

@@ -115,8 +115,25 @@ static_assert(kMaxPacketBytes <= USB_CFG_PAUDIO_BUF_BYTES, "a packet must fit th
 constexpr uint32_t kRingFrames = 8192u;
 constexpr uint32_t kRingMask = kRingFrames - 1u;
 
-/// How far ahead of the host the ring is held: two render windows, ~5.8 ms.
-constexpr uint32_t kLeadFrames = 256u;
+/// How far ahead of the host the ring is held: four render windows, ~11.6 ms.
+///
+/// Was 256 (~5.8 ms). Cody, on the first minute of a stream: "static in the audio when playing ... it
+/// works after a bit but it was staticy." That settling is the symptom this addresses.
+///
+/// There is no feedback endpoint at Full Speed (see kRxDriftCeiling below), so the device cannot ask
+/// the host to speed up or slow down - the two clocks are independent and the only compensation
+/// available is to grow or shrink a packet by one block. Every one of those resizes is a
+/// discontinuity on the wire. With a 5.8 ms lead and a 1.45 ms deadband (kLeadBandFrames), the lead
+/// spends the start of a stream crossing that band repeatedly while the two clocks settle into a
+/// relationship, and each crossing is audible.
+///
+/// Doubling the cushion gives the compensator twice the room before it has to resize anything. The
+/// cost is 5.8 ms of added output latency, which is the whole of the trade.
+///
+/// 512 is not a guess: the RETURN path already uses it (kRxLeadFrames), chosen by sweeping from 2048
+/// down and stopping where it "keeps more than two render windows above the floor". This is the same
+/// reasoning applied to the outbound direction, which had been left at half.
+constexpr uint32_t kLeadFrames = 512u;
 
 /// Inside this band every packet is the nominal size, so the host sees a steady rate. Outside it the packet grows
 /// or shrinks by one block until the lead is back.

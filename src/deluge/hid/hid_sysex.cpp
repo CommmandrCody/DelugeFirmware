@@ -12,6 +12,7 @@
 #include "io/midi/sysex.h"
 #include "memory/general_memory_allocator.h"
 #include "model/clip/instrument_clip.h" // Chroma (0x48): keyboardState.currentLayout
+#include "model/output.h"               // Chroma (0x49): the track list - name, colour, usbRouting
 #include "model/scale/preset_scales.h"  // Chroma (0x48): getScaleName
 #include "model/song/song.h"            // Chroma: resync — read the live key/scale to push on handshake
 #include "playback/playback_handler.h"  // Chroma: transport push - is it running, and where
@@ -81,6 +82,9 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		// de-duped, so a host that connects while the instrument sits still is told nothing until
 		// something happens to change. A state signal has to go in the hello as well as on change.
 		sendKeyboardStateIfChanged(true);
+		// ...and which tracks exist and where they go. Same reason again: a host that connects to a
+		// song already loaded has nothing to draw until a track changes, which may be never.
+		sendTrackStateIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -148,6 +152,7 @@ void HIDSysex::sendDisplayIfChanged() {
 	sendActiveViewIfChanged();
 	sendTransportIfChanged();     // Chroma: same piggyback, same reasoning - it self-gates and de-dupes
 	sendKeyboardStateIfChanged(); // Chroma (0x48): layout, key and note range - same piggyback again
+	sendTrackStateIfChanged();    // Chroma (0x49): the track list - de-duped by a hash of the whole list
 	// NB: timer is only used for throttling, under good conditions sending
 	// is driven by the display subsystem only
 	uiTimerManager.unsetTimer(TimerName::SYSEX_DISPLAY);
@@ -673,6 +678,113 @@ void HIDSysex::sendTransportIfChanged(bool force) {
 //
 // De-duped like the transport push: this is called on every redraw, and a surface does not need to
 // be told the same thing sixty times a second.
+// Chroma (0x49): WHICH TRACKS EXIST, AND WHERE THEY GO.
+//
+// Cody, on the USB audio routing menus: "I want the companion to be able to set the track properties
+// for things just like this." Setting comes later and is a separate decision; this is the half that
+// has to exist first, because a panel that cannot SHOW you where a track currently goes has no
+// business offering to change it.
+//
+// Today the only way to learn a track's USB routing is to walk into that track's menu, one track at a
+// time, on a four-character display. The song already knows all of it.
+//
+//   F0 00 21 7B 01 02 49 <nTracks> [ track ... ] F7
+//   track = <idx> <type> <colourHi> <colourLo> <usbHi> <usbLo> <flags> <nameLen> <name ascii...>
+//
+// Everything is 7-bit, so the two 16-bit fields travel as high/low halves. `flags` is bit 0 muted,
+// bit 1 soloing, bit 2 armed for recording.
+void HIDSysex::sendTrackStateIfChanged(bool force) {
+	if (lastHidCable == nullptr || currentSong == nullptr) {
+		return;
+	}
+
+	// BOUNDED, because this is the first push whose size depends on the SONG rather than on the
+	// protocol. The incoming sysex buffer is 1024 bytes; 24 tracks at 8 + 12 bytes each is 480, which
+	// leaves room and still covers any song anyone plays. A song with more tracks reports the first
+	// 24 rather than overrunning - a truncated list is a visible absence, a buffer overrun is not.
+	constexpr uint8_t kMaxTracks = 24;
+	constexpr uint8_t kMaxName = 12;
+
+	uint8_t msg[8 + kMaxTracks * (8 + kMaxName)];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02; // the longer frame form, which is what new tags use
+	msg[i++] = SysEx::SysexCommands::TrackState;
+	const int32_t countAt = i;
+	msg[i++] = 0; // filled in once we know how many we actually wrote
+
+	// A cheap running hash of everything we are about to send, so an unchanged song stays quiet. The
+	// handshake repeats every five seconds; without this, a host following the track list would be
+	// told the same thing twelve times a minute forever.
+	uint32_t hash = 2166136261u;
+	auto mix = [&hash](uint8_t b) { hash = (hash ^ b) * 16777619u; };
+
+	uint8_t n = 0;
+	for (Output* output = currentSong->firstOutput; output != nullptr && n < kMaxTracks; output = output->next, n++) {
+		const char* name = output->name.get();
+		uint8_t nameLen = 0;
+		while (name != nullptr && name[nameLen] != 0 && nameLen < kMaxName) {
+			nameLen++;
+		}
+		const uint16_t usb = output->usbRouting;
+		const uint16_t colour = (uint16_t)output->colour;
+		uint8_t flags = 0;
+		if (output->mutedInArrangementMode) {
+			flags |= 1 << 0;
+		}
+		if (output->soloingInArrangementMode) {
+			flags |= 1 << 1;
+		}
+		if (output->armedForRecording) {
+			flags |= 1 << 2;
+		}
+
+		msg[i++] = n;
+		msg[i++] = (uint8_t)output->type & 0x7f;
+		msg[i++] = (colour >> 7) & 0x7f;
+		msg[i++] = colour & 0x7f;
+		msg[i++] = (usb >> 7) & 0x7f;
+		msg[i++] = usb & 0x7f;
+		msg[i++] = flags;
+		msg[i++] = nameLen;
+		for (uint8_t k = 0; k < nameLen; k++) {
+			// 7-bit and printable. A stray high byte in a user-typed name would end the sysex frame
+			// early and the host would see a truncated, valid-looking list.
+			const uint8_t c = (uint8_t)name[k] & 0x7f;
+			msg[i++] = (c >= 32) ? c : '?';
+		}
+
+		mix(n);
+		mix((uint8_t)output->type);
+		mix((uint8_t)(colour >> 7));
+		mix((uint8_t)colour);
+		mix((uint8_t)(usb >> 7));
+		mix((uint8_t)usb);
+		mix(flags);
+		mix(nameLen);
+		for (uint8_t k = 0; k < nameLen; k++) {
+			mix((uint8_t)name[k]);
+		}
+	}
+	msg[countAt] = n;
+	mix(n);
+
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
+	if (!force && everSent && hash == lastHash) {
+		return;
+	}
+	lastHash = hash;
+	everSent = true;
+
+	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
+}
+
 void HIDSysex::sendKeyboardStateIfChanged(bool force) {
 	if (lastHidCable == nullptr) {
 		return;

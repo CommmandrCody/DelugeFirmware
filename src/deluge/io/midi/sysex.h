@@ -72,6 +72,17 @@ enum SysexCommands : uint8_t {
 	GoldKnob = 0x46,      // Chroma: outbound gold-knob push — which knob, the level its LED column shows, and the
 	                      // parameter's name. The host's panel header draws the real knobs; without this it had
 	                      // nothing to draw them FROM and sat dark on every page but Design.
+	TrackState = 0x49,    // Chroma: outbound track-list push - every track in the song, with its name,
+	                      // colour, USB audio routing and mute/solo/armed state. The Cockpit could
+	                      // previously only learn where a track goes over USB by walking into that
+	                      // track's menu, one at a time, on a four-character display.
+	                      //
+	                      // READ-ONLY, deliberately and for now. Setting a track property from the host
+	                      // would be the SECOND inbound message this instrument has ever had (0x44 is
+	                      // the first and only), and a track property is persistent song state rather
+	                      // than a momentary gesture - so "last write wins" is not obviously the right
+	                      // rule the way it is for a chord. Read first; the write is a separate
+	                      // decision with its own conflict rule.
 	Pong = 0x7F           // Pong reply
 };
 

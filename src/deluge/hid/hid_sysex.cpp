@@ -25,9 +25,11 @@
 #include "modulation/params/param_set.h" // Chroma (0x4B)                       // Chroma: resync — read the live key/scale to push on handshake
 #include "playback/playback_handler.h" // Chroma: transport push - is it running, and where
 #include "processing/engines/audio_engine.h"
+#include "processing/sound/sound_drum.h"       // Chroma (0x4B): a kit row's name
 #include "processing/sound/sound_instrument.h" // Chroma (0x4B): the track's own sound
 #include "util/pack.h"
 #include <cstring>
+#include <string>
 
 MIDICable* midiDisplayCable = nullptr;
 int32_t midiDisplayUntil = 0;
@@ -1100,7 +1102,8 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 	}
 	using namespace deluge::modulation::params;
 
-	uint8_t msg[7 + 39 + 1];
+	constexpr int32_t kMaxName = 24;
+	uint8_t msg[7 + 39 + 1 + kMaxName + 1];
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -1116,6 +1119,10 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 		hash = (hash ^ b) * 16777619u;
 	};
 
+	// What the player calls this sound: the kit row's name when a row is open in the editor,
+	// otherwise the track's. Appended after the fixed fields, which an older reader ignores.
+	const char* soundName = "";
+	std::string drumName; // owns a kit row's name for as long as soundName points into it
 	Sound* sound = nullptr;
 	ParamManager* paramManager = nullptr;
 	uint8_t source = 0;
@@ -1124,12 +1131,21 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 		sound = soundEditor.currentSound;
 		paramManager = soundEditor.currentParamManager;
 		source = 1;
+		if (soundEditor.editingKitRow()) {
+			drumName = static_cast<SoundDrum*>(sound)->getDrumName();
+			soundName = drumName.c_str();
+		}
+		else if (currentSong != nullptr && currentSong->getCurrentClip() != nullptr
+		         && currentSong->getCurrentClip()->output != nullptr) {
+			soundName = currentSong->getCurrentClip()->output->name.get();
+		}
 	}
 	else if (currentSong != nullptr) {
 		Clip* clip = currentSong->getCurrentClip();
 		if (clip != nullptr && clip->output != nullptr && clip->output->type == OutputType::SYNTH) {
 			sound = static_cast<SoundInstrument*>(clip->output);
 			paramManager = &clip->paramManager;
+			soundName = clip->output->name.get();
 		}
 	}
 	if (sound != nullptr && (paramManager == nullptr || !paramManager->containsAnyMainParamCollections())) {
@@ -1178,6 +1194,15 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 		for (int32_t l = 0; l < 4; l++) {
 			put(util::to_underlying(sound->lfoConfig[l].waveType));
 			level(lfoRate[l]);
+		}
+		int32_t n = (int32_t)strlen(soundName);
+		if (n > kMaxName) {
+			n = kMaxName;
+		}
+		put((uint8_t)n);
+		for (int32_t k = 0; k < n; k++) {
+			const uint8_t c = (uint8_t)soundName[k] & 0x7f;
+			put((c >= 32) ? c : '?'); // 7-bit and printable: a stray high byte would end the frame early
 		}
 	}
 

@@ -77,10 +77,13 @@ enum RuntimeFeatureSettingType : uint32_t {
 	// Keeping upstream's entries first also means a future rebase onto upstream appends rather than
 	// re-shuffles. FACTORY-RESET SETTINGS after flashing across this change.
 	RepairSongDates,
-	SongsNewestFirst,
 	ChordBrush,
 	KeyboardNotePreview,
 	RetrospectiveCapture,
+	// LAST, and it stays last until something newer is added after it. 1.3.91 put this one in the middle
+	// of the list, which is exactly what the note above says never to do, and shipped it with no menu
+	// item behind it - so the Features menu held a null entry and locked up on entry.
+	SongsNewestFirst,
 	MaxElement // Keep as boundary
 };
 

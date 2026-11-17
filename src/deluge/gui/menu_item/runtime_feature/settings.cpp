@@ -77,6 +77,7 @@ RoundedCornersSettingToggle menuRoundedCorners(RuntimeFeatureSettingType::Rounde
 SettingToggle menuShortcutOverlay(RuntimeFeatureSettingType::ShortcutOverlay);
 SettingToggle menuRepairSongDates(RuntimeFeatureSettingType::RepairSongDates);
 SettingToggle menuRetrospectiveCapture(RuntimeFeatureSettingType::RetrospectiveCapture);
+SettingToggle menuSongsNewestFirst(RuntimeFeatureSettingType::SongsNewestFirst);
 
 std::array<MenuItem*, RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettings> subMenuEntries{
     &menuDrumRandomizer, &menuFineTempo, &menuQuantize, &menuCatchNotes, &menuDeleteUnusedKitRows,
@@ -88,7 +89,15 @@ std::array<MenuItem*, RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettin
     &menuShowBatteryLevel,
     // menuRetrospectiveCapture is already listed above, with the other Chroma entries - it came
     // through the clean half of the merge. Listing it twice puts the same menu item on screen twice.
-    &menuShortcutOverlay, &menuRepairSongDates};
+    &menuShortcutOverlay, &menuRepairSongDates, &menuSongsNewestFirst};
+
+// EVERY SLOT MUST HOLD A MENU ITEM. The array is sized from the enum, so adding a setting without adding
+// its item here leaves a null at the end, and the menu follows it. That compiles, boots, and locks the
+// instrument up the moment Features is opened (1.3.91). Counted at build time so it cannot ship again.
+constexpr size_t kFeatureMenuItemsListed = 29;
+static_assert(
+    kFeatureMenuItemsListed == RuntimeFeatureSettingType::MaxElement - kNonTopLevelSettings,
+    "a runtime feature setting has no menu item (or one is listed twice): update subMenuEntries AND this count");
 
 Settings::Settings(l10n::String name, l10n::String title) : menu_item::Submenu(name, title, subMenuEntries) {
 }

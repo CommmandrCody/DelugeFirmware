@@ -77,6 +77,7 @@ enum RuntimeFeatureSettingType : uint32_t {
 	// Keeping upstream's entries first also means a future rebase onto upstream appends rather than
 	// re-shuffles. FACTORY-RESET SETTINGS after flashing across this change.
 	RepairSongDates,
+	SongsNewestFirst,
 	ChordBrush,
 	KeyboardNotePreview,
 	RetrospectiveCapture,

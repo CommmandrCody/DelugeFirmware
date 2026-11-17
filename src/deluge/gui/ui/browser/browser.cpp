@@ -266,6 +266,7 @@ Error Browser::readFileItemsForFolder(char const* filePrefixHere, bool allowFold
 
 	AudioEngine::logAction("readFileItemsForFolder");
 
+	recencyMode = false; // any ordinary read is name-ordered again
 	emptyFileItems();
 
 	Error error = StorageManager::initSD();
@@ -349,6 +350,118 @@ extensionNotSupported:
 	}
 
 	return error;
+}
+
+// RECENTS. The Deluge has no clock, but every save is stamped later than the last (see diskio.c), so the newest
+// date is the most recent save. This reads the whole folder once and keeps the newest few, newest first.
+//
+// Cody: "it's hard to remember what I recently worked on and the 7-seg makes it harder. I want a simple newest
+// on top sort."
+//
+// An earlier version sorted the ordinary 20-item window by date and STRANDED every older song: the window only
+// knows how to refill itself by name. This one never asks the window to do that. The list here is complete in
+// itself (nothing "deleted" off either end), and turning past its last entry hands over to the ordinary
+// name-ordered browser from the top - see selectEncoderAction(). So every song stays reachable by just turning.
+Error Browser::readNewestFileItems() {
+	constexpr int32_t kKeep = 20;
+	struct Newest {
+		char name[FF_LFN_BUF + 1];
+		uint32_t date;
+		FilePointer filePointer;
+	};
+	static Newest newest[kKeep];
+	int32_t count = 0;
+
+	emptyFileItems();
+	recencyMode = false;
+
+	Error error = StorageManager::initSD();
+	if (error != Error::NONE) {
+		return error;
+	}
+	staticDIR =
+	    D_TRY_CATCH(FatFS::Directory::open(currentDir.get()), error, { return fatfsErrorToDelugeError(error); });
+
+	numFileItemsDeletedAtStart = 0;
+	numFileItemsDeletedAtEnd = 0;
+	firstFileItemRemaining.clear();
+	lastFileItemRemaining.clear();
+	catalogSearchDirection = CATALOG_SEARCH_RIGHT;
+	maxNumFileItemsNow = kKeep + 1; // never reached, so getNewFileItem() never culls (culling sorts by name)
+	filenameToStartSearchAt = nullptr;
+
+	while (true) {
+		audioFileManager.loadAnyEnqueuedClusters();
+		FilePointer thisFilePointer;
+		bool failed = false;
+		std::tie(staticFNO, thisFilePointer) = D_TRY_CATCH(staticDIR.read_and_get_filepointer(), readError, {
+			failed = true;
+			break;
+		});
+		if (failed || staticFNO.fname[0] == 0) {
+			break;
+		}
+		if (staticFNO.fname[0] == '.' || (staticFNO.fattrib & AM_DIR) != 0) {
+			continue; // recents are files; folders are reached from the name-ordered list
+		}
+		char const* dotPos = strrchr(staticFNO.fname, '.');
+		if (dotPos == nullptr) {
+			continue;
+		}
+		bool allowed = false;
+		for (char const** ext = allowedFileExtensions; *ext != nullptr; ext++) {
+			if (strcasecmp(dotPos + 1, *ext) == 0) {
+				allowed = true;
+				break;
+			}
+		}
+		if (!allowed) {
+			continue;
+		}
+		uint32_t date = ((uint32_t)staticFNO.fdate << 16) | (uint32_t)staticFNO.ftime;
+		if ((((uint32_t)staticFNO.fdate >> 9) & 0x7Fu) >= 120u) {
+			date = 0; // a year of 2100 or later is the old clock bug, not a recent save: sort it last
+		}
+		// Where does it go, newest first? Ties keep directory order.
+		int32_t at = count;
+		while (at > 0 && newest[at - 1].date < date) {
+			at--;
+		}
+		if (at >= kKeep) {
+			continue;
+		}
+		int32_t last = (count < kKeep) ? count : kKeep - 1;
+		for (int32_t k = last; k > at; k--) {
+			newest[k] = newest[k - 1];
+		}
+		strncpy(newest[at].name, staticFNO.fname, FF_LFN_BUF);
+		newest[at].name[FF_LFN_BUF] = 0;
+		newest[at].date = date;
+		newest[at].filePointer = thisFilePointer;
+		if (count < kKeep) {
+			count++;
+		}
+	}
+	staticDIR.close();
+
+	for (int32_t k = 0; k < count; k++) {
+		FileItem* thisItem = getNewFileItem();
+		if (thisItem == nullptr) {
+			emptyFileItems();
+			return Error::INSUFFICIENT_RAM;
+		}
+		error = thisItem->filename.set(newest[k].name);
+		if (error != Error::NONE) {
+			emptyFileItems();
+			return error;
+		}
+		thisItem->isFolder = false;
+		thisItem->filePointer = newest[k].filePointer;
+		thisItem->dateModified = newest[k].date;
+		thisItem->displayName = thisItem->filename.get();
+	}
+	recencyMode = (count > 0);
+	return Error::NONE;
 }
 
 void Browser::deleteFolderAndDuplicateItems(Availability instrumentAvailabilityRequirement) {
@@ -680,6 +793,29 @@ Error Browser::arrivedInNewFolder(int32_t direction, char const* filenameToStart
 	shouldInterpretNoteNames = shouldInterpretNoteNamesForThisBrowser;
 	octaveStartsFromA = false;
 
+	// Recents: on first opening (not when moving between folders), start on the newest file. If that cannot be
+	// done for any reason, fall through to the ordinary name-ordered browser - never to an empty one.
+	if (direction == 0 && shouldOpenOnNewest()) {
+		if (readNewestFileItems() == Error::NONE && recencyMode) {
+			enteredTextEditPos = 0;
+			if (display->haveOLED()) {
+				scrollPosHorizontal = 0;
+			}
+			fileIndexSelected = 0;
+			if (setEnteredTextFromCurrentFilename() == Error::NONE) {
+				scrollPosVertical = 0;
+				clampFileSelectionAndScroll();
+				folderContentsReady(direction);
+				if (display->have7SEG()) {
+					displayText();
+				}
+				return Error::NONE;
+			}
+		}
+		recencyMode = false;
+		emptyFileItems();
+	}
+
 tryReadingItems:
 	bool doWeHaveASearchString = (filenameToStartAt && *filenameToStartAt);
 	int32_t newCatalogSearchDirection = doWeHaveASearchString ? CATALOG_SEARCH_BOTH : CATALOG_SEARCH_RIGHT;
@@ -957,6 +1093,9 @@ void Browser::selectEncoderAction(int8_t offset) {
 			numberEditPosNow = 0;
 		}
 
+		if (recencyMode) {
+			goto nonNumeric; // slot stepping searches by name, and this list is in date order
+		}
 		if (numberEditPosNow != -1) {
 			char const* numberPart = nameAfterPrefix(enteredText.get());
 			if (!numberPart) {
@@ -1009,6 +1148,26 @@ nonNumeric:
 
 	int32_t newCatalogSearchDirection;
 	Error error;
+
+	if (recencyMode && newFileIndex < 0) {
+		return; // already on the newest
+	}
+	if (recencyMode && newFileIndex >= fileItems.getNumElements()) {
+		// Past the last recent song: hand over to the ordinary browser, from the top of the name-ordered list.
+		// readFileItemsForFolder() clears recencyMode.
+		scrollPosVertical = 0;
+		error = readFileItemsFromFolderAndMemory(currentSong, outputTypeToLoad, filePrefix, NULL, NULL, true,
+		                                         Availability::ANY, CATALOG_SEARCH_RIGHT);
+		if (error != Error::NONE) {
+			emptyFileItems();
+			return;
+		}
+		recencyMode = false;
+		if (fileItems.getNumElements() == 0) {
+			return;
+		}
+		newFileIndex = 0;
+	}
 
 	if (newFileIndex < 0) {
 		D_PRINTLN("index below 0");
@@ -1133,6 +1292,17 @@ searchFromOneEnd:
 }
 
 bool Browser::predictExtendedText() {
+	if (recencyMode) {
+		// Typing searches by name. Swap the date-ordered list for the ordinary one around what was typed.
+		Error recencyExitError =
+		    readFileItemsFromFolderAndMemory(currentSong, outputTypeToLoad, filePrefix, enteredText.get(), NULL, true,
+		                                     Availability::ANY, CATALOG_SEARCH_BOTH);
+		recencyMode = false;
+		if (recencyExitError != Error::NONE) {
+			emptyFileItems();
+			return false;
+		}
+	}
 	Error error;
 	arrivedAtFileByTyping = true;
 	shouldInterpretNoteNames = shouldInterpretNoteNamesForThisBrowser;

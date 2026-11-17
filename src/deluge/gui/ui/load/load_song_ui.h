@@ -29,6 +29,7 @@ public:
 	void graphicsRoutine() override {}
 	void scrollFinished() override;
 	ActionResult padAction(int32_t x, int32_t y, int32_t velocity) override;
+	bool shouldOpenOnNewest() override; // Recents: the Features switch decides
 	bool opened() override;
 	void selectEncoderAction(int8_t offset) override;
 	void queueLoadNextSongIfAvailable(int8_t offset);

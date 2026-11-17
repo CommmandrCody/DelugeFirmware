@@ -79,6 +79,14 @@ public:
 	                             int32_t newCatalogSearchDirection = CATALOG_SEARCH_BOTH);
 	Error setFileByFullPath(OutputType outputType, char const* fullPath);
 	void sortFileItems();
+	/// Recents: fill fileItems with the newest files in currentDir, newest first, instead of the usual
+	/// name-ordered window. See arrivedInNewFolder().
+	Error readNewestFileItems();
+	/// Whether this browser opens on the newest files. Off unless a subclass says otherwise.
+	virtual bool shouldOpenOnNewest() { return false; }
+	/// True while fileItems holds the newest-first list rather than a name-ordered window. Nothing that
+	/// searches by name may run while this is set; every ordinary read clears it.
+	bool recencyMode = false;
 	FileItem* getNewFileItem();
 	static void emptyFileItems();
 	static void deleteSomeFileItems(int32_t startAt, int32_t stopAt);

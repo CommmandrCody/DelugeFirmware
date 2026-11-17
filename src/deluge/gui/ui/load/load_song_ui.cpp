@@ -277,6 +277,23 @@ void LoadSongUI::queueLoadNextSongIfAvailable(int8_t offset) {
 		// If no song is loaded/selected yet, we have nothing to do
 		return;
 	}
+	if (recencyMode) {
+		// "Next song" means next by NAME from the song that is playing. If the browser was last left showing
+		// recents, put the ordinary name-ordered list back around the current song first, exactly as opened()
+		// does, so turning recents on can never change which song a performer's next-song press loads.
+		String searchFilename;
+		searchFilename.set(&currentSong->name);
+		if (!searchFilename.isEmpty() && !searchFilename.contains(".XML")) {
+			if (searchFilename.concatenate(".XML") != Error::NONE) {
+				return;
+			}
+		}
+		currentDir.set(&currentSong->dirPath);
+		if (arrivedInNewFolder(1, searchFilename.get(), "SONGS") != Error::NONE || recencyMode
+		    || fileIndexSelected == -1) {
+			return;
+		}
+	}
 	doQueueLoadNextSongIfAvailable(offset);
 }
 
@@ -960,4 +977,9 @@ ActionResult LoadSongUI::padAction(int32_t x, int32_t y, int32_t on) {
 		return LoadUI::padAction(x, y, on);
 	}
 	return ActionResult::DEALT_WITH;
+}
+
+// Recents: open the song browser on the newest saves when the player has asked for that.
+bool LoadSongUI::shouldOpenOnNewest() {
+	return runtimeFeatureSettings.isOn(RuntimeFeatureSettingType::SongsNewestFirst);
 }

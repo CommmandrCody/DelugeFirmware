@@ -192,6 +192,12 @@ void RuntimeFeatureSettings::init() {
 	                  STRING_FOR_COMMUNITY_FEATURE_REPAIR_SONG_DATES, "repairSongDates",
 	                  RuntimeFeatureStateToggle::Off);
 
+	// SongsNewestFirst - Load Song opens on the most recently saved songs, newest first; turning past the last
+	// of them continues into the ordinary name-ordered list. Off leaves the browser exactly as it was.
+	SetupOnOffSetting(settings[RuntimeFeatureSettingType::SongsNewestFirst],
+	                  STRING_FOR_COMMUNITY_FEATURE_SONGS_NEWEST_FIRST, "songsNewestFirst",
+	                  RuntimeFeatureStateToggle::Off);
+
 	// AlternativePlaybackStartBehaviour
 	SetupOnOffSetting(settings[RuntimeFeatureSettingType::AlternativePlaybackStartBehaviour],
 	                  STRING_FOR_COMMUNITY_FEATURE_ALTERNATIVE_PLAYBACK_START_BEHAVIOUR,

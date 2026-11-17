@@ -64,6 +64,9 @@ void sendKeyboardStateIfChanged(bool force = false);
 /// Chroma (0x49): every track in the song - name, colour, USB routing, mute/solo/armed.
 /// De-duped like the other state pushes, and sent in the hello as well as on change.
 void sendTrackStateIfChanged(bool force = false);
+/// Chroma (0x4A): which menu is open, its reachable entries and the cursor. De-duped by a hash, so
+/// it is silent while the player is not navigating.
+void sendMenuContextIfChanged(bool force = false);
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

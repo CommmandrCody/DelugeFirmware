@@ -1,7 +1,9 @@
 #include "hid/hid_sysex.h"
 #include "gui/l10n/l10n.h"
+#include "gui/menu_item/submenu.h"           // Chroma (0x4A): the open menu's entries and cursor
 #include "gui/ui/keyboard/chords.h"          // Chroma: the synced spelling lean (gChromaSpelling) packed into 0x43
 #include "gui/ui/keyboard/keyboard_screen.h" // Chroma (0x48): keyboardScreen.noteRange()
+#include "gui/ui/sound_editor.h"             // Chroma (0x4A): which menu item is current
 #include "gui/ui/ui.h"
 #include "gui/ui_timer_manager.h"
 #include "hid/display/oled.h"
@@ -87,6 +89,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		// ...and which tracks exist and where they go. Same reason again: a host that connects to a
 		// song already loaded has nothing to draw until a track changes, which may be never.
 		sendTrackStateIfChanged(true);
+		// ...and the menu it has open, or that none is. Same reason as every line above.
+		sendMenuContextIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -155,6 +159,7 @@ void HIDSysex::sendDisplayIfChanged() {
 	sendTransportIfChanged();     // Chroma: same piggyback, same reasoning - it self-gates and de-dupes
 	sendKeyboardStateIfChanged(); // Chroma (0x48): layout, key and note range - same piggyback again
 	sendTrackStateIfChanged();    // Chroma (0x49): the track list - de-duped by a hash of the whole list
+	sendMenuContextIfChanged();   // Chroma (0x4A): the open menu - same piggyback, de-duped the same way
 	// NB: timer is only used for throttling, under good conditions sending
 	// is driven by the display subsystem only
 	uiTimerManager.unsetTimer(TimerName::SYSEX_DISPLAY);
@@ -928,6 +933,150 @@ void HIDSysex::sendKeyboardStateIfChanged(bool force) {
 static volatile bool gChordModPending = false;
 static uint8_t gChordModType = 0;
 static uint8_t gChordModValue = 0;
+
+// Chroma (0x4A): WHICH MENU IS OPEN, WHAT IS IN IT, AND WHERE THE CURSOR IS.
+//
+// The view push (0x45) says "the sound editor" and stops. It never said which menu, so a host could
+// not follow the player through the instrument's own menus - the Cockpit's body had nothing to draw
+// from, and the only description of where you were was four characters on the display.
+//
+//   F0 00 21 7B 01 02 4A 00 F7                                        no menu is open
+//   F0 00 21 7B 01 02 4A 01 <kind> <depth> <total> <cursor> <first> <count>
+//                           <titleLen> <title...> { <nameLen> <name...> } x count F7
+//
+// NAMES GO OUT IN FULL ENGLISH, even on a 7-segment unit whose own display abbreviates them. The
+// item's l10n id is looked up in the English table directly. An item that builds its name at run
+// time (a patch cable, say) has no id to look up, and sends whatever it calls itself.
+//
+// ONLY THE ENTRIES THE PLAYER CAN REACH. The same isRelevant() test the menu itself uses when the
+// select encoder turns, so the list a host draws is the list the encoder walks - not a longer one
+// with entries that cannot be selected on this sound.
+//
+// A LONG MENU IS A WINDOW around the cursor. Sixteen entries of twenty characters is 336 bytes; the
+// sysex buffer is 1024 and this must never be the frame that overruns it.
+void HIDSysex::sendMenuContextIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	constexpr int32_t kMaxItems = 16;
+	constexpr int32_t kMaxName = 20;
+	constexpr int32_t kMaxTitle = 24;
+	constexpr int32_t kMaxRelevant = 64;
+
+	uint8_t msg[16 + 1 + kMaxTitle + kMaxItems * (1 + kMaxName)];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02;
+	msg[i++] = SysEx::SysexCommands::MenuContext;
+
+	uint32_t hash = 2166136261u;
+	auto put = [&](uint8_t b) {
+		msg[i++] = b;
+		hash = (hash ^ b) * 16777619u;
+	};
+	auto putText = [&](std::string_view text, int32_t max) {
+		int32_t n = (int32_t)text.size();
+		if (n > max) {
+			n = max;
+		}
+		put((uint8_t)n);
+		for (int32_t k = 0; k < n; k++) {
+			// 7-bit and printable: a stray high byte would end the sysex frame early.
+			const uint8_t c = (uint8_t)text[k] & 0x7f;
+			put((c >= 32) ? c : '?');
+		}
+	};
+	// The item's own name if it builds one at run time, otherwise the English for its l10n id.
+	auto englishName = [](const MenuItem* item) -> std::string_view {
+		std::string_view shown = item->getName();
+		if (shown == deluge::l10n::getView(item->name)) {
+			return deluge::l10n::getView(deluge::l10n::built_in::english, item->name);
+		}
+		return shown;
+	};
+	auto englishTitle = [](const MenuItem* item) -> std::string_view {
+		std::string_view shown = item->getTitle();
+		if (shown == deluge::l10n::getView(item->title)) {
+			return deluge::l10n::getView(deluge::l10n::built_in::english, item->title);
+		}
+		return shown;
+	};
+
+	MenuItem* current = (getCurrentUI() == &soundEditor) ? soundEditor.getCurrentMenuItem() : nullptr;
+	if (current == nullptr) {
+		put(0); // no menu is open - a real answer, so a host can clear its list
+	}
+	else {
+		put(1);
+		if (current->isSubmenu()) {
+			auto* sub = static_cast<deluge::gui::menu_item::Submenu*>(current);
+			const MenuItem* selected = sub->hostCurrentItem();
+			const MenuItem* relevant[kMaxRelevant];
+			int32_t total = 0;
+			int32_t cursor = -1;
+			for (MenuItem* item : sub->hostItems()) {
+				if (total >= kMaxRelevant) {
+					break;
+				}
+				if (!item->isRelevant(soundEditor.currentModControllable, soundEditor.currentSourceIndex)) {
+					continue;
+				}
+				if (item == selected) {
+					cursor = total;
+				}
+				relevant[total++] = item;
+			}
+			int32_t first = 0;
+			int32_t count = total;
+			if (total > kMaxItems) {
+				count = kMaxItems;
+				first = ((cursor < 0) ? 0 : cursor) - kMaxItems / 2;
+				if (first < 0) {
+					first = 0;
+				}
+				if (first > total - kMaxItems) {
+					first = total - kMaxItems;
+				}
+			}
+			put(0); // kind: a list
+			put((uint8_t)(soundEditor.navigationDepth & 0x7f));
+			put((uint8_t)total);
+			put((cursor < 0) ? 0x7f : (uint8_t)cursor);
+			put((uint8_t)first);
+			put((uint8_t)count);
+			putText(englishTitle(current), kMaxTitle);
+			for (int32_t k = 0; k < count; k++) {
+				putText(englishName(relevant[first + k]), kMaxName);
+			}
+		}
+		else {
+			// A single item being edited. Its VALUE is already on the wire as the display text
+			// (0x42), so this says only what the value belongs to.
+			put(1); // kind: an item
+			put((uint8_t)(soundEditor.navigationDepth & 0x7f));
+			put(0);
+			put(0x7f);
+			put(0);
+			put(0);
+			putText(englishTitle(current), kMaxTitle);
+		}
+	}
+
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
+	if (!force && everSent && hash == lastHash) {
+		return;
+	}
+	lastHash = hash;
+	everSent = true;
+
+	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
+}
 
 void HIDSysex::receiveChordApply(uint8_t modType, uint8_t value) {
 	gChordModType = modType & 0x7f;

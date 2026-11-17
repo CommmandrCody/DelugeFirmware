@@ -66,6 +66,13 @@ public:
 	[[nodiscard]] int32_t getOccupiedSlots() const override { return 2; };
 	[[nodiscard]] bool showNotification() const override { return false; }
 
+	/// Chroma (0x4A): what this menu holds and where its cursor is, for a host that mirrors it.
+	/// Read-only on purpose - nothing outside the menu system may move the cursor through these.
+	[[nodiscard]] const deluge::vector<MenuItem*>& hostItems() const { return items; }
+	[[nodiscard]] const MenuItem* hostCurrentItem() const {
+		return (current_item_ != items.end()) ? *current_item_ : nullptr;
+	}
+
 protected:
 	deluge::vector<MenuItem*> items;
 	typename decltype(items)::iterator current_item_;

@@ -72,6 +72,9 @@ enum SysexCommands : uint8_t {
 	GoldKnob = 0x46,      // Chroma: outbound gold-knob push — which knob, the level its LED column shows, and the
 	                      // parameter's name. The host's panel header draws the real knobs; without this it had
 	                      // nothing to draw them FROM and sat dark on every page but Design.
+	MenuContext = 0x4A,   // Chroma: outbound menu-context push - which menu is open, the entries the player
+	                      // can reach and where the cursor is. 0x45 says only "the sound editor"; this
+	                      // is what lets a host follow the instrument through its own menus.
 	TrackState = 0x49,    // Chroma: outbound track-list push - every track in the song, with its name,
 	                      // colour, USB audio routing and mute/solo/armed state. The Cockpit could
 	                      // previously only learn where a track goes over USB by walking into that

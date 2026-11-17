@@ -52,6 +52,10 @@ public:
 
 	bool editedByUser = false;
 	bool mightExistOnCard = false;
+	// Chroma (0x4B): has this instrument been edited since it was last loaded from, or saved to, the
+	// card? `editedByUser` is never cleared and `mightExistOnCard` is never cleared by an edit, so
+	// neither can answer that. Set where the firmware already marks an edit; cleared on load and save.
+	bool changedSinceCard = false;
 	bool shouldHibernate{true};
 	bool matchesPreset(OutputType otherType, int32_t channel, int32_t channelSuffix, char const* otherName,
 	                   char const* otherPath) override {

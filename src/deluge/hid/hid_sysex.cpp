@@ -1103,7 +1103,7 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 	using namespace deluge::modulation::params;
 
 	constexpr int32_t kMaxName = 24;
-	uint8_t msg[7 + 39 + 1 + kMaxName + 1];
+	uint8_t msg[7 + 39 + 1 + kMaxName + 1 + 1];
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -1204,6 +1204,18 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 			const uint8_t c = (uint8_t)soundName[k] & 0x7f;
 			put((c >= 32) ? c : '?'); // 7-bit and printable: a stray high byte would end the frame early
 		}
+		// Card state of the instrument this sound belongs to (for a kit row, the kit):
+		//   bit 0  edited since it was last loaded from or saved to the card
+		//   bit 1  believed to have a file on the card at all
+		uint8_t cardState = 0;
+		if (currentSong != nullptr && currentSong->getCurrentClip() != nullptr) {
+			Output* owner = currentSong->getCurrentClip()->output;
+			if (owner != nullptr && owner->type != OutputType::AUDIO) {
+				auto* instrument = static_cast<Instrument*>(owner);
+				cardState = (instrument->changedSinceCard ? 1 : 0) | (instrument->mightExistOnCard ? 2 : 0);
+			}
+		}
+		put(cardState);
 	}
 
 	static uint32_t lastHash = 0;

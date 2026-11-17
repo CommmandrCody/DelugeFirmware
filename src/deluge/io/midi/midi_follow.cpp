@@ -1141,6 +1141,12 @@ void MidiFollow::handleReceivedCC(MIDICable& cable, ModelStackWithTimelineCounte
 				view.displayModEncoderValuePopup(kind, modelStackWithParam->paramId, newKnobPos);
 			}
 
+			// Chroma: a CC that changed a value is an edit. The firmware's own edit marker is not
+			// reached from here, so the changed-since-card flag is set directly.
+			if (clip != nullptr && clip->output != nullptr && clip->output->type != OutputType::AUDIO) {
+				static_cast<Instrument*>(clip->output)->changedSinceCard = true;
+			}
+
 			// Chroma (0x4B): tell a connected host what the sound holds NOW. The sound report otherwise
 			// rides on the display redrawing, and a CC only redraws when the popup above is enabled -
 			// which is off by default. Without this a host that changes a value over MIDI Follow is

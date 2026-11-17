@@ -39,6 +39,7 @@ Instrument::~Instrument() {
 // Returns whether subslot changed
 void Instrument::beenEdited(bool shouldMoveToEmptySlot) {
 	editedByUser = true;
+	changedSinceCard = true;
 }
 
 bool Instrument::writeDataToFile(Serializer& writer, Clip* clipForSavingOutputOnly, Song* song) {

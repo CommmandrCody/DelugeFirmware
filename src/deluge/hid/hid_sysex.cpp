@@ -11,11 +11,13 @@
 #include "io/midi/midi_engine.h"
 #include "io/midi/sysex.h"
 #include "memory/general_memory_allocator.h"
-#include "model/clip/instrument_clip.h" // Chroma (0x48): keyboardState.currentLayout
-#include "model/output.h"               // Chroma (0x49): the track list - name, colour, usbRouting
-#include "model/scale/preset_scales.h"  // Chroma (0x48): getScaleName
-#include "model/song/song.h"            // Chroma: resync — read the live key/scale to push on handshake
-#include "playback/playback_handler.h"  // Chroma: transport push - is it running, and where
+#include "model/clip/instrument_clip.h"            // Chroma (0x48): keyboardState.currentLayout
+#include "model/instrument/midi_instrument.h"      // Chroma (0x49): channelSuffix, MIDI only
+#include "model/instrument/non_audio_instrument.h" // Chroma (0x49): getChannel(), MIDI and CV
+#include "model/output.h"                          // Chroma (0x49): the track list - name, colour, usbRouting
+#include "model/scale/preset_scales.h"             // Chroma (0x48): getScaleName
+#include "model/song/song.h"                       // Chroma: resync — read the live key/scale to push on handshake
+#include "playback/playback_handler.h"             // Chroma: transport push - is it running, and where
 #include "processing/engines/audio_engine.h"
 #include "util/pack.h"
 #include <cstring>
@@ -690,9 +692,22 @@ void HIDSysex::sendTransportIfChanged(bool force) {
 //
 //   F0 00 21 7B 01 02 49 <nTracks> [ track ... ] F7
 //   track = <idx> <type> <colourHi> <colourLo> <usbHi> <usbLo> <flags> <nameLen> <name ascii...>
+//                                                                       [ <channel> <chanSuffix> ]
 //
 // Everything is 7-bit, so the two 16-bit fields travel as high/low halves. `flags` is bit 0 muted,
-// bit 1 soloing, bit 2 armed for recording.
+// bit 1 soloing, bit 2 armed for recording, and BIT 6 says this record carries a channel.
+//
+// THE CHANNEL IS OPTIONAL, PER RECORD. Only MIDI and CV tracks have one - both inherit it from
+// NonAudioInstrument - so a synth, kit or audio track does not set bit 6 and pays nothing. Cody,
+// after routing USB audio by hand: "its a struggle and menu diving ... I think we need a routing
+// page for midi and audio." The audio half was already here in `usbRouting`; this is the other half.
+//
+// THE MARKER IS A FLAGS BIT, not a frame-version byte after the count. A version byte would be read
+// as the first track's INDEX by any decoder that predated it, and index 0 is a legitimate value, so
+// the ambiguity would be silent. A spare flags bit cannot be mistaken for anything.
+//
+// `channelSuffix` is -1 on the instrument for "none" and travels as 0x7f, because every field here
+// is 7-bit and a negative number has nowhere to go.
 void HIDSysex::sendTrackStateIfChanged(bool force) {
 	if (lastHidCable == nullptr || currentSong == nullptr) {
 		return;
@@ -705,7 +720,11 @@ void HIDSysex::sendTrackStateIfChanged(bool force) {
 	constexpr uint8_t kMaxTracks = 24;
 	constexpr uint8_t kMaxName = 12;
 
-	uint8_t msg[8 + kMaxTracks * (8 + kMaxName)];
+	// 10, not 8: a MIDI or CV record carries two more bytes than the fixed header above. Worst case is
+	// every track being a MIDI track, and a buffer sized for the old record would be overrun by 48
+	// bytes - silently, on the stack, in an audio-thread-adjacent path. 8 + 24 * 22 = 536, which is
+	// still comfortably inside the 1024-byte sysex buffer.
+	uint8_t msg[8 + kMaxTracks * (10 + kMaxName)];
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -743,6 +762,31 @@ void HIDSysex::sendTrackStateIfChanged(bool force) {
 			flags |= 1 << 2;
 		}
 
+		// THE CHANNEL, for the tracks that have one.
+		//
+		// MIDI and CV both inherit `channel` from NonAudioInstrument, so one cast covers both. A
+		// synth, kit or audio track has no channel at all and does not set the marker - reporting 0
+		// for one would be a fabricated value, and 0 is a real channel, which makes it the kind of
+		// wrong answer that looks exactly like a right one.
+		//
+		// `channelSuffix` lives on MIDIInstrument rather than on NonAudioInstrument, and is -1 for
+		// "none". 0x7f carries that, because every field in this frame is 7-bit.
+		bool hasChannel = false;
+		uint8_t chanByte = 0;
+		uint8_t suffixByte = 0x7f;
+		if (output->type == OutputType::MIDI_OUT || output->type == OutputType::CV) {
+			auto* nai = static_cast<NonAudioInstrument*>(output);
+			hasChannel = true;
+			chanByte = (uint8_t)(nai->getChannel() & 0x7f);
+			if (output->type == OutputType::MIDI_OUT) {
+				const int32_t suffix = static_cast<MIDIInstrument*>(output)->channelSuffix;
+				suffixByte = (suffix < 0) ? 0x7f : (uint8_t)(suffix & 0x7f);
+			}
+		}
+		if (hasChannel) {
+			flags |= 1 << 6;
+		}
+
 		msg[i++] = n;
 		msg[i++] = (uint8_t)output->type & 0x7f;
 		msg[i++] = (colour >> 7) & 0x7f;
@@ -757,6 +801,12 @@ void HIDSysex::sendTrackStateIfChanged(bool force) {
 			const uint8_t c = (uint8_t)name[k] & 0x7f;
 			msg[i++] = (c >= 32) ? c : '?';
 		}
+		// After the name, so a reader that does not know about them simply stops at the name and the
+		// frame is the one it has always seen.
+		if (hasChannel) {
+			msg[i++] = chanByte;
+			msg[i++] = suffixByte;
+		}
 
 		mix(n);
 		mix((uint8_t)output->type);
@@ -768,6 +818,15 @@ void HIDSysex::sendTrackStateIfChanged(bool force) {
 		mix(nameLen);
 		for (uint8_t k = 0; k < nameLen; k++) {
 			mix((uint8_t)name[k]);
+		}
+		// INTO THE HASH TOO, or the dedupe defeats the whole point: move a MIDI track from channel 1
+		// to channel 2 and nothing else about it changes, so an unchanged hash would keep the host on
+		// the old channel until something else in the song happened to move. `flags` already carries
+		// the marker bit, so a track gaining a channel is caught either way - this is for a channel
+		// that CHANGES.
+		if (hasChannel) {
+			mix(chanByte);
+			mix(suffixByte);
 		}
 	}
 	msg[countAt] = n;

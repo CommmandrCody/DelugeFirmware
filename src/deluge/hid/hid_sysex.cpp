@@ -1,6 +1,7 @@
 #include "hid/hid_sysex.h"
 #include "gui/l10n/l10n.h"
-#include "gui/menu_item/submenu.h"           // Chroma (0x4A): the open menu's entries and cursor
+#include "gui/menu_item/submenu.h"
+#include "gui/menu_item/value_scaling.h" // Chroma (0x4B): the 0-50 the menus show           // Chroma (0x4A): the open menu's entries and cursor
 #include "gui/ui/keyboard/chords.h"          // Chroma: the synced spelling lean (gChromaSpelling) packed into 0x43
 #include "gui/ui/keyboard/keyboard_screen.h" // Chroma (0x48): keyboardScreen.noteRange()
 #include "gui/ui/sound_editor.h"             // Chroma (0x4A): which menu item is current
@@ -18,9 +19,13 @@
 #include "model/instrument/non_audio_instrument.h" // Chroma (0x49): getChannel(), MIDI and CV
 #include "model/output.h"                          // Chroma (0x49): the track list - name, colour, usbRouting
 #include "model/scale/preset_scales.h"             // Chroma (0x48): getScaleName
-#include "model/song/song.h"                       // Chroma: resync — read the live key/scale to push on handshake
-#include "playback/playback_handler.h"             // Chroma: transport push - is it running, and where
+#include "model/song/song.h"
+#include "modulation/params/param.h"         // Chroma (0x4B): which parameters make up a sound
+#include "modulation/params/param_manager.h" // Chroma (0x4B)
+#include "modulation/params/param_set.h" // Chroma (0x4B)                       // Chroma: resync — read the live key/scale to push on handshake
+#include "playback/playback_handler.h" // Chroma: transport push - is it running, and where
 #include "processing/engines/audio_engine.h"
+#include "processing/sound/sound_instrument.h" // Chroma (0x4B): the track's own sound
 #include "util/pack.h"
 #include <cstring>
 
@@ -91,6 +96,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendTrackStateIfChanged(true);
 		// ...and the menu it has open, or that none is. Same reason as every line above.
 		sendMenuContextIfChanged(true);
+		// ...and the sound in focus, or that there is none.
+		sendSoundStateIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -160,6 +167,7 @@ void HIDSysex::sendDisplayIfChanged() {
 	sendKeyboardStateIfChanged(); // Chroma (0x48): layout, key and note range - same piggyback again
 	sendTrackStateIfChanged();    // Chroma (0x49): the track list - de-duped by a hash of the whole list
 	sendMenuContextIfChanged();   // Chroma (0x4A): the open menu - same piggyback, de-duped the same way
+	sendSoundStateIfChanged();    // Chroma (0x4B): the sound in focus - same piggyback, de-duped the same way
 	// NB: timer is only used for throttling, under good conditions sending
 	// is driven by the display subsystem only
 	uiTimerManager.unsetTimer(TimerName::SYSEX_DISPLAY);
@@ -1063,6 +1071,113 @@ void HIDSysex::sendMenuContextIfChanged(bool force) {
 			put(0);
 			put(0);
 			putText(englishTitle(current), kMaxTitle);
+		}
+	}
+
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
+	if (!force && everSent && hash == lastHash) {
+		return;
+	}
+	lastHash = hash;
+	everSent = true;
+
+	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
+}
+
+// Chroma (0x4B): the sound in focus, as the instrument holds it.
+//
+// A host that draws a sound from its own copy of a patch is drawing a guess. This is what lets it
+// draw the oscillators, filters, envelopes and LFOs the player is actually hearing. Every level is
+// the 0-50 the menus show, so the numbers on a host match the numbers on the instrument.
+//
+// WHICH sound: the one open in the sound editor if there is one (that is how a kit row is reached),
+// otherwise the synth on the track the player is on. Anything else is "none", said out loud.
+void HIDSysex::sendSoundStateIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	using namespace deluge::modulation::params;
+
+	uint8_t msg[7 + 39 + 1];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02;
+	msg[i++] = SysEx::SysexCommands::SoundState;
+
+	uint32_t hash = 2166136261u;
+	auto put = [&](uint8_t b) {
+		msg[i++] = b & 0x7f;
+		hash = (hash ^ b) * 16777619u;
+	};
+
+	Sound* sound = nullptr;
+	ParamManager* paramManager = nullptr;
+	uint8_t source = 0;
+	if (getCurrentUI() == &soundEditor && soundEditor.currentSound != nullptr
+	    && soundEditor.currentParamManager != nullptr) {
+		sound = soundEditor.currentSound;
+		paramManager = soundEditor.currentParamManager;
+		source = 1;
+	}
+	else if (currentSong != nullptr) {
+		Clip* clip = currentSong->getCurrentClip();
+		if (clip != nullptr && clip->output != nullptr && clip->output->type == OutputType::SYNTH) {
+			sound = static_cast<SoundInstrument*>(clip->output);
+			paramManager = &clip->paramManager;
+		}
+	}
+	if (sound != nullptr && (paramManager == nullptr || !paramManager->containsAnyMainParamCollections())) {
+		sound = nullptr; // a sound whose parameters cannot be read is not one a host can draw
+	}
+
+	if (sound == nullptr) {
+		put(0);
+	}
+	else {
+		PatchedParamSet* params = paramManager->getPatchedParamSet();
+		auto level = [&](int32_t p) {
+			int32_t v = computeCurrentValueForStandardMenuItem(params->getValue(p));
+			if (v < 0) {
+				v = 0;
+			}
+			if (v > kMaxMenuValue) {
+				v = kMaxMenuValue;
+			}
+			put((uint8_t)v);
+		};
+		put(1);
+		put(source);
+		put(util::to_underlying(sound->getSynthMode()));
+		put(util::to_underlying(sound->polyphonic));
+		put(util::to_underlying(sound->sources[0].oscType));
+		put(util::to_underlying(sound->sources[1].oscType));
+		level(LOCAL_OSC_A_VOLUME);
+		level(LOCAL_OSC_B_VOLUME);
+		level(LOCAL_NOISE_VOLUME);
+		put(util::to_underlying(sound->lpfMode));
+		level(LOCAL_LPF_FREQ);
+		level(LOCAL_LPF_RESONANCE);
+		put(util::to_underlying(sound->hpfMode));
+		level(LOCAL_HPF_FREQ);
+		level(LOCAL_HPF_RESONANCE);
+		for (int32_t e = 0; e < 4; e++) {
+			level(LOCAL_ENV_0_ATTACK + e);
+			level(LOCAL_ENV_0_DECAY + e);
+			level(LOCAL_ENV_0_SUSTAIN + e);
+			level(LOCAL_ENV_0_RELEASE + e);
+		}
+		// LFO 1 and 3 are global, 2 and 4 are per voice; the wire carries them in the order a player counts.
+		static const int32_t lfoRate[4] = {GLOBAL_LFO_FREQ_1, LOCAL_LFO_LOCAL_FREQ_1, GLOBAL_LFO_FREQ_2,
+		                                   LOCAL_LFO_LOCAL_FREQ_2};
+		for (int32_t l = 0; l < 4; l++) {
+			put(util::to_underlying(sound->lfoConfig[l].waveType));
+			level(lfoRate[l]);
 		}
 	}
 

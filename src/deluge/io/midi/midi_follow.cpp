@@ -25,6 +25,7 @@
 #include "gui/views/session_view.h"
 #include "gui/views/view.h"
 #include "hid/display/display.h"
+#include "hid/hid_sysex.h" // Chroma (0x4B): report the sound after a CC changes it
 #include "io/midi/midi_device.h"
 #include "io/midi/midi_engine.h"
 #include "io/midi/midi_takeover.h"
@@ -1139,6 +1140,12 @@ void MidiFollow::handleReceivedCC(MIDICable& cable, ModelStackWithTimelineCounte
 				params::Kind kind = modelStackWithParam->paramCollection->getParamKind();
 				view.displayModEncoderValuePopup(kind, modelStackWithParam->paramId, newKnobPos);
 			}
+
+			// Chroma (0x4B): tell a connected host what the sound holds NOW. The sound report otherwise
+			// rides on the display redrawing, and a CC only redraws when the popup above is enabled -
+			// which is off by default. Without this a host that changes a value over MIDI Follow is
+			// never told whether it took. De-duplicated inside, and silent when no host is connected.
+			HIDSysex::sendSoundStateIfChanged();
 		}
 	}
 }

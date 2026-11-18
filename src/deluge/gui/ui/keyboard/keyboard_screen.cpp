@@ -1156,7 +1156,26 @@ uint8_t keyboardTickSquares[kDisplayHeight] = {255, 255, 255, 255, 255, 255, 255
 const uint8_t keyboardTickColoursBasicRecording[kDisplayHeight] = {0, 0, 0, 0, 0, 0, 0, 0};
 const uint8_t keyboardTickColoursLinearRecording[kDisplayHeight] = {0, 0, 0, 0, 0, 0, 0, 2};
 
+// Put out the preview pad of every tail-less note whose length has run. Runs with the display tick, which
+// is the only time the pad is being looked at; opening the keyboard clears any that expired while it was shut.
+void KeyboardScreen::expirePlaybackPreview() {
+	bool changed = false;
+	for (int32_t n = 0; n < kHighestKeyboardNote; n++) {
+		if (previewExpiry[n] != 0 && (int32_t)(AudioEngine::audioSampleTimer - previewExpiry[n]) >= 0) {
+			previewExpiry[n] = 0;
+			if (highlightedNotes[n] == 254) {
+				highlightedNotes[n] = 0;
+				changed = true;
+			}
+		}
+	}
+	if (changed) {
+		requestRendering();
+	}
+}
+
 void KeyboardScreen::graphicsRoutine() {
+	expirePlaybackPreview();
 	int32_t newTickSquare;
 
 	const uint8_t* colours = keyboardTickColoursBasicRecording;

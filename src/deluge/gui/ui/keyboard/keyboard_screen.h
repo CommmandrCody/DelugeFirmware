@@ -76,7 +76,16 @@ public:
 				v = 0;
 			}
 		}
+		for (uint32_t& t : previewExpiry) {
+			t = 0;
+		}
 	}
+	// WHEN A TAIL-LESS NOTE'S PREVIEW GOES OUT. A pluck or a one-shot has no note tail, so the sequencer never
+	// sends it a note-off and never "stops" it - which was the only thing that put a preview pad out. Measured
+	// on the instrument: 13 pads left at monochrome(110) with the song stopped (fw 1.3.95). So a note with no
+	// tail carries its own end: the audio-sample time at which its length is up. 0 means "ends by note-off".
+	uint32_t previewExpiry[kHighestKeyboardNote] = {0};
+	void expirePlaybackPreview();
 	inline void clearChordShapeHighlight() {
 		for (uint8_t& v : highlightedNotes) {
 			if (v == 255) {

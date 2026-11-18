@@ -2559,11 +2559,31 @@ void NoteRow::playNote(bool on, ModelStackWithNoteRow* modelStack, Note* thisNot
 					    && runtimeFeatureSettings.get(RuntimeFeatureSettingType::KeyboardNotePreview)
 					           == RuntimeFeatureStateToggle::On) {
 						lit = 254;
+						// A sound with no note tail is never sent a note-off, so nothing would ever put this
+						// pad out. Give it its own end: the note's length from now, at least a visible blink
+						// and at most ten seconds. With a tail, 0: the note-off puts it out as before.
+						uint32_t expiry = 0;
+						if (!clip->allowNoteTails(modelStack)) {
+							uint64_t samples = (uint64_t)((thisNote != nullptr) ? thisNote->getLength() : 0)
+							                   * playbackHandler.getTimePerInternalTick();
+							if (samples < 2205) {
+								samples = 2205;
+							}
+							if (samples > 441000) {
+								samples = 441000;
+							}
+							expiry = AudioEngine::audioSampleTimer + (uint32_t)samples;
+							if (expiry == 0) {
+								expiry = 1; // 0 means "no expiry"
+							}
+						}
+						keyboardScreen.previewExpiry[noteCode] = expiry;
 						keyboardScreen.requestRendering();
 					}
 				}
 				else if (lit == 254) {
 					lit = 0;
+					keyboardScreen.previewExpiry[noteCode] = 0;
 					keyboardScreen.requestRendering();
 				}
 			}

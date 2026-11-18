@@ -987,6 +987,7 @@ void KeyboardScreen::displayOrLanguageChanged() {
 
 void KeyboardScreen::openedInBackground() {
 	getCurrentInstrumentClip()->onKeyboardScreen = true;
+	clearPlaybackPreviewHighlight(); // a keyboard that has just been opened starts with no leftover white pads
 
 	// Ensure scroll values are calculated in bounds
 	layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->handleHorizontalEncoder(0, false, pressedPads,
@@ -996,6 +997,7 @@ void KeyboardScreen::openedInBackground() {
 }
 
 void KeyboardScreen::checkNewInstrument(Instrument* newInstrument) {
+	clearPlaybackPreviewHighlight(); // a different instrument under the same keyboard: likewise
 	layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->checkNewInstrument(newInstrument);
 }
 

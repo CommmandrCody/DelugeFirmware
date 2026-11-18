@@ -1881,7 +1881,9 @@ void NoteRow::stopCurrentlyPlayingNote(ModelStackWithNoteRow* modelStack, bool a
 	{
 		InstrumentClip* clip = (InstrumentClip*)modelStack->getTimelineCounter();
 		int32_t noteCode = getNoteCode();
-		if (clip == getCurrentInstrumentClip() && noteCode >= 0
+		// (No "is this the clip on screen" test: see playNote. A row that stops sounding after the player
+		// has left its clip must still put its own pad out.)
+		if (clip != nullptr && clip->output != nullptr && clip->output->type != OutputType::KIT && noteCode >= 0
 		    && noteCode < deluge::gui::ui::keyboard::kHighestKeyboardNote
 		    && keyboardScreen.highlightedNotes[noteCode] == 254) {
 			keyboardScreen.highlightedNotes[noteCode] = 0;
@@ -2540,16 +2542,30 @@ void NoteRow::playNote(bool on, ModelStackWithNoteRow* modelStack, Note* thisNot
 		// Light the playing note on the keyboard grid, so playback shows as shapes on the iso/in-key
 		// grids (watch a progression move under your fingers). Only for the clip you're viewing, and
 		// only when note highlighting is enabled; cleared on the note-off.
-		if (clip == getCurrentInstrumentClip()
-		    && runtimeFeatureSettings.get(RuntimeFeatureSettingType::KeyboardNotePreview)
-		           == RuntimeFeatureStateToggle::On) {
+		//
+		// LIGHTING needs the clip to be the one on screen. CLEARING must not: the highlight array belongs
+		// to the keyboard screen, not to a clip, so a note that was lit while its clip was on screen and
+		// ends after the player has moved to another track still has to be put out. Requiring "current
+		// clip" on the note-off left those pads white with nothing able to reset them - Cody: "some notes
+		// (pads) are lit in white and I can't get them to reset."
+		{
 			int32_t noteCode = getNoteCode();
-			// 254 = the DIM-white playback highlight. Never disturb a 255 chord-memory shape that's
-			// painted on this pad — the stored shape owns it until it's cleared by chord memory.
-			if (noteCode >= 0 && noteCode < deluge::gui::ui::keyboard::kHighestKeyboardNote
-			    && keyboardScreen.highlightedNotes[noteCode] != 255) {
-				keyboardScreen.highlightedNotes[noteCode] = on ? 254 : 0;
-				keyboardScreen.requestRendering();
+			if (noteCode >= 0 && noteCode < deluge::gui::ui::keyboard::kHighestKeyboardNote) {
+				// 254 = the DIM-white playback highlight. Never disturb a 255 chord-memory shape that's
+				// painted on this pad — the stored shape owns it until it's cleared by chord memory.
+				uint8_t& lit = keyboardScreen.highlightedNotes[noteCode];
+				if (on) {
+					if (clip == getCurrentInstrumentClip() && lit != 255
+					    && runtimeFeatureSettings.get(RuntimeFeatureSettingType::KeyboardNotePreview)
+					           == RuntimeFeatureStateToggle::On) {
+						lit = 254;
+						keyboardScreen.requestRendering();
+					}
+				}
+				else if (lit == 254) {
+					lit = 0;
+					keyboardScreen.requestRendering();
+				}
 			}
 		}
 

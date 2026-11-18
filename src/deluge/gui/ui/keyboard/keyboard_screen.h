@@ -67,6 +67,16 @@ public:
 
 	// Clear the persistent white chord-memory "shape" highlight (the 255 sentinels) so it gets out of
 	// the way as soon as the player starts playing. Leaves velocity-tinted incoming-note highlights alone.
+	// Put out every playback note-preview highlight (the 254 sentinels). Called whenever the keyboard starts
+	// showing a clip, so pads lit by whatever was playing on the last one cannot carry over. Notes still
+	// sounding on the new clip light again on their next note-on.
+	inline void clearPlaybackPreviewHighlight() {
+		for (uint8_t& v : highlightedNotes) {
+			if (v == 254) {
+				v = 0;
+			}
+		}
+	}
 	inline void clearChordShapeHighlight() {
 		for (uint8_t& v : highlightedNotes) {
 			if (v == 255) {

@@ -108,6 +108,10 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		requestOLEDDisplay(cable, data, len);
 		break;
 
+	case SysEx::SysexCommands::MixerSet:
+		receiveMixerSet(cable, data, len);
+		break;
+
 	case 1:
 		request7SegDisplay(cable, data, len);
 		break;
@@ -739,7 +743,7 @@ void HIDSysex::sendTrackStateIfChanged(bool force) {
 	// every track being a MIDI track, and a buffer sized for the old record would be overrun by 48
 	// bytes - silently, on the stack, in an audio-thread-adjacent path. 8 + 24 * 22 = 536, which is
 	// still comfortably inside the 1024-byte sysex buffer.
-	uint8_t msg[8 + kMaxTracks * (10 + kMaxName)];
+	uint8_t msg[8 + kMaxTracks * (12 + kMaxName)]; // +2 per track for the mixer
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -801,6 +805,11 @@ void HIDSysex::sendTrackStateIfChanged(bool force) {
 		if (hasChannel) {
 			flags |= 1 << 6;
 		}
+		// THE MIXER: this record carries a level and a mute/solo byte (firmware 1.3.94+). A marker bit like
+		// the channel's, so an older reader that stops at the name still reads the frame it always has.
+		flags |= 1 << 5;
+		const uint8_t mixLevel = output->mixerLevel & 0x7f;
+		const uint8_t mixFlags = (output->mixerMute ? 1 : 0) | (output->mixerSolo ? 2 : 0);
 
 		msg[i++] = n;
 		msg[i++] = (uint8_t)output->type & 0x7f;
@@ -822,6 +831,10 @@ void HIDSysex::sendTrackStateIfChanged(bool force) {
 			msg[i++] = chanByte;
 			msg[i++] = suffixByte;
 		}
+		msg[i++] = mixLevel;
+		msg[i++] = mixFlags;
+		mix(mixLevel);
+		mix(mixFlags);
 
 		mix(n);
 		mix((uint8_t)output->type);
@@ -1228,6 +1241,68 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 
 	msg[i++] = 0xf7;
 	lastHidCable->sendSysex(msg, i);
+}
+
+// Chroma (0x4E in, 0x4F out): set one track's mixer level, mute or solo, and say what happened.
+//
+//   in   F0 00 21 7B 01 02 4E <seq> <track> <nameHash> <what> <value> F7
+//   out  F0 00 21 7B 01 02 4F <seq> <result> F7
+//
+// <what>    0 level (value 0-127, 127 = unity)   1 mute (0/1)   2 solo (0/1)
+// <result>  0 applied   1 no such track   2 that track is not the one the host meant   3 bad request
+//
+// THE NAME GUARD. <track> is a position in the song's list, and positions move when tracks are added, deleted
+// or reordered. So the host also sends a 7-bit hash of the NAME of the track it means; if the track now at that
+// position has a different name, the command is refused rather than applied to the wrong track. It is a guard,
+// not an identity: two tracks with the same name are indistinguishable to it.
+//
+// THE OUTCOME IS NOT THE STATE. It says only what became of the command. The new level, mute or solo is
+// reported the way it always is, in the track list (0x49), which is pushed straight after a change.
+void HIDSysex::receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len) {
+	// data[0] = 0x02 (HID), data[1] = 0x4E, then seq, track, nameHash, what, value
+	const uint8_t seq = (len >= 3) ? (data[2] & 0x7f) : 0;
+	uint8_t result = 3;
+	if (len >= 7 && currentSong != nullptr) {
+		const uint8_t track = data[3] & 0x7f;
+		const uint8_t wantHash = data[4] & 0x7f;
+		const uint8_t what = data[5] & 0x7f;
+		const uint8_t value = data[6] & 0x7f;
+		Output* output = currentSong->firstOutput;
+		for (uint8_t n = 0; output != nullptr && n < track; n++) {
+			output = output->next;
+		}
+		if (output == nullptr) {
+			result = 1;
+		}
+		else {
+			uint32_t h = 2166136261u; // the same FNV-1a the host computes, over the name as 0x49 sends it
+			const char* name = output->name.get();
+			for (int32_t k = 0; name != nullptr && name[k] != 0 && k < 12; k++) {
+				const uint8_t c = (uint8_t)name[k] & 0x7f;
+				h = (h ^ ((c >= 32) ? c : '?')) * 16777619u;
+			}
+			if ((uint8_t)((h ^ (h >> 7) ^ (h >> 14) ^ (h >> 21)) & 0x7f) != wantHash) {
+				result = 2;
+			}
+			else if (what == 0) {
+				output->mixerLevel = value; // 0-127 by construction; 127 is unity
+				result = 0;
+			}
+			else if (what == 1 && value <= 1) {
+				output->mixerMute = (value == 1);
+				result = 0;
+			}
+			else if (what == 2 && value <= 1) {
+				output->mixerSolo = (value == 1);
+				result = 0;
+			}
+		}
+	}
+	uint8_t reply[10] = {0xf0, 0x00, 0x21, 0x7b, 0x01, 0x02, SysEx::SysexCommands::CommandOutcome, seq, result, 0xf7};
+	cable.sendSysex(reply, sizeof(reply));
+	if (result == 0) {
+		sendTrackStateIfChanged(); // the state itself, from the one place it is always reported
+	}
 }
 
 void HIDSysex::receiveChordApply(uint8_t modType, uint8_t value) {

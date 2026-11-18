@@ -2509,6 +2509,21 @@ void Song::renderAudio(std::span<StereoSample> outputBuffer, int32_t* reverbBuff
 	AudioEngine::logAction("Start output render");
 	using deluge::processing::engines::USBAudioStream;
 	const bool captureStems = USBAudioStream::stemsWanted();
+
+	// THE MIXER (Output::mixerLevel / mixerMute / mixerSolo). A track's share of the mix is the difference its
+	// render makes, the same way its USB copy is taken, so that share can be scaled without touching how any
+	// kind of track renders. Its reverb send is scaled with it: a fader that left the reverb tail at full
+	// level would not be a fader. A track at unity, unmuted, with nothing soloed, takes none of this path.
+	bool anyMixerSolo = false;
+	for (Output* output = firstOutput; output; output = output->next) {
+		if (output->mixerSolo) {
+			anyMixerSolo = true;
+			break;
+		}
+	}
+	static int32_t mixerMixBefore[SSI_TX_BUFFER_NUM_SAMPLES * 2];
+	static int32_t mixerReverbBefore[SSI_TX_BUFFER_NUM_SAMPLES];
+
 	for (Output* output = firstOutput; output; output = output->next) {
 		if (!output->inValidState) {
 			continue;
@@ -2529,12 +2544,32 @@ void Song::renderAudio(std::span<StereoSample> outputBuffer, int32_t* reverbBuff
 			if (wantsCopy || wantsOut) {
 				USBAudioStream::snapshotBeforeTrack(mixRaw, numSamples);
 			}
+			// Only when this track is not at unity, and only if the block fits the snapshot: otherwise it
+			// renders exactly as it always has.
+			const int32_t mixerGain = output->mixerGainQ30(anyMixerSolo);
+			const bool mixerScales = (mixerGain != (1 << 30)) && (numSamples <= SSI_TX_BUFFER_NUM_SAMPLES);
+			if (mixerScales) {
+				memcpy(mixerMixBefore, mixRaw, numSamples * 2 * sizeof(int32_t));
+				memcpy(mixerReverbBefore, reverbBuffer, numSamples * sizeof(int32_t));
+			}
 
 			output->renderOutput(modelStack, outputBuffer, reverbBuffer, volumePostFX >> 1, sideChainHitPending,
 			                     !isClipActiveNow, isClipActiveNow);
 
+			// The USB copy is taken BEFORE the fader, like a direct out: what a computer records does not
+			// change when a level is ridden on the instrument.
 			if (wantsCopy) {
 				USBAudioStream::captureStem(route, mixRaw, numSamples);
+			}
+			if (mixerScales) {
+				for (uint32_t s = 0; s < numSamples * 2; s++) {
+					const int64_t share = (int64_t)mixRaw[s] - mixerMixBefore[s];
+					mixRaw[s] = mixerMixBefore[s] + (int32_t)((share * mixerGain) >> 30);
+				}
+				for (uint32_t s = 0; s < numSamples; s++) {
+					const int64_t share = (int64_t)reverbBuffer[s] - mixerReverbBefore[s];
+					reverbBuffer[s] = mixerReverbBefore[s] + (int32_t)((share * mixerGain) >> 30);
+				}
 			}
 			if (wantsOut) {
 				USBAudioStream::removeTrackFromMix(mixRaw, numSamples);

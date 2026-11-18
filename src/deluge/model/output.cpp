@@ -274,6 +274,16 @@ bool Output::writeDataToFile(Serializer& writer, Clip* clipForSavingOutputOnly, 
 		if (usbRouting != UsbRoute::DEFAULT) {
 			writer.writeAttribute("usbRouting", usbRouting);
 		}
+		// The mixer, likewise only when it has been touched.
+		if (mixerLevel != kMixerUnity) {
+			writer.writeAttribute("mixerLevel", mixerLevel);
+		}
+		if (mixerMute) {
+			writer.writeAttribute("mixerMute", 1);
+		}
+		if (mixerSolo) {
+			writer.writeAttribute("mixerSolo", 1);
+		}
 
 		if (clipInstances.getNumElements()) {
 			writer.insertCommaIfNeeded();
@@ -357,6 +367,17 @@ bool Output::readTagFromFile(Deserializer& reader, char const* tagName) {
 	else if (!strcmp(tagName, "usbRouting")) {
 		// Masked, so a bit this firmware does not define routes nowhere.
 		usbRouting = (uint16_t)(reader.readTagOrAttributeValueInt() & UsbRoute::ALL);
+	}
+
+	else if (!strcmp(tagName, "mixerLevel")) {
+		int32_t level = reader.readTagOrAttributeValueInt();
+		mixerLevel = (uint8_t)((level < 0) ? 0 : (level > kMixerUnity) ? kMixerUnity : level); // never above unity
+	}
+	else if (!strcmp(tagName, "mixerMute")) {
+		mixerMute = reader.readTagOrAttributeValueInt() != 0;
+	}
+	else if (!strcmp(tagName, "mixerSolo")) {
+		mixerSolo = reader.readTagOrAttributeValueInt() != 0;
 	}
 
 	else if (!strcmp(tagName, "trackInstances") || !strcmp(tagName, "clipInstances")) {

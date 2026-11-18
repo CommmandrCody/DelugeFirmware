@@ -94,6 +94,26 @@ public:
 	uint16_t usbRouting = UsbRoute::DEFAULT;
 
 	[[nodiscard]] bool isInMainMix() const { return (usbRouting & UsbRoute::MAIN) != 0; }
+
+	/// THE MIXER. A level, a mute and a solo that belong to the TRACK - the Deluge otherwise has none: volume
+	/// is a parameter of each clip, so "this track's fader" had nothing to point at. Applied to the track's
+	/// contribution where it joins the song's mix (Song::renderAudio), reverb send included. Saved with the
+	/// song. At their defaults they do no work and change nothing.
+	static constexpr uint8_t kMixerUnity = 127; ///< 0 dB. The fader only attenuates, so it cannot clip a mix.
+	uint8_t mixerLevel = kMixerUnity;
+	bool mixerMute = false;
+	bool mixerSolo = false;
+	/// What this track is multiplied by, as Q30 (1 << 30 is unity). A squared taper, so the top of the fader
+	/// is fine and the bottom reaches silence.
+	[[nodiscard]] int32_t mixerGainQ30(bool anySolo) const {
+		if (mixerMute || (anySolo && !mixerSolo)) {
+			return 0;
+		}
+		if (mixerLevel >= kMixerUnity) {
+			return 1 << 30;
+		}
+		return (int32_t)(((int64_t)mixerLevel * mixerLevel << 30) / ((int64_t)kMixerUnity * kMixerUnity));
+	}
 	String name; // Contains the display name as the user sees it.
 	             // E.g. on numeric Deluge, SYNT000 will be just "0". Definitely no leading zeros, so not "000".
 	             // On OLED Deluge I thiiink SYNT000 would be "SYNT000"?

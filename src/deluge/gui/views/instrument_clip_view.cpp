@@ -2592,8 +2592,12 @@ void InstrumentClipView::editPadAction(bool state, uint8_t yDisplay, uint8_t xDi
 						}
 					}
 
-					// Or if general cut-mode samples - but only for kit Clips, not synth
-					else if (instrument->type == OutputType::KIT) {
+					// Or if general cut-mode samples - but only for kit Clips, not synth.
+					// Unless the player has asked for kit hits to be one step (Features > Kit Hits One Step):
+					// then the note keeps the width of the pad that was tapped, and a cut-mode sample is gated
+					// to it. Stretch-synced samples above are untouched: they need their length to stay in time.
+					else if (instrument->type == OutputType::KIT
+					         && !runtimeFeatureSettings.isOn(RuntimeFeatureSettingType::KitHitsOneStep)) {
 						bool anyLooping;
 						sampleLength = sound->hasCutOrLoopModeSamples(paramManager, yNote, &anyLooping);
 						if (sampleLength) {

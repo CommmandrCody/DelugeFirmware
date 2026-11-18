@@ -84,7 +84,8 @@ enum RuntimeFeatureSettingType : uint32_t {
 	// of the list, which is exactly what the note above says never to do, and shipped it with no menu
 	// item behind it - so the Features menu held a null entry and locked up on entry.
 	SongsNewestFirst,
-	MaxElement // Keep as boundary
+	KitHitsOneStep, // appended last, as the note above requires
+	MaxElement      // Keep as boundary
 };
 
 /// Definition for selectable options

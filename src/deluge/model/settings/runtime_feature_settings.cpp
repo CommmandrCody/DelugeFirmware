@@ -198,6 +198,12 @@ void RuntimeFeatureSettings::init() {
 	                  STRING_FOR_COMMUNITY_FEATURE_SONGS_NEWEST_FIRST, "songsNewestFirst",
 	                  RuntimeFeatureStateToggle::Off);
 
+	// KitHitsOneStep - tapping a step on a kit row whose sample is in CUT mode places a note ONE STEP long,
+	// so the sample is gated to the step. Off is stock behaviour: the note is made as long as the sample.
+	// Cody: "I want it to play just the length of the step and be gated."
+	SetupOnOffSetting(settings[RuntimeFeatureSettingType::KitHitsOneStep],
+	                  STRING_FOR_COMMUNITY_FEATURE_KIT_HITS_ONE_STEP, "kitHitsOneStep", RuntimeFeatureStateToggle::On);
+
 	// AlternativePlaybackStartBehaviour
 	SetupOnOffSetting(settings[RuntimeFeatureSettingType::AlternativePlaybackStartBehaviour],
 	                  STRING_FOR_COMMUNITY_FEATURE_ALTERNATIVE_PLAYBACK_START_BEHAVIOUR,

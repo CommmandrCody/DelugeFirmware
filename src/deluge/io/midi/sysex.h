@@ -72,6 +72,7 @@ enum SysexCommands : uint8_t {
 	GoldKnob = 0x46,       // Chroma: outbound gold-knob push — which knob, the level its LED column shows, and the
 	                       // parameter's name. The host's panel header draws the real knobs; without this it had
 	                       // nothing to draw them FROM and sat dark on every page but Design.
+	DeviceState = 0x4D,    // Chroma: outbound - current track, pad brightness and every Features setting.
 	MixerSet = 0x4E,       // Chroma: INBOUND, long form (01 02 4E ...) - set one track's level, mute or solo.
 	CommandOutcome = 0x4F, // Chroma: outbound - what became of a command, by its sequence number.
 	SoundState = 0x4B,     // Chroma: outbound sound push - the sound in focus as the instrument holds it: engine,

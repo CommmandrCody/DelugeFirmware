@@ -122,6 +122,10 @@ public:
 	 */
 	inline void set(RuntimeFeatureSettingType type, uint32_t value) { settings[type].value = value; }
 
+	/// Chroma (0x4D / 0x4E): one setting, read-only, for reporting it to a host and checking what a host asks
+	/// for against the options it really has. `t` must be below MaxElement.
+	[[nodiscard]] inline const RuntimeFeatureSetting& hostSetting(uint32_t t) const { return settings[t]; }
+
 	inline const char* getStartupSong() { return startupSong.get(); }
 	void init();
 	void factoryReset(bool showPopup = true);

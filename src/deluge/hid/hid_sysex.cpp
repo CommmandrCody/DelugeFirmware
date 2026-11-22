@@ -1,4 +1,5 @@
 #include "hid/hid_sysex.h"
+#include "extern.h" // Chroma (0x4D): sdRoutineLock
 #include "gui/l10n/l10n.h"
 #include "gui/menu_item/submenu.h"
 #include "gui/menu_item/value_scaling.h" // Chroma (0x4B): the 0-50 the menus show           // Chroma (0x4A): the open menu's entries and cursor
@@ -14,12 +15,14 @@
 #include "io/midi/midi_engine.h"
 #include "io/midi/sysex.h"
 #include "memory/general_memory_allocator.h"
-#include "model/clip/instrument_clip.h"            // Chroma (0x48): keyboardState.currentLayout
-#include "model/instrument/midi_instrument.h"      // Chroma (0x49): channelSuffix, MIDI only
-#include "model/instrument/non_audio_instrument.h" // Chroma (0x49): getChannel(), MIDI and CV
-#include "model/output.h"                          // Chroma (0x49): the track list - name, colour, usbRouting
-#include "model/scale/preset_scales.h"             // Chroma (0x48): getScaleName
+#include "model/clip/instrument_clip.h"              // Chroma (0x48): keyboardState.currentLayout
+#include "model/instrument/midi_instrument.h"        // Chroma (0x49): channelSuffix, MIDI only
+#include "model/instrument/non_audio_instrument.h"   // Chroma (0x49): getChannel(), MIDI and CV
+#include "model/output.h"                            // Chroma (0x49): the track list - name, colour, usbRouting
+#include "model/scale/preset_scales.h"               // Chroma (0x48): getScaleName
+#include "model/settings/runtime_feature_settings.h" // Chroma (0x4D): the Features settings
 #include "model/song/song.h"
+#include "model/usb_route.h"                 // Chroma (0x4E): the routing mask
 #include "modulation/params/param.h"         // Chroma (0x4B): which parameters make up a sound
 #include "modulation/params/param_manager.h" // Chroma (0x4B)
 #include "modulation/params/param_set.h" // Chroma (0x4B)                       // Chroma: resync — read the live key/scale to push on handshake
@@ -27,6 +30,7 @@
 #include "processing/engines/audio_engine.h"
 #include "processing/sound/sound_drum.h"       // Chroma (0x4B): a kit row's name
 #include "processing/sound/sound_instrument.h" // Chroma (0x4B): the track's own sound
+#include "storage/flash_storage.h"             // Chroma (0x4D): pad brightness
 #include "util/pack.h"
 #include <cstring>
 #include <string>
@@ -44,6 +48,8 @@ static MIDICable* lastHidCable = nullptr;
 static UIType lastSentView = UIType::NONE;
 // Chroma: whether we've pushed the "fx" context for the current gold-knob session (re-armed on any real view change).
 static bool fxContextSent = false;
+// Chroma (0x4E): defined beside the command that needs it; called from the display poll.
+static void saveFeaturesIfNeeded();
 
 // Forward-declared: the resync handler below re-pushes the current view directly, and the table that
 // maps a UIType to its slug is defined further down with the rest of the view code.
@@ -100,6 +106,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendMenuContextIfChanged(true);
 		// ...and the sound in focus, or that there is none.
 		sendSoundStateIfChanged(true);
+		// ...and the device's own state: current track, pad brightness and the Features settings.
+		sendDeviceStateIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -174,6 +182,8 @@ void HIDSysex::sendDisplayIfChanged() {
 	sendTrackStateIfChanged();    // Chroma (0x49): the track list - de-duped by a hash of the whole list
 	sendMenuContextIfChanged();   // Chroma (0x4A): the open menu - same piggyback, de-duped the same way
 	sendSoundStateIfChanged();    // Chroma (0x4B): the sound in focus - same piggyback, de-duped the same way
+	sendDeviceStateIfChanged();   // Chroma (0x4D): current track, pad brightness, Features - likewise
+	saveFeaturesIfNeeded();       // Chroma (0x4E): write a host's Features change to the card, from here only
 	// NB: timer is only used for throttling, under good conditions sending
 	// is driven by the display subsystem only
 	uiTimerManager.unsetTimer(TimerName::SYSEX_DISPLAY);
@@ -1243,65 +1253,207 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 	lastHidCable->sendSysex(msg, i);
 }
 
-// Chroma (0x4E in, 0x4F out): set one track's mixer level, mute or solo, and say what happened.
+// The 14-bit hash a host names a Features setting by: FNV-1a over the name it is stored under on the card.
+// Positions in the settings enum move between firmware builds; the stored name does not.
+static uint16_t settingNameHash(std::string_view name) {
+	uint32_t h = 2166136261u;
+	for (char ch : name) {
+		h = (h ^ (uint8_t)ch) * 16777619u;
+	}
+	return (uint16_t)((h ^ (h >> 14) ^ (h >> 28)) & 0x3fff);
+}
+
+// A Features change made by a host is applied at once and written to the card a moment later, when the card
+// is free - the same call the Deluge's own menu makes when it is left. NEVER from the command itself: that
+// arrives on the MIDI input path, and the card must not be touched from there. saveFeaturesIfNeeded() runs
+// from the display poll, which is the UI's.
+static bool featuresNeedSaving = false;
+static void saveFeaturesIfNeeded() {
+	if (featuresNeedSaving && !sdRoutineLock) {
+		featuresNeedSaving = false;
+		runtimeFeatureSettings.writeSettingsToFile();
+	}
+}
+
+// Chroma (0x4D): the device's own state - which track the player is on, how bright the pads are, and every
+// Features setting. Three things a host otherwise learns only by walking a menu or reading the card.
 //
-//   in   F0 00 21 7B 01 02 4E <seq> <track> <nameHash> <what> <value> F7
+//   F0 00 21 7B 01 02 4D <track> <brightness> <count> then count x (<hashHi> <hashLo> <value>) F7
+//
+// <track> is the position of the current clip's track in the 0x49 list, 7F for none. <brightness> is 1-25.
+// Each setting is named by settingNameHash() of its stored name; <value> is its value, capped at 127.
+void HIDSysex::sendDeviceStateIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	uint8_t msg[7 + 3 + RuntimeFeatureSettingType::MaxElement * 3 + 1];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02;
+	msg[i++] = SysEx::SysexCommands::DeviceState;
+	uint32_t hash = 2166136261u;
+	auto put = [&](uint8_t b) {
+		msg[i++] = b & 0x7f;
+		hash = (hash ^ b) * 16777619u;
+	};
+
+	uint8_t track = 0x7f;
+	if (currentSong != nullptr && currentSong->getCurrentClip() != nullptr) {
+		Output* current = currentSong->getCurrentClip()->output;
+		uint8_t n = 0;
+		for (Output* output = currentSong->firstOutput; output != nullptr && n < 0x7f; output = output->next, n++) {
+			if (output == current) {
+				track = n;
+				break;
+			}
+		}
+	}
+	put(track);
+	put(FlashStorage::defaultPadBrightness);
+	put((uint8_t)RuntimeFeatureSettingType::MaxElement);
+	for (uint32_t t = 0; t < RuntimeFeatureSettingType::MaxElement; t++) {
+		const auto& setting = runtimeFeatureSettings.hostSetting(t);
+		const uint16_t name = settingNameHash(setting.xmlName);
+		put((uint8_t)(name >> 7));
+		put((uint8_t)(name & 0x7f));
+		put((uint8_t)((setting.value > 127) ? 127 : setting.value));
+	}
+
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
+	if (!force && everSent && hash == lastHash) {
+		return;
+	}
+	lastHash = hash;
+	everSent = true;
+	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
+}
+
+// Chroma (0x4E in, 0x4F out): a host changes one thing on the instrument, and is told what happened.
+//
+//   in   F0 00 21 7B 01 02 4E <seq> <a> <b> <what> <value> [<value2>] F7
 //   out  F0 00 21 7B 01 02 4F <seq> <result> F7
 //
-// <what>    0 level (value 0-127, 127 = unity)   1 mute (0/1)   2 solo (0/1)
-// <result>  0 applied   1 no such track   2 that track is not the one the host meant   3 bad request
+// <what>  0 track level (value 0-127, 127 = unity)      a = track, b = hash of the track's name
+//         1 track mute (0/1)                            a = track, b = hash of the track's name
+//         2 track solo (0/1)                            a = track, b = hash of the track's name
+//         3 track USB routing (value, value2 = mask)    a = track, b = hash of the track's name
+//         4 a Features setting (value)                  a, b = the setting's 14-bit name hash
+//         5 pad brightness (value 1-25)                 a, b unused
+// <result>  0 applied   1 no such track or setting   2 that track is not the one the host meant   3 bad request
 //
-// THE NAME GUARD. <track> is a position in the song's list, and positions move when tracks are added, deleted
-// or reordered. So the host also sends a 7-bit hash of the NAME of the track it means; if the track now at that
-// position has a different name, the command is refused rather than applied to the wrong track. It is a guard,
-// not an identity: two tracks with the same name are indistinguishable to it.
+// THE NAME GUARD. A track is addressed by its position, and positions move when tracks are added, deleted or
+// reordered. So the host also sends a 7-bit hash of the NAME of the track it means; if the track now at that
+// position has a different name, the command is refused rather than applied to the wrong track. It is a
+// guard, not an identity: two tracks with the same name are indistinguishable to it.
 //
-// THE OUTCOME IS NOT THE STATE. It says only what became of the command. The new level, mute or solo is
-// reported the way it always is, in the track list (0x49), which is pushed straight after a change.
+// THE OUTCOME IS NOT THE STATE. It says only what became of the command. The new value is reported the way
+// it always is - the track list (0x49) or the device state (0x4D) - straight after a change.
+//
+// TWO SETTINGS ARE NOT OFFERED: the develop-sysex key and the emulated display. One opens the instrument to
+// firmware loading and the other can take its physical display away; neither is a host's to flip.
 void HIDSysex::receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len) {
-	// data[0] = 0x02 (HID), data[1] = 0x4E, then seq, track, nameHash, what, value
+	// data[0] = 0x02 (HID), data[1] = 0x4E, then seq, a, b, what, value, [value2]
 	const uint8_t seq = (len >= 3) ? (data[2] & 0x7f) : 0;
 	uint8_t result = 3;
-	if (len >= 7 && currentSong != nullptr) {
-		const uint8_t track = data[3] & 0x7f;
-		const uint8_t wantHash = data[4] & 0x7f;
+	bool tracksChanged = false;
+	bool deviceChanged = false;
+	if (len >= 7) {
+		const uint8_t a = data[3] & 0x7f;
+		const uint8_t b = data[4] & 0x7f;
 		const uint8_t what = data[5] & 0x7f;
 		const uint8_t value = data[6] & 0x7f;
-		Output* output = currentSong->firstOutput;
-		for (uint8_t n = 0; output != nullptr && n < track; n++) {
-			output = output->next;
+
+		if (what <= 3) {
+			Output* output = (currentSong != nullptr) ? currentSong->firstOutput : nullptr;
+			for (uint8_t n = 0; output != nullptr && n < a; n++) {
+				output = output->next;
+			}
+			if (output == nullptr) {
+				result = 1;
+			}
+			else {
+				uint32_t h = 2166136261u; // the same FNV-1a the host computes, over the name as 0x49 sends it
+				const char* name = output->name.get();
+				for (int32_t k = 0; name != nullptr && name[k] != 0 && k < 12; k++) {
+					const uint8_t c = (uint8_t)name[k] & 0x7f;
+					h = (h ^ ((c >= 32) ? c : '?')) * 16777619u;
+				}
+				if ((uint8_t)((h ^ (h >> 7) ^ (h >> 14) ^ (h >> 21)) & 0x7f) != b) {
+					result = 2;
+				}
+				else if (what == 0) {
+					output->mixerLevel = value; // 0-127 by construction; 127 is unity
+					result = 0;
+				}
+				else if (what == 1 && value <= 1) {
+					output->mixerMute = (value == 1);
+					result = 0;
+				}
+				else if (what == 2 && value <= 1) {
+					output->mixerSolo = (value == 1);
+					result = 0;
+				}
+				else if (what == 3 && len >= 8) {
+					// Two 7-bit halves, masked: a bit this firmware does not define routes nowhere.
+					output->usbRouting = (uint16_t)((((uint16_t)value << 7) | (data[7] & 0x7f)) & UsbRoute::ALL);
+					result = 0;
+				}
+				tracksChanged = (result == 0);
+			}
 		}
-		if (output == nullptr) {
+		else if (what == 4) {
+			const uint16_t want = (uint16_t)(((uint16_t)a << 7) | b);
 			result = 1;
+			for (uint32_t t = 0; t < RuntimeFeatureSettingType::MaxElement; t++) {
+				if (settingNameHash(runtimeFeatureSettings.hostSetting(t).xmlName) != want) {
+					continue;
+				}
+				if (t == RuntimeFeatureSettingType::DevSysexAllowed
+				    || t == RuntimeFeatureSettingType::EmulatedDisplay) {
+					result = 3; // not a host's to change
+					break;
+				}
+				// Only a value the setting actually offers.
+				bool offered = false;
+				for (const auto& option : runtimeFeatureSettings.hostSetting(t).options) {
+					if (option.value == value) {
+						offered = true;
+						break;
+					}
+				}
+				if (!offered) {
+					result = 3;
+					break;
+				}
+				runtimeFeatureSettings.set((RuntimeFeatureSettingType)t, value);
+				featuresNeedSaving = true; // written to the card from sendDeviceStateIfChanged, when it is free
+				result = 0;
+				deviceChanged = true;
+				break;
+			}
 		}
-		else {
-			uint32_t h = 2166136261u; // the same FNV-1a the host computes, over the name as 0x49 sends it
-			const char* name = output->name.get();
-			for (int32_t k = 0; name != nullptr && name[k] != 0 && k < 12; k++) {
-				const uint8_t c = (uint8_t)name[k] & 0x7f;
-				h = (h ^ ((c >= 32) ? c : '?')) * 16777619u;
-			}
-			if ((uint8_t)((h ^ (h >> 7) ^ (h >> 14) ^ (h >> 21)) & 0x7f) != wantHash) {
-				result = 2;
-			}
-			else if (what == 0) {
-				output->mixerLevel = value; // 0-127 by construction; 127 is unity
+		else if (what == 5) {
+			if (value >= kMinLedBrightness && value <= kMaxLedBrightness) {
+				FlashStorage::defaultPadBrightness = value;
+				PadLEDs::setBrightnessLevel(value);
 				result = 0;
-			}
-			else if (what == 1 && value <= 1) {
-				output->mixerMute = (value == 1);
-				result = 0;
-			}
-			else if (what == 2 && value <= 1) {
-				output->mixerSolo = (value == 1);
-				result = 0;
+				deviceChanged = true;
 			}
 		}
 	}
 	uint8_t reply[10] = {0xf0, 0x00, 0x21, 0x7b, 0x01, 0x02, SysEx::SysexCommands::CommandOutcome, seq, result, 0xf7};
 	cable.sendSysex(reply, sizeof(reply));
-	if (result == 0) {
+	if (tracksChanged) {
 		sendTrackStateIfChanged(); // the state itself, from the one place it is always reported
+	}
+	if (deviceChanged) {
+		sendDeviceStateIfChanged();
 	}
 }
 

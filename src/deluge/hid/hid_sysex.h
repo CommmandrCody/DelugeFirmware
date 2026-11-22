@@ -69,6 +69,7 @@ void sendTrackStateIfChanged(bool force = false);
 void sendMenuContextIfChanged(bool force = false);
 void sendSoundStateIfChanged(bool force = false);
 void receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len);
+void sendDeviceStateIfChanged(bool force = false);
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

@@ -11,6 +11,7 @@
 #include "hid/display/oled.h"
 #include "hid/display/seven_segment.h"
 #include "hid/led/pad_leds.h"
+#include "hid/matrix/matrix_driver.h"
 #include "io/midi/midi_device.h"
 #include "io/midi/midi_engine.h"
 #include "io/midi/sysex.h"
@@ -1487,7 +1488,7 @@ bool HIDSysex::takeChordMod(uint8_t* modType, uint8_t* value) {
 void HIDSysex::sendPadGrid(MIDICable& cable) {
 	const int32_t W = kDisplayWidth + kSideBarWidth; // 18
 	const int32_t H = kDisplayHeight;                // 8
-	uint8_t raw[8 * 18 * 3];
+	uint8_t raw[8 * 18 * 3 + 18];
 	int32_t p = 0;
 	for (int32_t y = 0; y < H; y++) {
 		for (int32_t x = 0; x < W; x++) {
@@ -1504,6 +1505,19 @@ void HIDSysex::sendPadGrid(MIDICable& cable) {
 			raw[p++] = c.g;
 			raw[p++] = c.b;
 		}
+	}
+	// WHICH PADS A FINGER IS ON (1.3.98): one byte per column after the colours, bit y set while that
+	// pad is physically held. The colour above already shifts under a finger, but on a screen that shift
+	// reads as one more lit pad among the others a keyboard layout lights for the same note. Cody:
+	// "make more bold the ACTUAL note(s) being pressed". A reader that wants 432 bytes still gets them.
+	for (int32_t x = 0; x < W; x++) {
+		uint8_t held = 0;
+		for (int32_t y = 0; y < H; y++) {
+			if (matrixDriver.padStates[x][y]) {
+				held |= (1 << y);
+			}
+		}
+		raw[p++] = held;
 	}
 	uint8_t reply_hdr[7] = {0xF0, 0x00, 0x21, 0x7B, 0x01, 0x02, 0x50};
 	uint8_t* reply = midiEngine.sysex_fmt_buffer;

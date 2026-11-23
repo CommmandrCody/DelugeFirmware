@@ -80,10 +80,13 @@ enum RuntimeFeatureSettingType : uint32_t {
 	ChordBrush,
 	KeyboardNotePreview,
 	RetrospectiveCapture,
-	// LAST, and it stays last until something newer is added after it. 1.3.91 put this one in the middle
-	// of the list, which is exactly what the note above says never to do, and shipped it with no menu
-	// item behind it - so the Features menu held a null entry and locked up on entry.
-	SongsNewestFirst,
+	// SongsNewestFirst lived here from 1.3.91 to 1.3.100 and is GONE (1.3.101): a SHIFT tap in the song
+	// browser switches the order on the spot, so a switch three menus deep had nothing left to do. Settings
+	// are stored by NAME, so removing one moves no other setting's value; a card that still lists
+	// "songsNewestFirst" has it carried along as an unknown name and written back untouched.
+	//
+	// What 1.3.91 taught stays true: every entry here needs its menu item in
+	// gui/menu_item/runtime_feature/settings.cpp, and the count there is checked at build time.
 	KitHitsOneStep, // appended last, as the note above requires
 	MaxElement      // Keep as boundary
 };

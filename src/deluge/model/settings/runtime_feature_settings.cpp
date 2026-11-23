@@ -192,12 +192,6 @@ void RuntimeFeatureSettings::init() {
 	                  STRING_FOR_COMMUNITY_FEATURE_REPAIR_SONG_DATES, "repairSongDates",
 	                  RuntimeFeatureStateToggle::Off);
 
-	// SongsNewestFirst - Load Song opens on the most recently saved songs, newest first; turning past the last
-	// of them continues into the ordinary name-ordered list. Off leaves the browser exactly as it was.
-	SetupOnOffSetting(settings[RuntimeFeatureSettingType::SongsNewestFirst],
-	                  STRING_FOR_COMMUNITY_FEATURE_SONGS_NEWEST_FIRST, "songsNewestFirst",
-	                  RuntimeFeatureStateToggle::Off);
-
 	// KitHitsOneStep - tapping a step on a kit row whose sample is in CUT mode places a note ONE STEP long,
 	// so the sample is gated to the step. Off is stock behaviour: the note is made as long as the sample.
 	// Cody: "I want it to play just the length of the step and be gated."

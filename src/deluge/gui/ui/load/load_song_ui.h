@@ -29,7 +29,7 @@ public:
 	void graphicsRoutine() override {}
 	void scrollFinished() override;
 	ActionResult padAction(int32_t x, int32_t y, int32_t velocity) override;
-	bool shouldOpenOnNewest() override; // Recents: the Features switch sets it on opening; a SHIFT tap flips it
+	bool shouldOpenOnNewest() override; // Recents: off on opening; a SHIFT tap flips it
 	void toggleSortOrder();
 	bool newestThisSession = false; // the order this visit to the browser is showing
 	bool shiftTapPending = false;   // SHIFT went down and nothing else has happened since

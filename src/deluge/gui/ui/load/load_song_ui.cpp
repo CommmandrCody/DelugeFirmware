@@ -69,8 +69,10 @@ LoadSongUI::LoadSongUI() {
 }
 
 bool LoadSongUI::opened() {
-	// The order this visit starts in is the Features switch's. A SHIFT tap flips it until the browser closes.
-	newestThisSession = runtimeFeatureSettings.isOn(RuntimeFeatureSettingType::SongsNewestFirst);
+	// Every visit starts in name order, as the browser always has. A SHIFT tap shows the newest songs first
+	// until the browser closes. (1.3.91-1.3.100 had a Features switch for the starting order; the tap made
+	// it redundant and it is gone.)
+	newestThisSession = false;
 	shiftTapPending = false;
 
 	qwertyAlwaysVisible = false;
@@ -1011,7 +1013,7 @@ bool LoadSongUI::shouldOpenOnNewest() {
 //
 // Cody, 2026-11-23: "the sort order in load needs to be more quickly togglable when loading so we can do
 // a traditional load or press a shift during load and it sorts differently to show the recents". The
-// Features switch still decides which order the browser OPENS in; this flips it for the visit.
+// browser always OPENS in name order; this flips it for the visit.
 //
 // Going to name order keeps the song under the cursor, so the list opens around it. Going to newest
 // first lands on the newest song, which is the point of asking.

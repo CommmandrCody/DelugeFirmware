@@ -8,6 +8,7 @@
 #include "gui/ui/sound_editor.h"             // Chroma (0x4A): which menu item is current
 #include "gui/ui/ui.h"
 #include "gui/ui_timer_manager.h"
+#include "gui/views/view.h"
 #include "hid/display/oled.h"
 #include "hid/display/seven_segment.h"
 #include "hid/led/pad_leds.h"
@@ -136,6 +137,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		// The panel rides the pad poll: a button light can change with no display redraw, and the pads
 		// are the one thing a host asks for continuously. De-duped, so an unchanged panel costs nothing.
 		sendPanelStateIfChanged();
+		// ...and so does the device state: selecting a track in the song grid redraws no display either.
+		sendDeviceStateIfChanged();
 		break;
 
 	default:
@@ -1307,14 +1310,45 @@ void HIDSysex::sendDeviceStateIfChanged(bool force) {
 		hash = (hash ^ b) * 16777619u;
 	};
 
+	// THE TRACK THE PLAYER HAS SELECTED (1.3.98): what the gold knobs are aimed at right now. That is a
+	// clip's track while a clip is selected - held in the song grid, or open in its own view - and the
+	// whole song when nothing is. Cody, 2026-11-23: "I want it to follow the selected track in delly ...
+	// if we're in the song mode then master". The song is sent as 7E; 7F stays "none".
+	//
+	// 1.3.97 sent the song's CURRENT clip, which is the clip last opened and does not move back to
+	// "nothing" when the player returns to the song grid - so the mark sat on a track nobody was on.
+	//
+	// The knob focus is a pointer the view holds, and it is only ever COMPARED here, never followed:
+	// a clip is looked up among the song's own clips, so a stale pointer matches nothing.
 	uint8_t track = 0x7f;
-	if (currentSong != nullptr && currentSong->getCurrentClip() != nullptr) {
-		Output* current = currentSong->getCurrentClip()->output;
-		uint8_t n = 0;
-		for (Output* output = currentSong->firstOutput; output != nullptr && n < 0x7f; output = output->next, n++) {
-			if (output == current) {
-				track = n;
-				break;
+	if (currentSong != nullptr) {
+		TimelineCounter* focus =
+		    view.activeModControllableModelStack.toWithTimelineCounter()->getTimelineCounterAllowNull();
+		Output* selected = nullptr;
+		if (focus == currentSong) {
+			track = 0x7e;
+		}
+		else if (focus != nullptr) {
+			for (int32_t c = 0; c < currentSong->sessionClips.getNumElements() && selected == nullptr; c++) {
+				Clip* clip = currentSong->sessionClips.getClipAtIndex(c);
+				if (clip == focus) {
+					selected = clip->output;
+				}
+			}
+			for (int32_t c = 0; c < currentSong->arrangementOnlyClips.getNumElements() && selected == nullptr; c++) {
+				Clip* clip = currentSong->arrangementOnlyClips.getClipAtIndex(c);
+				if (clip == focus) {
+					selected = clip->output;
+				}
+			}
+		}
+		if (selected != nullptr) {
+			uint8_t n = 0;
+			for (Output* output = currentSong->firstOutput; output != nullptr && n < 0x7e; output = output->next, n++) {
+				if (output == selected) {
+					track = n;
+					break;
+				}
 			}
 		}
 	}

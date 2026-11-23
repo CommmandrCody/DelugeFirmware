@@ -32,6 +32,7 @@ public:
 	bool shouldOpenOnNewest() override; // Recents: off on opening; a SHIFT tap flips it
 	void toggleSortOrder();
 	bool newestThisSession = false; // the order this visit to the browser is showing
+	uint8_t sortOrder = 0;          // 0 name order, 1 newest first, 2 newest first with one row per song
 	bool shiftTapPending = false;   // SHIFT went down and nothing else has happened since
 	bool opened() override;
 	void selectEncoderAction(int8_t offset) override;

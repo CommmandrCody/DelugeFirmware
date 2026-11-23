@@ -87,6 +87,8 @@ public:
 	/// True while fileItems holds the newest-first list rather than a name-ordered window. Nothing that
 	/// searches by name may run while this is set; every ordinary read clears it.
 	bool recencyMode = false;
+	// When set, the newest-first list holds ONE ROW PER SONG - its newest version - instead of every file.
+	bool collapseVersions = false;
 	FileItem* getNewFileItem();
 	static void emptyFileItems();
 	static void deleteSomeFileItems(int32_t startAt, int32_t stopAt);

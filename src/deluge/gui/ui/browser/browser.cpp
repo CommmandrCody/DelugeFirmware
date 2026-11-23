@@ -38,6 +38,7 @@
 #include "storage/storage_manager.h"
 #include "util/functions.h"
 #include "util/try.h"
+#include "util/version_name.h"
 #include <climits>
 #include <cstddef> // offsetof, for the recents sort key
 #include <cstring>
@@ -421,6 +422,26 @@ Error Browser::readNewestFileItems() {
 		uint32_t date = ((uint32_t)staticFNO.fdate << 16) | (uint32_t)staticFNO.ftime;
 		if ((((uint32_t)staticFNO.fdate >> 9) & 0x7Fu) >= 120u) {
 			date = 0; // a year of 2100 or later is the old clock bug, not a recent save: sort it last
+		}
+		// ONE ROW PER SONG: if a version of this song is already kept, the newer of the two stays and the
+		// other goes. "Version" is decided by util/version_name.h, which is where the rule is written down.
+		if (collapseVersions) {
+			int32_t rival = -1;
+			for (int32_t k = 0; k < count; k++) {
+				if (deluge::version_name::sameSong(newest[k].name, staticFNO.fname)) {
+					rival = k;
+					break;
+				}
+			}
+			if (rival >= 0) {
+				if (newest[rival].date >= date) {
+					continue; // the one already kept is as new or newer
+				}
+				for (int32_t k = rival; k < count - 1; k++) {
+					newest[k] = newest[k + 1];
+				}
+				count--;
+			}
 		}
 		// Where does it go, newest first? Ties keep directory order.
 		int32_t at = count;

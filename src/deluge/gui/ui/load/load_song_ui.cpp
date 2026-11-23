@@ -73,6 +73,8 @@ bool LoadSongUI::opened() {
 	// until the browser closes. (1.3.91-1.3.100 had a Features switch for the starting order; the tap made
 	// it redundant and it is gone.)
 	newestThisSession = false;
+	sortOrder = 0;
+	collapseVersions = false;
 	shiftTapPending = false;
 
 	qwertyAlwaysVisible = false;
@@ -1009,14 +1011,17 @@ bool LoadSongUI::shouldOpenOnNewest() {
 	return newestThisSession;
 }
 
-// TAP SHIFT TO SWITCH THE ORDER: name order <-> newest first, without leaving the browser.
+// TAP SHIFT TO STEP THROUGH THE ORDERS, without leaving the browser:
 //
-// Cody, 2026-11-23: "the sort order in load needs to be more quickly togglable when loading so we can do
-// a traditional load or press a shift during load and it sorts differently to show the recents". The
-// browser always OPENS in name order; this flips it for the visit.
+//   A-Z    every song by name, opened on the song you are in - the browser as it always was
+//   RCNT   the newest saves first, every file
+//   LAST   the newest saves first, ONE ROW PER SONG: the last version of each
 //
-// Going to name order keeps the song under the cursor, so the list opens around it. Going to newest
-// first lands on the newest song, which is the point of asking.
+// Cody, 2026-11-23: "press a shift during load and it sorts differently to show the recents ... maybe
+// also collapse versions to the latest ... or somehow both". Asked which order, he chose this one.
+//
+// Going back to name order keeps the song under the cursor, so the list opens around it. The two newest
+// orders land on the newest song, which is the point of asking.
 void LoadSongUI::toggleSortOrder() {
 	if (currentUIMode != UI_MODE_NONE) {
 		return;
@@ -1028,16 +1033,29 @@ void LoadSongUI::toggleSortOrder() {
 			return;
 		}
 	}
-	newestThisSession = !newestThisSession;
+	if (!recencyMode) {
+		sortOrder = 0; // turning past the end of a newest-first list hands over to names; start counting from there
+	}
+	const uint8_t before = sortOrder;
+	sortOrder = (uint8_t)((sortOrder + 1) % 3);
+	newestThisSession = (sortOrder != 0);
+	collapseVersions = (sortOrder == 2);
 	Error error = arrivedInNewFolder(0, keep.get(), "SONGS");
 	if (error != Error::NONE) {
 		// Could not read it that way: put the order back and read again, so the browser is never left empty.
-		newestThisSession = !newestThisSession;
+		sortOrder = before;
+		newestThisSession = (sortOrder != 0);
+		collapseVersions = (sortOrder == 2);
 		arrivedInNewFolder(0, keep.get(), "SONGS");
 		display->displayError(error);
 		return;
 	}
-	// Say which order it actually is, not which was asked for: with no dated songs, recents falls back.
-	display->displayPopup(recencyMode ? "RCNT" : "A-Z");
+	if (!recencyMode) {
+		// No dated songs to show newest-first, so the browser fell back to names. Say so, and be there.
+		sortOrder = 0;
+		newestThisSession = false;
+		collapseVersions = false;
+	}
+	display->displayPopup(sortOrder == 2 ? "LAST" : sortOrder == 1 ? "RCNT" : "A-Z");
 	currentFileChanged(1);
 }

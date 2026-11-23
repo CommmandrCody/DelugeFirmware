@@ -101,6 +101,15 @@ public:
 
 	virtual NotesState& getNotesState() { return currentNotesState; }
 
+	/// True once after the layout changed WHICH notes a held chord is made of, when it wants the whole
+	/// chord struck again rather than only the notes that moved. Asking clears the request.
+	///
+	/// Without it the keyboard screen sounds only the difference: turn a voicing up and the new TOP note
+	/// is the one freshly struck, turn it back down and the new BOTTOM note is - so the same voicing
+	/// sounded different depending on which way it was reached. Cody: "as I step back the voice isn't the
+	/// same as it was stepping up, it's like an octave off".
+	virtual bool takeRestrikeRequest() { return false; }
+
 	virtual void checkNewInstrument(Instrument* newInstrument) {}
 
 protected:

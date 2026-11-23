@@ -70,6 +70,12 @@ private:
 	int32_t isoNoteChromatic(int32_t localX, int32_t y); // chromatic isomorphic mapping (localX 0..6)
 	// Expand the base chord (chordNotes) into the played/shown VOICING per the SPREAD + STACK controls.
 	uint8_t buildVoicing(int16_t* out, uint8_t maxOut);
+	bool takeRestrikeRequest() override {
+		const bool wanted = restrikeWanted;
+		restrikeWanted = false;
+		return wanted;
+	}
+	bool restrikeWanted = false;             // set by a voicing dial step while a chord is held
 	static constexpr uint8_t kMaxVoice = 16; // capacity for a stacked voicing
 	// Chroma: re-broadcast the currently-selected chord's state to the host (CT dashboard) after ANY
 	// voicing change, so the dash tracks every change live instead of only on a fresh palette pick.

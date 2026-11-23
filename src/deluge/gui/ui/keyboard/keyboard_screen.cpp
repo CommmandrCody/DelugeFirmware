@@ -818,8 +818,16 @@ ActionResult KeyboardScreen::verticalEncoderAction(int32_t offset, bool inCardRo
 		layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->precalculate();
 	}
 	else {
-		layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->handleVerticalEncoder(offset);
+		KeyboardLayout* turned = layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout];
+		turned->handleVerticalEncoder(offset);
 		if (isUIModeWithinRange(padActionUIModes)) {
+			if (turned->takeRestrikeRequest()) {
+				// Strike the WHOLE chord again: everything off first, then the new voicing on. Sounding only
+				// the notes that moved made one voicing sound two ways, depending on the direction of travel.
+				lastNotesState = currentNotesState;
+				currentNotesState = NotesState{};
+				updateActiveNotes();
+			}
 			evaluateActiveNotes();
 			updateActiveNotes();
 		}

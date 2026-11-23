@@ -69,6 +69,9 @@ LoadSongUI::LoadSongUI() {
 }
 
 bool LoadSongUI::opened() {
+	// The order this visit starts in is the Features switch's. A SHIFT tap flips it until the browser closes.
+	newestThisSession = runtimeFeatureSettings.isOn(RuntimeFeatureSettingType::SongsNewestFirst);
+	shiftTapPending = false;
 
 	qwertyAlwaysVisible = false;
 	qwertyCurrentlyDrawnOnscreen = false;
@@ -206,6 +209,23 @@ void LoadSongUI::displayLoopsRemainingPopup() {
 
 ActionResult LoadSongUI::buttonAction(deluge::hid::Button b, bool on, bool inCardRoutine) {
 	using namespace deluge::hid::button;
+
+	// A SHIFT TAP - down and up with nothing between - switches the order. SHIFT held with anything else
+	// is still SHIFT, so every existing combination is untouched, and SHIFT itself is passed on as before.
+	if (b == SHIFT) {
+		if (on) {
+			shiftTapPending = (currentUIMode == UI_MODE_NONE);
+		}
+		else if (shiftTapPending) {
+			if (inCardRoutine) {
+				return ActionResult::REMIND_ME_OUTSIDE_CARD_ROUTINE;
+			}
+			shiftTapPending = false;
+			toggleSortOrder();
+		}
+		return LoadUI::buttonAction(b, on, inCardRoutine);
+	}
+	shiftTapPending = false;
 
 	// Load button or select encoder press. Unlike most (all?) other children of Browser, we override this and don't
 	// just call mainButtonAction(), because unlike all the others, we need to action the load immediately on down-press
@@ -765,6 +785,7 @@ void LoadSongUI::currentFileChanged(int32_t movementDirection) {
 }
 
 void LoadSongUI::selectEncoderAction(int8_t offset) {
+	shiftTapPending = false; // SHIFT + turn is not a tap
 
 	if (currentUIMode == UI_MODE_LOADING_SONG_UNESSENTIAL_SAMPLES_ARMED) {
 		session.numRepeatsTilLaunch += offset;
@@ -828,6 +849,7 @@ goAgain:
 }
 
 ActionResult LoadSongUI::verticalEncoderAction(int32_t offset, bool inCardRoutine) {
+	shiftTapPending = false; // SHIFT + turn is not a tap
 	if (!currentUIMode && !Buttons::isButtonPressed(deluge::hid::button::Y_ENC) && !Buttons::isShiftButtonPressed()
 	    && offset < 0) {
 		if (inCardRoutine) {
@@ -956,6 +978,7 @@ void LoadSongUI::displayText(bool blinkImmediately) {
 }
 
 ActionResult LoadSongUI::padAction(int32_t x, int32_t y, int32_t on) {
+	shiftTapPending = false; // SHIFT + a pad is not a tap
 	// If QWERTY not visible yet, make it visible now
 	if (!qwertyVisible) {
 		if (on && !currentUIMode) {
@@ -981,5 +1004,38 @@ ActionResult LoadSongUI::padAction(int32_t x, int32_t y, int32_t on) {
 
 // Recents: open the song browser on the newest saves when the player has asked for that.
 bool LoadSongUI::shouldOpenOnNewest() {
-	return runtimeFeatureSettings.isOn(RuntimeFeatureSettingType::SongsNewestFirst);
+	return newestThisSession;
+}
+
+// TAP SHIFT TO SWITCH THE ORDER: name order <-> newest first, without leaving the browser.
+//
+// Cody, 2026-11-23: "the sort order in load needs to be more quickly togglable when loading so we can do
+// a traditional load or press a shift during load and it sorts differently to show the recents". The
+// Features switch still decides which order the browser OPENS in; this flips it for the visit.
+//
+// Going to name order keeps the song under the cursor, so the list opens around it. Going to newest
+// first lands on the newest song, which is the point of asking.
+void LoadSongUI::toggleSortOrder() {
+	if (currentUIMode != UI_MODE_NONE) {
+		return;
+	}
+	String keep;
+	keep.set(&enteredText);
+	if (!keep.isEmpty() && !keep.contains(".XML")) {
+		if (keep.concatenate(".XML") != Error::NONE) {
+			return;
+		}
+	}
+	newestThisSession = !newestThisSession;
+	Error error = arrivedInNewFolder(0, keep.get(), "SONGS");
+	if (error != Error::NONE) {
+		// Could not read it that way: put the order back and read again, so the browser is never left empty.
+		newestThisSession = !newestThisSession;
+		arrivedInNewFolder(0, keep.get(), "SONGS");
+		display->displayError(error);
+		return;
+	}
+	// Say which order it actually is, not which was asked for: with no dated songs, recents falls back.
+	display->displayPopup(recencyMode ? "RCNT" : "A-Z");
+	currentFileChanged(1);
 }

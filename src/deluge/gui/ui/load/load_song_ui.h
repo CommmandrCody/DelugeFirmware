@@ -29,7 +29,10 @@ public:
 	void graphicsRoutine() override {}
 	void scrollFinished() override;
 	ActionResult padAction(int32_t x, int32_t y, int32_t velocity) override;
-	bool shouldOpenOnNewest() override; // Recents: the Features switch decides
+	bool shouldOpenOnNewest() override; // Recents: the Features switch sets it on opening; a SHIFT tap flips it
+	void toggleSortOrder();
+	bool newestThisSession = false; // the order this visit to the browser is showing
+	bool shiftTapPending = false;   // SHIFT went down and nothing else has happened since
 	bool opened() override;
 	void selectEncoderAction(int8_t offset) override;
 	void queueLoadNextSongIfAvailable(int8_t offset);

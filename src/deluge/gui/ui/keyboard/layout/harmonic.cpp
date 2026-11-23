@@ -1528,6 +1528,7 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 			char buf[8];
 			sprintf(buf, "H%d", (int)s.voicingHome); // "H-24".."H24" fits the 4-char 7-seg
 			display->displayPopup(buf);
+			restrikeWanted = true; // the same voicing must sound the same whichever way it was reached
 			pushChordState();
 			return;
 		}
@@ -1542,7 +1543,8 @@ void KeyboardLayoutHarmonic::handleVerticalEncoder(int32_t offset) {
 		char buf[8];
 		sprintf(buf, "V%d", (int)s.voicingWalk); // "V-24".."V24" fits the 4-char 7-seg (VOI%d overflowed)
 		display->displayPopup(buf);
-		pushChordState(); // dashboard tracks the voicing walk live
+		restrikeWanted = true; // the same voicing must sound the same whichever way it was reached
+		pushChordState();      // dashboard tracks the voicing walk live
 		return;
 	}
 	if (verticalEncoderHandledByColumns(offset)) {

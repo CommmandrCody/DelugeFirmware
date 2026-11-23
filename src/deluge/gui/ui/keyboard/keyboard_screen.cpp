@@ -1208,6 +1208,35 @@ void KeyboardScreen::graphicsRoutine() {
 	}
 }
 
+// WHICH PADS PLAY A NOTE THAT IS BEING HELD: one byte per main-grid column, bit y per row.
+//
+// A keyboard layout repeats each note across the grid, and lights every copy while it is held. A host
+// drawing the grid needs to tell those copies from everything else that is lit - scale colours, the
+// root - and only the layout knows which pad is which note. Cody, 2026-11-23: "I want the white to
+// cascade across the grid like the played ones but lighter". A layout with no notes says nothing.
+void KeyboardScreen::soundingPads(uint8_t columns[kDisplayWidth]) {
+	for (int32_t x = 0; x < kDisplayWidth; x++) {
+		columns[x] = 0;
+	}
+	InstrumentClip* clip = getCurrentInstrumentClip();
+	if (clip == nullptr) {
+		return;
+	}
+	KeyboardLayout* layout = layout_list[clip->keyboardState.currentLayout];
+	if (layout == nullptr) {
+		return;
+	}
+	NotesState& held = layout->getNotesState();
+	for (int32_t x = 0; x < kDisplayWidth; x++) {
+		for (int32_t y = 0; y < kDisplayHeight; y++) {
+			const int32_t n = layout->noteAtPad(x, y);
+			if (n >= 0 && held.noteEnabled((uint8_t)n)) {
+				columns[x] |= (1 << y);
+			}
+		}
+	}
+}
+
 bool KeyboardScreen::noteRange(int32_t& lo, int32_t& hi) {
 	lo = -1;
 	hi = -1;

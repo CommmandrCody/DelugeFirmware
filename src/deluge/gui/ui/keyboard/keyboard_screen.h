@@ -45,6 +45,7 @@ public:
 	/// whole difference between isomorphic, in-key and piano. Any copy of that arithmetic elsewhere
 	/// would be a second version of the thing drifting away from the first.
 	bool noteRange(int32_t& lo, int32_t& hi);
+	void soundingPads(uint8_t columns[kDisplayWidth]);
 
 	ActionResult verticalEncoderAction(int32_t offset, bool inCardRoutine) override;
 	ActionResult horizontalEncoderAction(int32_t offset) override;

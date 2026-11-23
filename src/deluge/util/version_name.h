@@ -27,8 +27,9 @@ inline char lower(char c) {
 /// Two kinds of suffix count as a version, because both are in use on this instrument:
 ///
 ///   "TRACK 4", "TRACK_4", "TRACK-4"   a number after a separator - how a player numbers their saves
-///   "SONG751A"                         one capital letter straight after a digit - the Deluge's own
-///                                      "save as new version"
+///   "SONG751A", "song751a"             one letter straight after a digit - the Deluge's own slot and
+///                                      sub-slot naming (Browser::getSlot), which is what its
+///                                      "save as new version" writes
 ///
 /// A number that is simply the end of the name is NOT a version: "SONG751" and "SONG752" are two
 /// songs, and treating them as one would fold every default-named song on the card into a single row.
@@ -37,8 +38,10 @@ inline int32_t baseLength(char const* name) {
 	char const* dot = strrchr(name, '.');
 	int32_t full = dot != nullptr ? (int32_t)(dot - name) : (int32_t)strlen(name);
 	int32_t len = full;
-	if (len >= 2 && name[len - 1] >= 'A' && name[len - 1] <= 'Z' && isDigit(name[len - 2])) {
-		len--; // the Deluge's letter: "SONG751A" -> "SONG751", "MIX 2B" -> "MIX 2"
+	// The Deluge's own sub-slot letter: "SONG751A" -> "SONG751", "MIX 2B" -> "MIX 2". Either case, because
+	// Browser::getSlot() reads 'a'-'z' and 'A'-'Z' alike as the sub-slot, and this must agree with it.
+	if (len >= 2 && lower(name[len - 1]) >= 'a' && lower(name[len - 1]) <= 'z' && isDigit(name[len - 2])) {
+		len--;
 	}
 	int32_t k = len;
 	while (k > 0 && isDigit(name[k - 1])) {

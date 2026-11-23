@@ -75,6 +75,7 @@ enum SysexCommands : uint8_t {
 	DeviceState = 0x4D,    // Chroma: outbound - current track, pad brightness and every Features setting.
 	MixerSet = 0x4E,       // Chroma: INBOUND, long form (01 02 4E ...) - set one track's level, mute or solo.
 	CommandOutcome = 0x4F, // Chroma: outbound - what became of a command, by its sequence number.
+	PanelState = 0x51,     // Chroma: outbound - which button lights are on and which buttons are held.
 	SoundState = 0x4B,     // Chroma: outbound sound push - the sound in focus as the instrument holds it: engine,
 	                       // oscillator types, both filters, four envelopes and four LFOs. A host draws the
 	                       // sound from this instead of from its own copy of a patch.

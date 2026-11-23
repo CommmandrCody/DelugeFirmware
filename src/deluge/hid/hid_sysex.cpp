@@ -109,6 +109,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendSoundStateIfChanged(true);
 		// ...and the device's own state: current track, pad brightness and the Features settings.
 		sendDeviceStateIfChanged(true);
+		// ...and the front panel: which button lights are on.
+		sendPanelStateIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -131,6 +133,9 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 
 	case 3:
 		sendPadGrid(cable); // Chroma: mirror the live pad-LED grid
+		// The panel rides the pad poll: a button light can change with no display redraw, and the pads
+		// are the one thing a host asks for continuously. De-duped, so an unchanged panel costs nothing.
+		sendPanelStateIfChanged();
 		break;
 
 	default:
@@ -1322,6 +1327,74 @@ void HIDSysex::sendDeviceStateIfChanged(bool force) {
 		put((uint8_t)(name >> 7));
 		put((uint8_t)(name & 0x7f));
 		put((uint8_t)((setting.value > 127) ? 127 : setting.value));
+	}
+
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
+	if (!force && everSent && hash == lastHash) {
+		return;
+	}
+	lastHash = hash;
+	everSent = true;
+	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
+}
+
+// Chroma (0x51): THE FRONT PANEL - which button lights are on, and which buttons a finger is on.
+//
+//   F0 00 21 7B 01 02 51 <cols> <rows> cols x <lit> cols x <held> F7
+//
+// One byte per column of the button matrix, bit y set for row y; the lights first, then the buttons
+// held. A button and its light share a coordinate, so the two halves line up.
+//
+// Cody, 2026-11-23: "an exact replica of the device ... mirror exactly what delly shows down to the lit
+// buttons. this is helpful for teaching". The pads, the display and the gold knobs were already
+// reported; the lights were not, so a drawing of the panel could only have guessed at them.
+//
+// A blinking light is reported as it blinks - on, off, on - because that is what it is doing.
+namespace indicator_leds {
+extern bool ledStates[];
+}
+namespace Buttons {
+extern bool buttonStates[NUM_BUTTON_COLS + 1][NUM_BUTTON_ROWS];
+}
+void HIDSysex::sendPanelStateIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	uint8_t msg[7 + 2 + NUM_LED_COLS * 2 + 1];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02;
+	msg[i++] = SysEx::SysexCommands::PanelState;
+	uint32_t hash = 2166136261u;
+	auto put = [&](uint8_t b) {
+		msg[i++] = b & 0x7f;
+		hash = (hash ^ b) * 16777619u;
+	};
+	put(NUM_LED_COLS);
+	put(NUM_LED_ROWS);
+	for (int32_t x = 0; x < NUM_LED_COLS; x++) {
+		uint8_t lit = 0;
+		for (int32_t y = 0; y < NUM_LED_ROWS; y++) {
+			if (indicator_leds::ledStates[x + y * NUM_LED_COLS]) {
+				lit |= (1 << y);
+			}
+		}
+		put(lit);
+	}
+	for (int32_t x = 0; x < NUM_LED_COLS; x++) {
+		uint8_t held = 0;
+		for (int32_t y = 0; y < NUM_LED_ROWS; y++) {
+			if (x < NUM_BUTTON_COLS && y < NUM_BUTTON_ROWS && Buttons::buttonStates[x][y]) {
+				held |= (1 << y);
+			}
+		}
+		put(held);
 	}
 
 	static uint32_t lastHash = 0;

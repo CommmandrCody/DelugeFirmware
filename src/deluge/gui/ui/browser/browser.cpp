@@ -38,7 +38,6 @@
 #include "storage/storage_manager.h"
 #include "util/functions.h"
 #include "util/try.h"
-#include "util/version_name.h"
 #include <climits>
 #include <cstddef> // offsetof, for the recents sort key
 #include <cstring>
@@ -424,11 +423,13 @@ Error Browser::readNewestFileItems() {
 			date = 0; // a year of 2100 or later is the old clock bug, not a recent save: sort it last
 		}
 		// ONE ROW PER SONG: if a version of this song is already kept, the newer of the two stays and the
-		// other goes. "Version" is decided by util/version_name.h, which is where the rule is written down.
+		// other goes. What counts as a version is the firmware's OWN rule - the one that names a save
+		// "SONG185A" or "TRACK_2" in the first place (gui/ui/browser/default_name.h) - so this folds exactly
+		// the names that saving a new version produces, and nothing else.
 		if (collapseVersions) {
 			int32_t rival = -1;
 			for (int32_t k = 0; k < count; k++) {
-				if (deluge::version_name::sameSong(newest[k].name, staticFNO.fname)) {
+				if (deluge::gui::browser::sameFamily(newest[k].name, staticFNO.fname, filePrefix ? filePrefix : "")) {
 					rival = k;
 					break;
 				}

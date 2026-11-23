@@ -90,4 +90,23 @@ char const* numberPartOf(char const* name, char const* filePrefix);
 ///         numbers past 9999.
 std::string nextDefaultName(std::string_view currentName, std::string_view slotPrefix, FileListView const& files);
 
+/// @brief How much of a name is the song itself, with its variation suffix left off.
+///
+/// The inverse of nextDefaultName(): every name that function can produce from `X` has the same stem as `X`.
+///   SONG185, SONG185A, SONG185B        -> "SONG185"
+///   MYTRACK, "MYTRACK 2", "MYTRACK 3"  -> "MYTRACK"
+///   TRACK_1, TRACK_2                   -> "TRACK"
+/// A number that simply ends a name is not a suffix: "SONG185" and "SONG186" are two songs.
+///
+/// Used by the song browser's LAST order, which shows one row per song. It allocates nothing, because it is
+/// called for every pair of files while a folder is being read.
+///
+/// @param name       The name WITHOUT its extension.
+/// @param slotPrefix "SONG" for songs, empty for everything else - as for nextDefaultName().
+/// @return The length of the stem, at most name.size().
+size_t familyStemLength(std::string_view name, std::string_view slotPrefix);
+
+/// @brief Whether two file names are variations of the same song. Extensions are ignored, and so is case.
+bool sameFamily(char const* a, char const* b, std::string_view slotPrefix);
+
 } // namespace deluge::gui::browser

@@ -182,4 +182,70 @@ std::string nextDefaultName(std::string_view currentName, std::string_view slotP
 	return prefix + std::to_string(std::max<int32_t>(highest, 1) + 1);
 }
 
+size_t familyStemLength(std::string_view name, std::string_view slotPrefix) {
+	// Slot form, exactly as slotStem() reads it: the prefix, one to three digits, then nothing or one letter.
+	if (!slotPrefix.empty() && name.size() > slotPrefix.size()) {
+		bool prefixed = true;
+		for (size_t i = 0; i < slotPrefix.size(); i++) {
+			if (upper(name[i]) != upper(slotPrefix[i])) {
+				prefixed = false;
+				break;
+			}
+		}
+		if (prefixed) {
+			size_t digitsStart = slotPrefix.size();
+			size_t pos = digitsStart;
+			while (pos < name.size() && pos - digitsStart < kMaxSlotDigits
+			       && std::isdigit(static_cast<unsigned char>(name[pos]))) {
+				pos++;
+			}
+			if (pos > digitsStart) {
+				if (pos == name.size()) {
+					return pos; // "SONG185"
+				}
+				if (pos + 1 == name.size() && std::isalpha(static_cast<unsigned char>(name[pos]))) {
+					return pos; // "SONG185A"
+				}
+			}
+		}
+	}
+
+	// Numeric form, exactly as numericStem() reads it: the last '_' or ' ' with nothing but digits after it.
+	for (char candidate : {'_', ' '}) {
+		size_t at = name.rfind(candidate);
+		if (at == std::string_view::npos || at + 1 >= name.size()) {
+			continue;
+		}
+		bool allDigits = true;
+		for (size_t i = at + 1; i < name.size(); i++) {
+			if (!std::isdigit(static_cast<unsigned char>(name[i]))) {
+				allDigits = false;
+				break;
+			}
+		}
+		if (allDigits) {
+			return at;
+		}
+	}
+	return name.size();
+}
+
+bool sameFamily(char const* a, char const* b, std::string_view slotPrefix) {
+	auto bare = [](char const* name) {
+		char const* dot = strrchr(name, '.');
+		return std::string_view{name, dot != nullptr ? static_cast<size_t>(dot - name) : strlen(name)};
+	};
+	std::string_view nameA = bare(a), nameB = bare(b);
+	size_t stemA = familyStemLength(nameA, slotPrefix), stemB = familyStemLength(nameB, slotPrefix);
+	if (stemA != stemB) {
+		return false;
+	}
+	for (size_t i = 0; i < stemA; i++) {
+		if (upper(nameA[i]) != upper(nameB[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
 } // namespace deluge::gui::browser

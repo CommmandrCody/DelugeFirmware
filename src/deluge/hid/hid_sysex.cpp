@@ -112,6 +112,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendDeviceStateIfChanged(true);
 		// ...and the front panel: which button lights are on.
 		sendPanelStateIfChanged(true);
+		// ...and which note each pad plays, or that the pads play none.
+		sendPadNotesIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -139,6 +141,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendPanelStateIfChanged();
 		// ...and so does the device state: selecting a track in the song grid redraws no display either.
 		sendDeviceStateIfChanged();
+		// ...and the pads' notes: scrolling a keyboard layout moves every note and redraws no display.
+		sendPadNotesIfChanged();
 		break;
 
 	default:
@@ -1429,6 +1433,70 @@ void HIDSysex::sendPanelStateIfChanged(bool force) {
 			}
 		}
 		put(held);
+	}
+
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
+	if (!force && everSent && hash == lastHash) {
+		return;
+	}
+	lastHash = hash;
+	everSent = true;
+	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
+}
+
+// Chroma (0x52): WHICH NOTE EACH PAD PLAYS, and how the instrument spells it.
+//
+//   F0 00 21 7B 01 02 52 <cols> <rows> <flats> <root> then rows x cols note bytes, bottom row first F7
+//
+// <cols> <rows> are 16 and 8 in a keyboard layout that has notes, and 0 0 anywhere else - and then the
+// frame ends after <root>. <flats> is 1 when the instrument's own spelling choice (Auto / Flats / Sharps,
+// with Auto following the key) comes out as flats, so a host spells a note the way this instrument does
+// and never has an opinion of its own. <root> is the key's root as a pitch class. A pad that plays no
+// note is 7F.
+//
+// Cody, 2026-11-23: "I want to know the exact note I play, and I want a toggle where we see the root
+// note names on the grid and the other notes lightly ... flats and sharps as configured". A host is told
+// each pad's colour, but only the layout knows which pad is which note.
+void HIDSysex::sendPadNotesIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	uint8_t msg[7 + 4 + kDisplayWidth * kDisplayHeight + 1];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02;
+	msg[i++] = SysEx::SysexCommands::PadNotes;
+	uint32_t hash = 2166136261u;
+	auto put = [&](uint8_t b) {
+		msg[i++] = b & 0x7f;
+		hash = (hash ^ b) * 16777619u;
+	};
+
+	uint8_t notes[kDisplayHeight][kDisplayWidth];
+	bool any = false;
+	UI* ui = getCurrentUI();
+	if (currentSong != nullptr && ui != nullptr && ui->getUIType() == UIType::KEYBOARD_SCREEN) {
+		any = keyboardScreen.padNotes(notes);
+	}
+	const uint8_t root = (currentSong != nullptr) ? (uint8_t)(((currentSong->key.rootNote % 12) + 12) % 12) : 0;
+	const bool flats =
+	    (currentSong != nullptr) && deluge::gui::ui::keyboard::effectivePreferFlats(root, currentSong->key.modeNotes);
+	put(any ? kDisplayWidth : 0);
+	put(any ? kDisplayHeight : 0);
+	put(flats ? 1 : 0);
+	put(root);
+	if (any) {
+		for (int32_t y = 0; y < kDisplayHeight; y++) {
+			for (int32_t x = 0; x < kDisplayWidth; x++) {
+				put(notes[y][x]);
+			}
+		}
 	}
 
 	static uint32_t lastHash = 0;

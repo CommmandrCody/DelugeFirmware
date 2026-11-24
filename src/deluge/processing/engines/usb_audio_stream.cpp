@@ -259,13 +259,9 @@ volatile uint32_t healthDmaBusy = 0;      ///< timer passes that found the previ
 volatile uint32_t healthRecoveries = 0;   ///< abandoned driver transfers ended by force
 volatile uint32_t healthResyncs = 0;      ///< times the reader was thrown forward after falling a ring behind
 volatile uint32_t healthUnderruns = 0;    ///< packets sent as silence because the ring held too little
-volatile uint32_t healthWatchdog = 0;     ///< stalls the watchdog cleared (Chroma, 1.3.120)
-
-/// Write attempts since a packet was last committed. The timer makes 2.5 a millisecond, so this is a clock that
-/// stops when the stream does - which is exactly what it measures.
-volatile uint32_t passesSinceRetire = 0;
-/// 100 ms of attempts with nothing committed is a stall, not a slow host: a healthy stream commits every frame.
-constexpr uint32_t kStalledPasses = 250u;
+/// The 1.3.120 watchdog is gone (1.3.121): clearing the pipe let through a dribble and never cured a stall. Still
+/// reported, as 0, so a host reading 0x5B sees the same frame.
+volatile uint32_t healthWatchdog = 0;
 
 /* ---- In: host to device ------------------------------------------------------------------------------------- */
 
@@ -850,16 +846,33 @@ uint32_t buildNextPacket(uint8_t* buffer) {
 		return frames;
 	}
 
-	const int32_t leadError = (int32_t)available - (int32_t)kLeadFrames;
+	// THE PACKET SIZE STAYS STEADY (Chroma, 1.3.121). The host reads this endpoint's clock from the packet sizes:
+	// it is asynchronous, so a run of big packets says "the Deluge is running fast". This used to correct the lead
+	// on almost every packet - a block more above the band, a block less below it, four more after a stall - so
+	// packets wobbled +-5% from one to the next and ran +4% for as long as a backlog lasted. Measured 2026-11-24:
+	// after the builder was starved for ~0.2 s (a filter knob being turned is enough), the stream stalled for good,
+	// with a maximum-size packet stuck in the pipe and the computer no longer collecting.
+	//
+	// Now: a backlog left by a stall is DROPPED (the audio skips forward, once) instead of being caught up, and the
+	// normal drift between the two clocks - parts per million - is corrected by at most one block every ten packets,
+	// about 0.45%. The sizes the host sees stay the plain 44, 44, ..., 46 of 44.1 kHz.
+	int32_t leadError = (int32_t)available - (int32_t)kLeadFrames;
+	if (leadError > (int32_t)(kLeadCatchUpFrames / 2u)) {
+		readFrame = writeFrame - kLeadFrames;
+		available = kLeadFrames;
+		leadError = 0;
+		healthResyncs = healthResyncs + 1;
+	}
 	uint32_t send = frames;
-	if (leadError > (int32_t)kLeadCatchUpFrames) {
-		send = frames + 4u * kFramesPerBlock;
-	}
-	else if (leadError > (int32_t)kLeadBandFrames) {
-		send = frames + kFramesPerBlock;
-	}
-	else if (leadError < -(int32_t)kLeadBandFrames) {
-		send = (frames > kFramesPerBlock) ? frames - kFramesPerBlock : kFramesPerBlock;
+	static uint32_t trimTurn = 0;
+	if (++trimTurn >= 10u) {
+		trimTurn = 0;
+		if (leadError > (int32_t)kLeadBandFrames) {
+			send = frames + kFramesPerBlock;
+		}
+		else if (leadError < -(int32_t)kLeadBandFrames) {
+			send = (frames > kFramesPerBlock) ? frames - kFramesPerBlock : kFramesPerBlock;
+		}
 	}
 	if (send > available) {
 		send = available;
@@ -946,7 +959,6 @@ void retireAudioDma() {
 	DMACn(kAudioDmaChannel).CHCTRL_n = kDmaChctrlClearEnd | kDmaChctrlClearTc;
 	usbRegisters()->D0FIFOCTR |= USB_BVAL;
 	healthRetired = healthRetired + 1;
-	passesSinceRetire = 0;
 	if (audioDmaStandby) {
 		audioDmaStandby = false;
 	}
@@ -1001,7 +1013,6 @@ void audioWriteTimerInterrupt(uint32_t /*intSense*/) {
 	if (!streamActive || !transferInitialised) {
 		return;
 	}
-	passesSinceRetire = passesSinceRetire + 1;
 	const bool queueEmpty = (queueWrite == queueRead);
 	if (queueEmpty && !standbyReady) {
 		return;
@@ -1071,7 +1082,6 @@ void stopAudioWriteTimer() {
 }
 
 void stopStream() {
-	passesSinceRetire = 0;
 	transferInFlight = false;
 	frameAccumulator = 0;
 	primed = false;
@@ -1092,32 +1102,6 @@ void stopStream() {
 	}
 }
 
-/// THE WATCHDOG (Chroma, 1.3.120). Measured 2026-11-24 with the 0x5B counters, on 1.3.113 as well as later builds:
-/// after the packet builder is starved for a moment, the transmit pipe's buffer stays full for good. The driver
-/// keeps its transfer, every write attempt finds the FIFO not ready, and endAbandonedTransfer() never acts, because
-/// it only steps in when the pipe looks IDLE - and a buffer that never empties never looks idle. The computer then
-/// replays its last audio until something restarts the stream (a preset load did).
-///
-/// So: after 100 ms with nothing committed, do what a restart does. Release D0FIFO (the buffer may not be cleared
-/// while a port has it selected), end the driver's transfer - which sets the pipe to NAK and clears its buffer -
-/// drop the packets queued before the stall, and let serviceStream() re-arm everything on its next lines.
-void clearStalledPipe() {
-	DISABLE_ALL_INTERRUPTS();
-	if (audioDmaConfigured && !parkAudioDmaPort()) {
-		ENABLE_ALL_INTERRUPTS();
-		return; // the controller would not let go within 10 us; try again on the next pass
-	}
-	usb_pstd_forced_termination(USB_CFG_PAUDIO_ISO_IN, kUsbDataStop);
-	transferInFlight = false;
-	stuckPasses = 0;
-	queueRead = queueWrite;
-	primed = false;
-	frameAccumulator = 0;
-	passesSinceRetire = 0;
-	healthWatchdog = healthWatchdog + 1;
-	ENABLE_ALL_INTERRUPTS();
-}
-
 void serviceStream() {
 	if (!ringCleared) {
 		memset(ring, 0, sizeof(ring));
@@ -1133,10 +1117,6 @@ void serviceStream() {
 		return;
 	}
 	streamActive = true;
-
-	if (audioTimerRunning && passesSinceRetire > kStalledPasses) {
-		clearStalledPipe();
-	}
 
 	// Every pass, in every state: a queue left unfilled while nothing is in flight starves the timer for good.
 	buildQueuedPackets();

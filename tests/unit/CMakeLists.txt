@@ -75,6 +75,8 @@ file(GLOB_RECURSE deluge_SOURCES
         # For iterance migration tests (links against the real iterancePresets[]
         # from lookuptables.cpp, already included above)
         ../../src/deluge/model/iterance/iterance_migration.cpp
+        # For the sample-in-focus frame (0x55). Plain numbers in, bytes out: no instrument needed.
+        ../../src/deluge/hid/sample_frame.cpp
         # For waveform peak math tests
         ../../src/deluge/gui/waveform/waveform_peak_math.cpp
 )
@@ -101,6 +103,7 @@ add_executable(UnitTests
         iterance_migration_tests.cpp
         waveform_peak_math_tests.cpp
         press_feedback_tests.cpp
+        sample_frame_tests.cpp
 )
 add_test(NAME UnitTests
         COMMAND UnitTests)

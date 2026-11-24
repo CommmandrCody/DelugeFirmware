@@ -79,6 +79,7 @@ enum SysexCommands : uint8_t {
 	PadNotes = 0x52,        // Chroma: outbound - which note each pad of the main grid plays, and how to spell it.
 	PadVelocities = 0x53,   // Chroma: outbound - the velocity each pad plays at, where its position decides that.
 	KeyboardColumns = 0x54, // Chroma: outbound - what the keyboard's two sidebar columns are set to.
+	SampleState = 0x55,     // Chroma: outbound - the sample in focus: file, repeat mode, start, end and loop.
 	SoundState = 0x4B,      // Chroma: outbound sound push - the sound in focus as the instrument holds it: engine,
 	                        // oscillator types, both filters, four envelopes and four LFOs. A host draws the
 	                        // sound from this instead of from its own copy of a patch.

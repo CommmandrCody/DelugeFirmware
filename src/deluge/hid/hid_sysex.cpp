@@ -13,14 +13,18 @@
 #include "hid/display/seven_segment.h"
 #include "hid/led/pad_leds.h"
 #include "hid/matrix/matrix_driver.h"
+#include "hid/sample_frame.h" // Chroma (0x55): the packing of the sample in focus
 #include "io/midi/midi_device.h"
 #include "io/midi/midi_engine.h"
 #include "io/midi/sysex.h"
 #include "memory/general_memory_allocator.h"
 #include "model/clip/instrument_clip.h"              // Chroma (0x48): keyboardState.currentLayout
+#include "model/instrument/kit.h"                    // Chroma (0x55): the kit's selected row
 #include "model/instrument/midi_instrument.h"        // Chroma (0x49): channelSuffix, MIDI only
 #include "model/instrument/non_audio_instrument.h"   // Chroma (0x49): getChannel(), MIDI and CV
 #include "model/output.h"                            // Chroma (0x49): the track list - name, colour, usbRouting
+#include "model/sample/sample.h"                     // Chroma (0x55): length, rate
+#include "model/sample/sample_holder_for_voice.h"    // Chroma (0x55): start, end, loop
 #include "model/scale/preset_scales.h"               // Chroma (0x48): getScaleName
 #include "model/settings/runtime_feature_settings.h" // Chroma (0x4D): the Features settings
 #include "model/song/song.h"
@@ -30,9 +34,10 @@
 #include "modulation/params/param_set.h" // Chroma (0x4B)                       // Chroma: resync — read the live key/scale to push on handshake
 #include "playback/playback_handler.h" // Chroma: transport push - is it running, and where
 #include "processing/engines/audio_engine.h"
-#include "processing/sound/sound_drum.h"       // Chroma (0x4B): a kit row's name
-#include "processing/sound/sound_instrument.h" // Chroma (0x4B): the track's own sound
-#include "storage/flash_storage.h"             // Chroma (0x4D): pad brightness
+#include "processing/sound/sound_drum.h"           // Chroma (0x4B): a kit row's name
+#include "processing/sound/sound_instrument.h"     // Chroma (0x4B): the track's own sound
+#include "storage/flash_storage.h"                 // Chroma (0x4D): pad brightness
+#include "storage/multi_range/multisample_range.h" // Chroma (0x55): a sample oscillator's zones
 #include "util/pack.h"
 #include <cstring>
 #include <string>
@@ -118,6 +123,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendPadVelocitiesIfChanged(true);
 		// ...and what the keyboard's sidebar columns are.
 		sendKeyboardColumnsIfChanged(true);
+		// ...and the sample the sound in focus plays, or that there is none.
+		sendSampleStateIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -149,6 +156,7 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendPadNotesIfChanged();
 		sendPadVelocitiesIfChanged();   // zooming or scrolling the drums layout moves every velocity
 		sendKeyboardColumnsIfChanged(); // a column's function changes with a button and no redraw
+		sendSampleStateIfChanged();     // hitting a kit pad selects its row and may redraw nothing
 		break;
 
 	default:
@@ -202,6 +210,7 @@ void HIDSysex::sendDisplayIfChanged() {
 	sendMenuContextIfChanged();   // Chroma (0x4A): the open menu - same piggyback, de-duped the same way
 	sendSoundStateIfChanged();    // Chroma (0x4B): the sound in focus - same piggyback, de-duped the same way
 	sendDeviceStateIfChanged();   // Chroma (0x4D): current track, pad brightness, Features - likewise
+	sendSampleStateIfChanged();   // Chroma (0x55): the sample in focus - likewise
 	saveFeaturesIfNeeded();       // Chroma (0x4E): write a host's Features change to the card, from here only
 	// NB: timer is only used for throttling, under good conditions sending
 	// is driven by the display subsystem only
@@ -1270,6 +1279,194 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 
 	msg[i++] = 0xf7;
 	lastHidCable->sendSysex(msg, i);
+}
+
+// Chroma (0x55): THE SAMPLE IN FOCUS - what file the sound plays, how a note plays it (CUT, ONCE, LOOP
+// or STRETCH), and where it starts, ends and loops. The frame is laid out in hid/sample_frame.h.
+//
+// Cody, 2026-11-24: "now with the sound tab looking so good we need to talk sampling". Before this a
+// host could say only that an oscillator WAS a sample. The setting that decides whether a hit stops
+// with its step or rings out was visible in one place, three menus deep, one row at a time.
+//
+// WHICH sound: the one in the sound editor if it is open (0x4B's choice), otherwise the synth on the
+// current track (0x4B's choice again), otherwise - new here - the selected row of the current kit, so
+// hitting a kit pad is enough to see what that row will do.
+//
+// READS ONLY, and only of what is already in memory: no zone is created, no file is opened, nothing
+// is loaded. Every pointer on the way down is checked, and every downcast is proven by the object
+// itself (its type field or its own virtual), not by what screen is showing.
+//
+// WHAT THE CARD LOCK DOES AND DOES NOT DO. The walk is skipped while the card routine holds its lock,
+// which covers the one moment a kit's row list is unlinked and relinked: a save. It does NOT cover
+// loads - this also runs in the middle of one, from display ticks and from MIDI serviced while the
+// loader yields. It is safe there because loaders build into objects that are not attached to the
+// current song until they are whole (a preset into a spare instrument, a song into preLoadedSong).
+// A skipped report is NOT marked as sent - a forced one is owed until it goes.
+void HIDSysex::sendSampleStateIfChanged(bool force) {
+	static bool owed = false; // a forced send that could not go yet
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
+
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	owed = owed || force;
+	if (sdRoutineLock) {
+		return;
+	}
+	using namespace deluge::hid;
+	using namespace deluge::modulation::params;
+
+	sample_frame::Focus focus;
+	Sound* sound = nullptr;
+	ParamManager* paramManager = nullptr;
+	Clip* clip = (currentSong != nullptr) ? currentSong->getCurrentClip() : nullptr;
+	Output* output = (clip != nullptr) ? clip->output : nullptr;
+	Kit* kit = (output != nullptr && output->type == OutputType::KIT) ? static_cast<Kit*>(output) : nullptr;
+	Drum* rowDrum = nullptr; // the kit row this sound is, when it is one
+	NoteRow* noteRow = nullptr;
+	int32_t noteRowIndex = -1;
+
+	if (getCurrentUI() == &soundEditor && soundEditor.currentSound != nullptr
+	    && soundEditor.currentParamManager != nullptr) {
+		sound = soundEditor.currentSound;
+		paramManager = soundEditor.currentParamManager;
+		focus.source = sample_frame::kSoundEditor;
+		if (sound->isDrum()) { // asked of the object: only a SoundDrum answers yes
+			SoundDrum* drum = static_cast<SoundDrum*>(sound);
+			rowDrum = drum;
+			focus.name = drum->getName(); // the row's own storage: no copy, so no allocation on every poll
+		}
+		else if (output != nullptr) {
+			focus.name = output->name.get();
+		}
+	}
+	else if (output != nullptr && output->type == OutputType::SYNTH) {
+		sound = static_cast<SoundInstrument*>(output);
+		paramManager = &clip->paramManager;
+		focus.source = sample_frame::kSynthTrack;
+		focus.name = output->name.get();
+	}
+	// Membership first: getDrumIndex only compares pointers, so it is the one check that is safe to make
+	// on a selection that no longer exists. Only a row found in this kit is then looked at.
+	else if (kit != nullptr && kit->selectedDrum != nullptr && kit->getDrumIndex(kit->selectedDrum) >= 0
+	         && kit->selectedDrum->type == DrumType::SOUND) {
+		SoundDrum* drum = static_cast<SoundDrum*>(kit->selectedDrum);
+		sound = drum;
+		rowDrum = drum;
+		focus.source = sample_frame::kKitRow;
+		focus.name = drum->getName();
+	}
+	// WHICH ROW: its place among the clip's note rows, which is the order the pads show them in. NOT its
+	// place in the kit's own list of drums - every save relinks that list, so the number would change
+	// under a player who touched nothing.
+	if (rowDrum != nullptr && kit != nullptr && clip->type == ClipType::INSTRUMENT) {
+		noteRow = static_cast<InstrumentClip*>(clip)->getNoteRowForDrum(rowDrum, &noteRowIndex);
+		// A row's parameters live with its notes. Without them the row is still reported; only the
+		// amp release is left out.
+		if (noteRow != nullptr && paramManager == nullptr) {
+			paramManager = &noteRow->paramManager;
+		}
+	}
+	if (paramManager != nullptr && !paramManager->containsAnyMainParamCollections()) {
+		paramManager = nullptr;
+	}
+
+	if (sound != nullptr && sound->getSynthMode() != SynthMode::FM) {
+		focus.row = (noteRow != nullptr) ? noteRowIndex : -1;
+		for (int32_t s = 0; s < kNumSources && s < 2; s++) {
+			Source& source = sound->sources[s];
+			// A sample oscillator's zones are MultisampleRanges. Anything else in that array is a
+			// wavetable's, and must not be read as one.
+			if (source.oscType != OscType::SAMPLE || source.ranges.elementSize != sizeof(MultisampleRange)) {
+				continue;
+			}
+			const int32_t zones = source.ranges.getNumElements();
+			if (zones <= 0) {
+				continue; // a sample oscillator with no zone yet has nothing to report, and none is made
+			}
+			int32_t zone = 0;
+			if (focus.source == sample_frame::kSoundEditor && soundEditor.currentSourceIndex == s
+			    && soundEditor.currentMultiRangeIndex > 0 && soundEditor.currentMultiRangeIndex < zones) {
+				zone = soundEditor.currentMultiRangeIndex; // the zone the editor is on
+			}
+			auto* range = static_cast<MultisampleRange*>(source.ranges.getElement(zone));
+			if (range == nullptr) {
+				continue;
+			}
+			SampleHolderForVoice& holder = range->sampleHolder;
+			if (holder.audioFileType != AudioFileType::SAMPLE) {
+				continue; // the holder says what it holds; anything else is not read as a sample
+			}
+			sample_frame::Osc& osc = focus.osc[s];
+			osc.mode = (uint8_t)util::to_underlying(source.repeatMode);
+			osc.reversed = source.sampleControls.reversed;
+			osc.pitchSpeedIndependent = source.sampleControls.pitchAndSpeedAreIndependent;
+			osc.speed = source.timeStretchAmount;
+			osc.transpose = holder.transpose;
+			osc.cents = holder.cents;
+			osc.loopLocked = holder.loopLocked;
+			osc.start = holder.startPos;
+			osc.loopStart = holder.loopStartPos;
+			osc.loopEnd = holder.loopEndPos;
+			osc.zone = (uint8_t)((zone > 127) ? 127 : zone);
+			osc.zones = (uint8_t)((zones > 127) ? 127 : zones);
+			osc.path = holder.filePath.get();
+			const auto* sample = (holder.audioFile != nullptr && holder.audioFile->type == AudioFileType::SAMPLE)
+			                         ? static_cast<const Sample*>(holder.audioFile)
+			                         : nullptr;
+			if (sample != nullptr) {
+				osc.loaded = true;
+				osc.length = sample->lengthInSamples;
+				osc.rate = sample->sampleRate;
+				osc.channels = sample->numChannels;
+				// The end as it will play: the stored one may sit beyond the end of the file.
+				osc.end = (holder.endPos < sample->lengthInSamples) ? holder.endPos : sample->lengthInSamples;
+			}
+			else {
+				osc.end = holder.endPos; // as stored: with no file to measure against it may be a placeholder
+			}
+			focus.oscMask |= (uint8_t)(1 << s);
+		}
+		focus.present = (focus.oscMask != 0);
+	}
+
+	if (focus.present) {
+		if (paramManager != nullptr) {
+			PatchedParamSet* params = paramManager->getPatchedParamSet();
+			if (params != nullptr) {
+				int32_t release = computeCurrentValueForStandardMenuItem(params->getValue(LOCAL_ENV_0_RELEASE));
+				focus.ampRelease = (release < 0) ? 0 : ((release > kMaxMenuValue) ? kMaxMenuValue : release);
+			}
+		}
+		if (output != nullptr && output->type != OutputType::AUDIO
+		    && static_cast<Instrument*>(output)->changedSinceCard) {
+			focus.state |= sample_frame::kStateEdited;
+		}
+		// Whether this sound obeys note length is NOT reported yet (kStateTailsKnown stays clear):
+		// asking needs a model stack built for the row, which is a change for a flash of its own.
+	}
+
+	uint8_t msg[sample_frame::kMaxFrame];
+	const int32_t length = sample_frame::pack(focus, msg);
+	uint32_t hash = 2166136261u;
+	for (int32_t k = 0; k < length; k++) {
+		hash = (hash ^ msg[k]) * 16777619u;
+	}
+	if (!owed && everSent && hash == lastHash) {
+		return;
+	}
+	// Whole or not at all, and never remembered as sent when it was not.
+	// (A queue that has overflowed reports its room as a negative number, which arrives here as an
+	// enormous one. More room than the queue has is no room.)
+	const size_t space = lastHidCable->sendBufferSpace();
+	if (space < (size_t)length + 64 || space > 0x10000) {
+		return;
+	}
+	lastHash = hash;
+	everSent = true;
+	owed = false;
+	lastHidCable->sendSysex(msg, length);
 }
 
 // The 14-bit hash a host names a Features setting by: FNV-1a over the name it is stored under on the card.

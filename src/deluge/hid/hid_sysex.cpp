@@ -125,7 +125,7 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		// ...and what the keyboard's sidebar columns are.
 		sendKeyboardColumnsIfChanged(true);
 		// ...and the sample the sound in focus plays, or that there is none.
-		sendSampleStateIfChanged(true);
+		// sendSampleStateIfChanged(true);  // OFF in 1.3.119: bisecting the USB audio stall (see below)
 		// ...and whether the USB audio stream is really sending.
 		sendHealthIfDue(true);
 		// ...and the chord being held, or that there is none.
@@ -162,10 +162,10 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendPadNotesIfChanged();
 		sendPadVelocitiesIfChanged();   // zooming or scrolling the drums layout moves every velocity
 		sendKeyboardColumnsIfChanged(); // a column's function changes with a button and no redraw
-		sendSampleStateIfChanged();     // hitting a kit pad selects its row and may redraw nothing
-		sendHealthIfDue();              // about once a second; the pad poll is the only steady clock a host gives
-		sendHeldChordIfChanged();       // a chord is held and let go with no display redraw a host can count on
-		sendAnalogueProbeIfChanged();   // the converter's eight inputs, when one moves
+		// sendSampleStateIfChanged();  // OFF in 1.3.119: bisecting the USB audio stall (see below)
+		sendHealthIfDue();            // about once a second; the pad poll is the only steady clock a host gives
+		sendHeldChordIfChanged();     // a chord is held and let go with no display redraw a host can count on
+		sendAnalogueProbeIfChanged(); // the converter's eight inputs, when one moves
 		break;
 
 	default:
@@ -219,8 +219,8 @@ void HIDSysex::sendDisplayIfChanged() {
 	sendMenuContextIfChanged();   // Chroma (0x4A): the open menu - same piggyback, de-duped the same way
 	sendSoundStateIfChanged();    // Chroma (0x4B): the sound in focus - same piggyback, de-duped the same way
 	sendDeviceStateIfChanged();   // Chroma (0x4D): current track, pad brightness, Features - likewise
-	sendSampleStateIfChanged();   // Chroma (0x55): the sample in focus - likewise
-	saveFeaturesIfNeeded();       // Chroma (0x4E): write a host's Features change to the card, from here only
+	// sendSampleStateIfChanged();  // OFF in 1.3.119: bisecting the USB audio stall
+	saveFeaturesIfNeeded(); // Chroma (0x4E): write a host's Features change to the card, from here only
 	// NB: timer is only used for throttling, under good conditions sending
 	// is driven by the display subsystem only
 	uiTimerManager.unsetTimer(TimerName::SYSEX_DISPLAY);
@@ -1311,6 +1311,8 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 // loader yields. It is safe there because loaders build into objects that are not attached to the
 // current song until they are whole (a preset into a spare instrument, a song into preLoadedSong).
 // A skipped report is NOT marked as sent - a forced one is owed until it goes.
+// 1.3.119: NOT CALLED. The USB audio stream stalled on 1.3.114 and 1.3.118 and never on 1.3.113, and 1.3.114
+// added only this report. Switched off at every call site to confirm it before finding out why.
 void HIDSysex::sendSampleStateIfChanged(bool force) {
 	static bool owed = false; // a forced send that could not go yet
 	static uint32_t lastHash = 0;

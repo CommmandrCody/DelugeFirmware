@@ -90,6 +90,27 @@ void KeyboardLayoutVelocityDrums::evaluatePads(PressedPad presses[kMaxNumKeyboar
 	}
 }
 
+// The velocity a pad plays at: the same arithmetic evaluatePads() uses when the pad is pressed, so what a
+// host is told and what the drum is hit with cannot differ. -1 for a pad past the kit's last drum.
+int32_t KeyboardLayoutVelocityDrums::velocityAtPad(int32_t x, int32_t y) {
+	if (x < 0 || x >= kDisplayWidth || y < 0 || y >= kDisplayHeight) {
+		return -1;
+	}
+	uint32_t zoom_level = getState().drums.zoom_level;
+	uint32_t edge_size_x = zoom_arr[zoom_level][0];
+	uint32_t edge_size_y = zoom_arr[zoom_level][1];
+	uint32_t pads_per_row = kDisplayWidth / edge_size_x;
+	bool odd_pad = (edge_size_x % 2 == 1 && edge_size_x > 1);
+	bool x_adjust_note = (odd_pad && x == kDisplayWidth - 1);
+	uint32_t note = ((uint32_t)x / edge_size_x) - x_adjust_note + (((uint32_t)y / edge_size_y) * pads_per_row)
+	                + getState().drums.scroll_offset;
+	if (note > getHighestClipNote()) {
+		return -1;
+	}
+	int32_t velocity = velocityFromCoords(x, y, edge_size_x, edge_size_y) >> 1;
+	return (velocity < 1) ? 1 : (velocity > 127 ? 127 : velocity);
+}
+
 void KeyboardLayoutVelocityDrums::handleVerticalEncoder(int32_t offset) {
 	PressedPad pressedPad{};
 	uint32_t edge_size_x = zoom_arr[getState().drums.zoom_level][0];

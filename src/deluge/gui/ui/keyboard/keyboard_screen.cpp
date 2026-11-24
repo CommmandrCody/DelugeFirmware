@@ -1308,6 +1308,22 @@ bool KeyboardScreen::padNotes(uint8_t notes[kDisplayHeight][kDisplayWidth]) {
 	return any;
 }
 
+// THE VELOCITY EACH PAD PLAYS AT, asked of the layout. 0 where the pad's position does not decide it.
+// Returns false when no pad of this layout does, so a host shows nothing.
+bool KeyboardScreen::padVelocities(uint8_t velocities[kDisplayHeight][kDisplayWidth]) {
+	bool any = false;
+	InstrumentClip* clip = getCurrentInstrumentClip();
+	KeyboardLayout* layout = (clip != nullptr) ? layout_list[clip->keyboardState.currentLayout] : nullptr;
+	for (int32_t y = 0; y < kDisplayHeight; y++) {
+		for (int32_t x = 0; x < kDisplayWidth; x++) {
+			const int32_t v = (layout != nullptr) ? layout->velocityAtPad(x, y) : -1;
+			velocities[y][x] = (v >= 1 && v <= 127) ? (uint8_t)v : 0;
+			any = any || (v >= 1);
+		}
+	}
+	return any;
+}
+
 bool KeyboardScreen::noteRange(int32_t& lo, int32_t& hi) {
 	lo = -1;
 	hi = -1;

@@ -47,6 +47,7 @@ public:
 	bool noteRange(int32_t& lo, int32_t& hi);
 	void soundingPads(uint8_t columns[kDisplayWidth]);
 	bool padNotes(uint8_t notes[kDisplayHeight][kDisplayWidth]);
+	bool padVelocities(uint8_t velocities[kDisplayHeight][kDisplayWidth]);
 
 	ActionResult verticalEncoderAction(int32_t offset, bool inCardRoutine) override;
 	ActionResult horizontalEncoderAction(int32_t offset) override;

@@ -114,6 +114,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendPanelStateIfChanged(true);
 		// ...and which note each pad plays, or that the pads play none.
 		sendPadNotesIfChanged(true);
+		// ...and the velocity each pad plays at, where position decides it.
+		sendPadVelocitiesIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -143,6 +145,7 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendDeviceStateIfChanged();
 		// ...and the pads' notes: scrolling a keyboard layout moves every note and redraws no display.
 		sendPadNotesIfChanged();
+		sendPadVelocitiesIfChanged(); // zooming or scrolling the drums layout moves every velocity
 		break;
 
 	default:
@@ -1498,6 +1501,58 @@ void HIDSysex::sendPadNotesIfChanged(bool force) {
 		for (int32_t y = 0; y < kDisplayHeight; y++) {
 			for (int32_t x = 0; x < kDisplayWidth; x++) {
 				put(notes[y][x]);
+			}
+		}
+	}
+
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
+	if (!force && everSent && hash == lastHash) {
+		return;
+	}
+	lastHash = hash;
+	everSent = true;
+	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
+}
+
+// Chroma (0x53): THE VELOCITY EACH PAD PLAYS AT, where the pad's position decides it.
+//
+//   F0 00 21 7B 01 02 53 <cols> <rows> then rows x cols velocity bytes, bottom row first F7
+//
+// 16 and 8 in the velocity drums layout; 0 0 anywhere else, and the frame ends there. A velocity is 1-127;
+// 0 is a pad that plays nothing. Cody, 2026-11-23: "a toggle like the notes for the velocities".
+void HIDSysex::sendPadVelocitiesIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	uint8_t msg[7 + 2 + kDisplayWidth * kDisplayHeight + 1];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02;
+	msg[i++] = SysEx::SysexCommands::PadVelocities;
+	uint32_t hash = 2166136261u;
+	auto put = [&](uint8_t b) {
+		msg[i++] = b & 0x7f;
+		hash = (hash ^ b) * 16777619u;
+	};
+
+	uint8_t velocities[kDisplayHeight][kDisplayWidth];
+	bool any = false;
+	UI* ui = getCurrentUI();
+	if (currentSong != nullptr && ui != nullptr && ui->getUIType() == UIType::KEYBOARD_SCREEN) {
+		any = keyboardScreen.padVelocities(velocities);
+	}
+	put(any ? kDisplayWidth : 0);
+	put(any ? kDisplayHeight : 0);
+	if (any) {
+		for (int32_t y = 0; y < kDisplayHeight; y++) {
+			for (int32_t x = 0; x < kDisplayWidth; x++) {
+				put(velocities[y][x]);
 			}
 		}
 	}

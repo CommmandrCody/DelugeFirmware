@@ -40,6 +40,7 @@ public:
 	                             bool encoderPressed = false) override;
 
 	void renderPads(RGB image[][kDisplayWidth + kSideBarWidth]) override;
+	int32_t velocityAtPad(int32_t x, int32_t y) override;
 
 	l10n::String name() override { return l10n::String::STRING_FOR_KEYBOARD_LAYOUT_VELOCITY_DRUMS; }
 	bool supportsInstrument() override { return false; }

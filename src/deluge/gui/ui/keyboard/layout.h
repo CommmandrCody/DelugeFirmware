@@ -76,6 +76,12 @@ public:
 	/// rather than by being special-cased somewhere else. No layout is privileged.
 	virtual int32_t noteAtPad(int32_t x, int32_t y) { return -1; }
 
+	/// The velocity (1-127) a pad plays at, or -1 if where you press does not decide it.
+	///
+	/// Only the velocity drums layout answers: there each drum is a block of pads and WHICH pad you hit
+	/// is how hard it plays. Cody, 2026-11-23: "a toggle like the notes for the velocities".
+	virtual int32_t velocityAtPad(int32_t x, int32_t y) { return -1; }
+
 	virtual void renderSidebarPads(RGB image[][kDisplayWidth + kSideBarWidth]) {
 		// Clean sidebar if function is not overwritten
 		for (int32_t y = 0; y < kDisplayHeight; y++) {

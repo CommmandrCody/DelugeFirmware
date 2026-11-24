@@ -259,6 +259,13 @@ volatile uint32_t healthDmaBusy = 0;      ///< timer passes that found the previ
 volatile uint32_t healthRecoveries = 0;   ///< abandoned driver transfers ended by force
 volatile uint32_t healthResyncs = 0;      ///< times the reader was thrown forward after falling a ring behind
 volatile uint32_t healthUnderruns = 0;    ///< packets sent as silence because the ring held too little
+volatile uint32_t healthWatchdog = 0;     ///< stalls the watchdog cleared (Chroma, 1.3.120)
+
+/// Write attempts since a packet was last committed. The timer makes 2.5 a millisecond, so this is a clock that
+/// stops when the stream does - which is exactly what it measures.
+volatile uint32_t passesSinceRetire = 0;
+/// 100 ms of attempts with nothing committed is a stall, not a slow host: a healthy stream commits every frame.
+constexpr uint32_t kStalledPasses = 250u;
 
 /* ---- In: host to device ------------------------------------------------------------------------------------- */
 
@@ -939,6 +946,7 @@ void retireAudioDma() {
 	DMACn(kAudioDmaChannel).CHCTRL_n = kDmaChctrlClearEnd | kDmaChctrlClearTc;
 	usbRegisters()->D0FIFOCTR |= USB_BVAL;
 	healthRetired = healthRetired + 1;
+	passesSinceRetire = 0;
 	if (audioDmaStandby) {
 		audioDmaStandby = false;
 	}
@@ -993,6 +1001,7 @@ void audioWriteTimerInterrupt(uint32_t /*intSense*/) {
 	if (!streamActive || !transferInitialised) {
 		return;
 	}
+	passesSinceRetire = passesSinceRetire + 1;
 	const bool queueEmpty = (queueWrite == queueRead);
 	if (queueEmpty && !standbyReady) {
 		return;
@@ -1062,6 +1071,7 @@ void stopAudioWriteTimer() {
 }
 
 void stopStream() {
+	passesSinceRetire = 0;
 	transferInFlight = false;
 	frameAccumulator = 0;
 	primed = false;
@@ -1082,6 +1092,32 @@ void stopStream() {
 	}
 }
 
+/// THE WATCHDOG (Chroma, 1.3.120). Measured 2026-11-24 with the 0x5B counters, on 1.3.113 as well as later builds:
+/// after the packet builder is starved for a moment, the transmit pipe's buffer stays full for good. The driver
+/// keeps its transfer, every write attempt finds the FIFO not ready, and endAbandonedTransfer() never acts, because
+/// it only steps in when the pipe looks IDLE - and a buffer that never empties never looks idle. The computer then
+/// replays its last audio until something restarts the stream (a preset load did).
+///
+/// So: after 100 ms with nothing committed, do what a restart does. Release D0FIFO (the buffer may not be cleared
+/// while a port has it selected), end the driver's transfer - which sets the pipe to NAK and clears its buffer -
+/// drop the packets queued before the stall, and let serviceStream() re-arm everything on its next lines.
+void clearStalledPipe() {
+	DISABLE_ALL_INTERRUPTS();
+	if (audioDmaConfigured && !parkAudioDmaPort()) {
+		ENABLE_ALL_INTERRUPTS();
+		return; // the controller would not let go within 10 us; try again on the next pass
+	}
+	usb_pstd_forced_termination(USB_CFG_PAUDIO_ISO_IN, kUsbDataStop);
+	transferInFlight = false;
+	stuckPasses = 0;
+	queueRead = queueWrite;
+	primed = false;
+	frameAccumulator = 0;
+	passesSinceRetire = 0;
+	healthWatchdog = healthWatchdog + 1;
+	ENABLE_ALL_INTERRUPTS();
+}
+
 void serviceStream() {
 	if (!ringCleared) {
 		memset(ring, 0, sizeof(ring));
@@ -1097,6 +1133,10 @@ void serviceStream() {
 		return;
 	}
 	streamActive = true;
+
+	if (audioTimerRunning && passesSinceRetire > kStalledPasses) {
+		clearStalledPipe();
+	}
 
 	// Every pass, in every state: a queue left unfilled while nothing is in flight starves the timer for good.
 	buildQueuedPackets();
@@ -1234,6 +1274,10 @@ void USBAudioStream::readHealth(Health& out) {
 	out.resyncs = healthResyncs;
 	out.underruns = healthUnderruns;
 	out.lead = (int32_t)(writeFrame - readFrame);
+	out.watchdog = healthWatchdog;
+	out.pipeControl = *pipeControl(USB_CFG_PAUDIO_ISO_IN);
+	out.fifoSelect = usbRegisters()->D0FIFOSEL;
+	out.fifoControl = usbRegisters()->D0FIFOCTR;
 }
 
 void USBAudioStream::beginRender(uint32_t numSamples) {

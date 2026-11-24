@@ -58,6 +58,10 @@ public:
 		uint32_t resyncs;       ///< times the reader was thrown forward, ever
 		uint32_t underruns;     ///< packets sent as silence for want of audio, ever
 		int32_t lead;           ///< frames the engine is ahead of the packet builder
+		uint32_t watchdog;      ///< stalls the watchdog cleared, ever (1.3.120)
+		uint16_t pipeControl;   ///< the transmit pipe's PIPEnCTR as read now: PID, BSTS, INBUFM, PBUSY
+		uint16_t fifoSelect;    ///< D0FIFOSEL as read now: which pipe the DMA port has selected
+		uint16_t fifoControl;   ///< D0FIFOCTR as read now: FRDY, BVAL
 	};
 	static void readHealth(Health& out);
 

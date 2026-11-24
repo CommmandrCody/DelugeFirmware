@@ -125,7 +125,7 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		// ...and what the keyboard's sidebar columns are.
 		sendKeyboardColumnsIfChanged(true);
 		// ...and the sample the sound in focus plays, or that there is none.
-		// sendSampleStateIfChanged(true);  // OFF in 1.3.119: bisecting the USB audio stall (see below)
+		sendSampleStateIfChanged(true);
 		// ...and whether the USB audio stream is really sending.
 		sendHealthIfDue(true);
 		// ...and the chord being held, or that there is none.
@@ -162,10 +162,10 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendPadNotesIfChanged();
 		sendPadVelocitiesIfChanged();   // zooming or scrolling the drums layout moves every velocity
 		sendKeyboardColumnsIfChanged(); // a column's function changes with a button and no redraw
-		// sendSampleStateIfChanged();  // OFF in 1.3.119: bisecting the USB audio stall (see below)
-		sendHealthIfDue();            // about once a second; the pad poll is the only steady clock a host gives
-		sendHeldChordIfChanged();     // a chord is held and let go with no display redraw a host can count on
-		sendAnalogueProbeIfChanged(); // the converter's eight inputs, when one moves
+		sendSampleStateIfChanged();     // hitting a kit pad selects its row and may redraw nothing
+		sendHealthIfDue();              // about once a second; the pad poll is the only steady clock a host gives
+		sendHeldChordIfChanged();       // a chord is held and let go with no display redraw a host can count on
+		sendAnalogueProbeIfChanged();   // the converter's eight inputs, when one moves
 		break;
 
 	default:
@@ -219,8 +219,8 @@ void HIDSysex::sendDisplayIfChanged() {
 	sendMenuContextIfChanged();   // Chroma (0x4A): the open menu - same piggyback, de-duped the same way
 	sendSoundStateIfChanged();    // Chroma (0x4B): the sound in focus - same piggyback, de-duped the same way
 	sendDeviceStateIfChanged();   // Chroma (0x4D): current track, pad brightness, Features - likewise
-	// sendSampleStateIfChanged();  // OFF in 1.3.119: bisecting the USB audio stall
-	saveFeaturesIfNeeded(); // Chroma (0x4E): write a host's Features change to the card, from here only
+	sendSampleStateIfChanged();   // Chroma (0x55): the sample in focus - likewise
+	saveFeaturesIfNeeded();       // Chroma (0x4E): write a host's Features change to the card, from here only
 	// NB: timer is only used for throttling, under good conditions sending
 	// is driven by the display subsystem only
 	uiTimerManager.unsetTimer(TimerName::SYSEX_DISPLAY);
@@ -1311,8 +1311,6 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 // loader yields. It is safe there because loaders build into objects that are not attached to the
 // current song until they are whole (a preset into a spare instrument, a song into preLoadedSong).
 // A skipped report is NOT marked as sent - a forced one is owed until it goes.
-// 1.3.119: NOT CALLED. The USB audio stream stalled on 1.3.114 and 1.3.118 and never on 1.3.113, and 1.3.114
-// added only this report. Switched off at every call site to confirm it before finding out why.
 void HIDSysex::sendSampleStateIfChanged(bool force) {
 	static bool owed = false; // a forced send that could not go yet
 	static uint32_t lastHash = 0;
@@ -1483,7 +1481,8 @@ void HIDSysex::sendSampleStateIfChanged(bool force) {
 // Chroma (0x5B): HEALTH - is the USB audio stream really sending.
 //
 //   F0 00 21 7B 01 02 5B <ver=1> <flags> <interval ms x2> <started x2> <standby x2> <retired x2>
-//                        <notReady x2> <dmaBusy x2> <recoveries> <resyncs> <underruns x2> <lead x2, +8192> F7
+//                        <notReady x2> <dmaBusy x2> <recoveries> <resyncs> <underruns x2> <lead x2, +8192>
+//                        [1.3.120: <watchdog> <pipeCtr x3> <d0FifoSel x3> <d0FifoCtr x3>] F7
 //
 // Cody, 2026-11-24: "after a while the scope and waveform gets stuck ... the wire is silent yet the scope is
 // stuck showing data". Measured that day: the computer was receiving the same quarter second of his last
@@ -1560,6 +1559,17 @@ void HIDSysex::sendHealthIfDue(bool force) {
 	int32_t lead = health.lead;
 	lead = (lead < -8192) ? -8192 : ((lead > 8191) ? 8191 : lead);
 	put14((uint32_t)(lead + 8192));
+	// 1.3.120: the watchdog's count since the last report, and three registers read as the report was made, so a
+	// stall can be seen from the hardware's side. 16 bits each, sent as 3 x 7.
+	put7(health.watchdog - last.watchdog);
+	auto put16 = [&](uint16_t v) {
+		put(v >> 14);
+		put(v >> 7);
+		put(v);
+	};
+	put16(health.pipeControl);
+	put16(health.fifoSelect);
+	put16(health.fifoControl);
 	msg[i++] = 0xf7;
 
 	everSent = true;

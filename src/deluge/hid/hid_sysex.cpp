@@ -166,6 +166,7 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendHealthIfDue();              // about once a second; the pad poll is the only steady clock a host gives
 		sendHeldChordIfChanged();       // a chord is held and let go with no display redraw a host can count on
 		sendAnalogueProbeIfChanged();   // the converter's eight inputs, when one moves
+		flushGoldKnobs();               // a knob value held back by the 40 ms gap
 		break;
 
 	default:
@@ -219,6 +220,7 @@ void HIDSysex::sendDisplayIfChanged() {
 	sendMenuContextIfChanged();   // Chroma (0x4A): the open menu - same piggyback, de-duped the same way
 	sendSoundStateIfChanged();    // Chroma (0x4B): the sound in focus - same piggyback, de-duped the same way
 	sendDeviceStateIfChanged();   // Chroma (0x4D): current track, pad brightness, Features - likewise
+	flushGoldKnobs();             // Chroma (0x46): a knob value held back by the 40 ms gap
 	sendSampleStateIfChanged();   // Chroma (0x55): the sample in focus - likewise
 	saveFeaturesIfNeeded();       // Chroma (0x4E): write a host's Features change to the card, from here only
 	// NB: timer is only used for throttling, under good conditions sending
@@ -557,6 +559,11 @@ void HIDSysex::sendFxContext() {
 // receive and the knobs stayed dark until someone touched one. A mirror that only works once you
 // move is not a mirror, it is an echo.
 static uint8_t curKnobLevel[2] = {0xff, 0xff};
+// 1.3.122: the per-knob report gap, so a chattering encoder cannot flood USB (see sendGoldKnob).
+constexpr uint32_t kKnobGapSamples = kSampleRate * 40 / 1000;
+static uint32_t knobSentAt[2] = {0, 0};
+static bool knobPending[2] = {false, false};
+static bool knobBipolar[2] = {false, false};
 static char curKnobName[2][32] = {{0}, {0}};
 static uint8_t sentKnobLevel[2] = {0xff, 0xff};
 static char sentKnobName[2][32] = {{0}, {0}};
@@ -595,9 +602,41 @@ void HIDSysex::sendGoldKnob(uint8_t whichKnob, int32_t level, bool bipolar, cons
 		return; // nobody to tell yet - but we now know what to tell them when they turn up
 	}
 	if (sentKnobLevel[whichKnob] == (uint8_t)lv && strncmp(sentKnobName[whichKnob], name, 32) == 0) {
+		knobPending[whichKnob] = false;
 		return; // nothing moved and nothing was reassigned
 	}
+	// AT MOST ONE REPORT PER KNOB EVERY 40 MS (1.3.122). This is called on every encoder tick, and a worn
+	// encoder chatters: Cody's upper gold knob is mechanically bumped, and turning cutoff on it killed the
+	// USB audio stream within seconds while the lower knob (resonance) never did. Each tick went out over
+	// USB at once. Now a tick inside the gap only marks the knob pending; flushGoldKnobs() sends the
+	// latest value when the gap has passed, so the host still ends on the true position.
+	knobBipolar[whichKnob] = bipolar;
+	if ((uint32_t)(AudioEngine::audioSampleTimer - knobSentAt[whichKnob]) < kKnobGapSamples) {
+		knobPending[whichKnob] = true;
+		return;
+	}
+	knobPending[whichKnob] = false;
+	knobSentAt[whichKnob] = AudioEngine::audioSampleTimer;
 	emitGoldKnob(whichKnob, (uint8_t)lv, bipolar, name);
+}
+
+// Sends a knob value held back by the 40 ms gap, once the gap has passed. From the pad poll and the display
+// poll, which run often enough that the last position of a turn reaches the host within a poll.
+void HIDSysex::flushGoldKnobs() {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	for (uint8_t k = 0; k < 2; k++) {
+		if (!knobPending[k] || curKnobLevel[k] == 0xff) {
+			continue;
+		}
+		if ((uint32_t)(AudioEngine::audioSampleTimer - knobSentAt[k]) < kKnobGapSamples) {
+			continue;
+		}
+		knobPending[k] = false;
+		knobSentAt[k] = AudioEngine::audioSampleTimer;
+		emitGoldKnob(k, curKnobLevel[k], knobBipolar[k], curKnobName[k]);
+	}
 }
 
 // Push BOTH knobs as they currently stand, ignoring the de-dupe. Called from the handshake, which

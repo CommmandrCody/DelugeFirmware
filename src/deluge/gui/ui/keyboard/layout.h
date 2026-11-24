@@ -76,6 +76,13 @@ public:
 	/// rather than by being special-cased somewhere else. No layout is privileged.
 	virtual int32_t noteAtPad(int32_t x, int32_t y) { return -1; }
 
+	/// The note a host should NAME on a pad, or -1 for none. For a pad that plays one note this is that
+	/// note. A layout whose pads play CHORDS answers with the chord's root, so a screen can show where
+	/// the roots are - Cody, 2026-11-23: "we also should do this on all screens where the roots are
+	/// needed to be shown, like the chord library". Kept apart from noteAtPad() on purpose: that one
+	/// also decides which pads light for a held note, and a chord pad is not "the same note" as its root.
+	virtual int32_t labelNoteAtPad(int32_t x, int32_t y) { return noteAtPad(x, y); }
+
 	/// The velocity (1-127) a pad plays at, or -1 if where you press does not decide it.
 	///
 	/// Only the velocity drums layout answers: there each drum is a block of pads and WHICH pad you hit

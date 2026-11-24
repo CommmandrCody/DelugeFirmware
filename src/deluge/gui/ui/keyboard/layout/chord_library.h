@@ -40,6 +40,14 @@ public:
 	void precalculate() override;
 
 	void renderPads(RGB image[][kDisplayWidth + kSideBarWidth]) override;
+	/// Every pad in a column is a chord on that column's root.
+	int32_t labelNoteAtPad(int32_t x, int32_t y) override {
+		if (x < 0 || x >= kDisplayWidth || y < 0 || y >= kDisplayHeight) {
+			return -1;
+		}
+		const int32_t root = noteFromCoords(x);
+		return (root >= 0 && root < 127) ? root : -1;
+	}
 
 	l10n::String name() override { return l10n::String::STRING_FOR_KEYBOARD_LAYOUT_CHORD_LIBRARY; }
 	bool supportsInstrument() override { return true; }

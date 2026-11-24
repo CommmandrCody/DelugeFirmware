@@ -1309,7 +1309,7 @@ bool KeyboardScreen::padNotes(uint8_t notes[kDisplayHeight][kDisplayWidth]) {
 	KeyboardLayout* layout = (clip != nullptr) ? layout_list[clip->keyboardState.currentLayout] : nullptr;
 	for (int32_t y = 0; y < kDisplayHeight; y++) {
 		for (int32_t x = 0; x < kDisplayWidth; x++) {
-			const int32_t n = (layout != nullptr) ? layout->noteAtPad(x, y) : -1;
+			const int32_t n = (layout != nullptr) ? layout->labelNoteAtPad(x, y) : -1;
 			if (n >= 0 && n < 127) {
 				notes[y][x] = (uint8_t)n;
 				any = true;

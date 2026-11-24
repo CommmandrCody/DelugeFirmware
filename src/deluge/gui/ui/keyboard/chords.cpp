@@ -552,6 +552,34 @@ bool describeChordInKey(const uint8_t* notes, int32_t count, uint8_t keyRootPc, 
 	}
 	static const char* const kRoman[7] = {"I", "II", "III", "IV", "V", "VI", "VII"};
 	static const int8_t kMajorRef[7] = {0, 2, 4, 5, 7, 9, 11};
+	// The numeral for a root that is a degree of a seven-note scale, upper case for a major third, then the
+	// suffix. Writes nothing when the root is not a degree, or the scale does not have seven notes.
+	auto writeRoman = [&](int32_t rootPc, bool upper, const char* suffix) {
+		if (scaleCount != 7) {
+			return;
+		}
+		for (int32_t d = 0; d < 7; d++) {
+			if (((keyRootPc + scaleIv[d]) % 12) != (uint32_t)rootPc) {
+				continue;
+			}
+			int32_t acc = scaleIv[d] - kMajorRef[d]; // -1 = flat, +1 = sharp degree
+			char num[8];
+			int32_t n = 0;
+			if (acc < 0) {
+				num[n++] = 'b';
+			}
+			else if (acc > 0) {
+				num[n++] = '#';
+			}
+			const char* numeral = kRoman[d];
+			for (int32_t k = 0; numeral[k] != '\0'; k++) {
+				num[n++] = upper ? numeral[k] : (char)(numeral[k] - 'A' + 'a');
+			}
+			num[n] = '\0';
+			sprintf(romanOut, "%s%s", num, suffix);
+			return;
+		}
+	};
 
 	for (int32_t attempt = -1; attempt < 12; attempt++) {
 		int32_t rootPc = (attempt < 0) ? bassPc : attempt;
@@ -572,32 +600,40 @@ bool describeChordInKey(const uint8_t* notes, int32_t count, uint8_t keyRootPc, 
 			sprintf(absOut, "%s%s", noteNameInKey(rootPc, flats), chord.name);
 
 			// Roman numeral: only for 7-note scales when the root is a scale degree.
-			if (scaleCount == 7) {
-				for (int32_t d = 0; d < 7; d++) {
-					if (((keyRootPc + scaleIv[d]) % 12) != (uint32_t)rootPc) {
-						continue;
-					}
-					int32_t acc = scaleIv[d] - kMajorRef[d]; // -1 = flat, +1 = sharp degree
-					bool upper = chord.intervalSet.has(MAJ3);
-					char num[8];
-					int32_t n = 0;
-					if (acc < 0) {
-						num[n++] = 'b';
-					}
-					else if (acc > 0) {
-						num[n++] = '#';
-					}
-					const char* numeral = kRoman[d];
-					for (int32_t k = 0; numeral[k] != '\0'; k++) {
-						num[n++] = upper ? numeral[k] : (char)(numeral[k] - 'A' + 'a');
-					}
-					num[n] = '\0';
-					sprintf(romanOut, "%s%s", num, chord.name);
-					break;
-				}
-			}
+			writeRoman(rootPc, chord.intervalSet.has(MAJ3), chord.name);
 			return true;
 		}
+	}
+
+	// TWO DIFFERENT NOTES (Chroma, 1.3.117): an interval, named from the lowest note. However many octaves of
+	// each are held, two pitch classes are a dyad - Cody, 2026-11-24, holding A6 C7 C8: "shows nothing, include
+	// dyads". None of the chord table's shapes has two notes, so before this a dyad named nothing at all.
+	//
+	// From the bass, as it is played: C under A is a major sixth, not an inverted A minor - an interval does not
+	// say which triad it belongs to, so this does not guess. A fifth is written the way players write it ("A5").
+	// A third or a fifth on a degree of the key gets its numeral, lower case for a minor third: those three
+	// imply the chord on that degree. The other intervals get none.
+	if (present.count() == 2) {
+		int32_t otherPc = bassPc;
+		for (int32_t pc = 0; pc < 12; pc++) {
+			if (pc != bassPc && present.has(pc)) {
+				otherPc = pc;
+			}
+		}
+		const int32_t interval = ((otherPc - bassPc) + 12) % 12;
+		static const char* const kIntervalName[12] = {"",    " m2", " M2", " m3", " M3", " P4",
+		                                              " TT", "5",   " m6", " M6", " m7", " M7"};
+		sprintf(absOut, "%s%s", noteNameInKey(bassPc, flats), kIntervalName[interval]);
+		if (interval == MIN3) {
+			writeRoman(bassPc, false, "");
+		}
+		else if (interval == MAJ3) {
+			writeRoman(bassPc, true, "");
+		}
+		else if (interval == P5) {
+			writeRoman(bassPc, true, "5");
+		}
+		return true;
 	}
 	return false;
 }

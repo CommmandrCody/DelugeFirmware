@@ -62,40 +62,41 @@ enum SysexCommands : uint8_t {
 	Transport = 0x47,  // Chroma: outbound transport push - playing, tempo, and where the playhead is.
 	                   // "Show me where we are" is the one question a 4-character display cannot
 	                   // answer and a second screen exists to.
-	KeyboardState = 0x48,  // Chroma: outbound keyboard-state push - which layout, what key and scale, and
-	                       // the span of notes the grid is currently showing. All eight keyboard
-	                       // layouts report as the single view slug "keyboard" over 0x45, so a host had
-	                       // no way to tell isomorphic from in-key from piano; and root/scale only
-	                       // escaped via 0x43, which fires on harmonic palette picks alone. Cody: "I
-	                       // want the mode of the keyboard displayed clearly and the current root
-	                       // note/scale selected ... also note the range of notes C1-N".
-	GoldKnob = 0x46,       // Chroma: outbound gold-knob push — which knob, the level its LED column shows, and the
-	                       // parameter's name. The host's panel header draws the real knobs; without this it had
-	                       // nothing to draw them FROM and sat dark on every page but Design.
-	DeviceState = 0x4D,    // Chroma: outbound - current track, pad brightness and every Features setting.
-	MixerSet = 0x4E,       // Chroma: INBOUND, long form (01 02 4E ...) - set one track's level, mute or solo.
-	CommandOutcome = 0x4F, // Chroma: outbound - what became of a command, by its sequence number.
-	PanelState = 0x51,     // Chroma: outbound - which button lights are on and which buttons are held.
-	PadNotes = 0x52,       // Chroma: outbound - which note each pad of the main grid plays, and how to spell it.
-	PadVelocities = 0x53,  // Chroma: outbound - the velocity each pad plays at, where its position decides that.
-	SoundState = 0x4B,     // Chroma: outbound sound push - the sound in focus as the instrument holds it: engine,
-	                       // oscillator types, both filters, four envelopes and four LFOs. A host draws the
-	                       // sound from this instead of from its own copy of a patch.
-	MenuContext = 0x4A,    // Chroma: outbound menu-context push - which menu is open, the entries the player
-	                       // can reach and where the cursor is. 0x45 says only "the sound editor"; this
-	                       // is what lets a host follow the instrument through its own menus.
-	TrackState = 0x49,     // Chroma: outbound track-list push - every track in the song, with its name,
-	                       // colour, USB audio routing and mute/solo/armed state. The Cockpit could
-	                       // previously only learn where a track goes over USB by walking into that
-	                       // track's menu, one at a time, on a four-character display.
-	                       //
-	                       // READ-ONLY, deliberately and for now. Setting a track property from the host
-	                       // would be the SECOND inbound message this instrument has ever had (0x44 is
-	                       // the first and only), and a track property is persistent song state rather
-	                       // than a momentary gesture - so "last write wins" is not obviously the right
-	                       // rule the way it is for a chord. Read first; the write is a separate
-	                       // decision with its own conflict rule.
-	Pong = 0x7F            // Pong reply
+	KeyboardState = 0x48,   // Chroma: outbound keyboard-state push - which layout, what key and scale, and
+	                        // the span of notes the grid is currently showing. All eight keyboard
+	                        // layouts report as the single view slug "keyboard" over 0x45, so a host had
+	                        // no way to tell isomorphic from in-key from piano; and root/scale only
+	                        // escaped via 0x43, which fires on harmonic palette picks alone. Cody: "I
+	                        // want the mode of the keyboard displayed clearly and the current root
+	                        // note/scale selected ... also note the range of notes C1-N".
+	GoldKnob = 0x46,        // Chroma: outbound gold-knob push — which knob, the level its LED column shows, and the
+	                        // parameter's name. The host's panel header draws the real knobs; without this it had
+	                        // nothing to draw them FROM and sat dark on every page but Design.
+	DeviceState = 0x4D,     // Chroma: outbound - current track, pad brightness and every Features setting.
+	MixerSet = 0x4E,        // Chroma: INBOUND, long form (01 02 4E ...) - set one track's level, mute or solo.
+	CommandOutcome = 0x4F,  // Chroma: outbound - what became of a command, by its sequence number.
+	PanelState = 0x51,      // Chroma: outbound - which button lights are on and which buttons are held.
+	PadNotes = 0x52,        // Chroma: outbound - which note each pad of the main grid plays, and how to spell it.
+	PadVelocities = 0x53,   // Chroma: outbound - the velocity each pad plays at, where its position decides that.
+	KeyboardColumns = 0x54, // Chroma: outbound - what the keyboard's two sidebar columns are set to.
+	SoundState = 0x4B,      // Chroma: outbound sound push - the sound in focus as the instrument holds it: engine,
+	                        // oscillator types, both filters, four envelopes and four LFOs. A host draws the
+	                        // sound from this instead of from its own copy of a patch.
+	MenuContext = 0x4A,     // Chroma: outbound menu-context push - which menu is open, the entries the player
+	                        // can reach and where the cursor is. 0x45 says only "the sound editor"; this
+	                        // is what lets a host follow the instrument through its own menus.
+	TrackState = 0x49,      // Chroma: outbound track-list push - every track in the song, with its name,
+	                        // colour, USB audio routing and mute/solo/armed state. The Cockpit could
+	                        // previously only learn where a track goes over USB by walking into that
+	                        // track's menu, one at a time, on a four-character display.
+	                        //
+	                        // READ-ONLY, deliberately and for now. Setting a track property from the host
+	                        // would be the SECOND inbound message this instrument has ever had (0x44 is
+	                        // the first and only), and a track property is persistent song state rather
+	                        // than a momentary gesture - so "last write wins" is not obviously the right
+	                        // rule the way it is for a chord. Read first; the write is a separate
+	                        // decision with its own conflict rule.
+	Pong = 0x7F             // Pong reply
 };
 
 } // namespace SysEx

@@ -116,6 +116,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendPadNotesIfChanged(true);
 		// ...and the velocity each pad plays at, where position decides it.
 		sendPadVelocitiesIfChanged(true);
+		// ...and what the keyboard's sidebar columns are.
+		sendKeyboardColumnsIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -145,7 +147,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendDeviceStateIfChanged();
 		// ...and the pads' notes: scrolling a keyboard layout moves every note and redraws no display.
 		sendPadNotesIfChanged();
-		sendPadVelocitiesIfChanged(); // zooming or scrolling the drums layout moves every velocity
+		sendPadVelocitiesIfChanged();   // zooming or scrolling the drums layout moves every velocity
+		sendKeyboardColumnsIfChanged(); // a column's function changes with a button and no redraw
 		break;
 
 	default:
@@ -1566,6 +1569,39 @@ void HIDSysex::sendPadVelocitiesIfChanged(bool force) {
 	everSent = true;
 	msg[i++] = 0xf7;
 	lastHidCable->sendSysex(msg, i);
+}
+
+// Chroma (0x54): WHAT THE KEYBOARD'S TWO SIDEBAR COLUMNS ARE SET TO.
+//
+//   F0 00 21 7B 01 02 54 <left> <right> F7
+//
+// Each is the column's function: 0 velocity, 1 mod, 2 chord, 3 song chord memory, 4 chord memory,
+// 5 scale mode, 6 DX, 7 session. 7F 7F when the keyboard is not on screen. The two columns are eight
+// unlabelled pads each and their function changes with a button; Cody, 2026-11-23: "velocity, mod are
+// not labelled".
+void HIDSysex::sendKeyboardColumnsIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	uint8_t left = 0x7f;
+	uint8_t right = 0x7f;
+	UI* ui = getCurrentUI();
+	if (currentSong != nullptr && ui != nullptr && ui->getUIType() == UIType::KEYBOARD_SCREEN) {
+		InstrumentClip* clip = getCurrentInstrumentClip();
+		if (clip != nullptr) {
+			left = (uint8_t)clip->keyboardState.columnControl.leftColFunc & 0x7f;
+			right = (uint8_t)clip->keyboardState.columnControl.rightColFunc & 0x7f;
+		}
+	}
+	static uint8_t lastLeft = 0xff;
+	static uint8_t lastRight = 0xff;
+	if (!force && left == lastLeft && right == lastRight) {
+		return;
+	}
+	lastLeft = left;
+	lastRight = right;
+	uint8_t msg[10] = {0xf0, 0x00, 0x21, 0x7b, 0x01, 0x02, SysEx::SysexCommands::KeyboardColumns, left, right, 0xf7};
+	lastHidCable->sendSysex(msg, sizeof(msg));
 }
 
 // Chroma (0x4E in, 0x4F out): a host changes one thing on the instrument, and is told what happened.

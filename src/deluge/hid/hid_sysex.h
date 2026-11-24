@@ -73,6 +73,7 @@ void sendDeviceStateIfChanged(bool force = false);
 void sendPanelStateIfChanged(bool force = false);
 void sendPadNotesIfChanged(bool force = false);
 void sendPadVelocitiesIfChanged(bool force = false);
+void sendKeyboardColumnsIfChanged(bool force = false);
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

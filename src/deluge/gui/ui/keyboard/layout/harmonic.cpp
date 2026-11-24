@@ -546,6 +546,20 @@ int32_t KeyboardLayoutHarmonic::isoNoteChromatic(int32_t localX, int32_t y) {
 	return (getState().harmonic.isoOctave - 1) * 12 + getRootNote() + localX + y * getState().isomorphic.rowInterval;
 }
 
+int32_t KeyboardLayoutHarmonic::noteAtPad(int32_t x, int32_t y) {
+	if (x < 0 || x >= kDisplayWidth || y < 0 || y >= kDisplayHeight) {
+		return -1;
+	}
+	ColInfo ci = colInfoFor(x, getState().harmonic.swapped);
+	if (ci.region != REG_ISO || ci.local < 0 || ci.local >= kBlockWidth) {
+		return -1;
+	}
+	// The same call the pads themselves make when pressed and when drawn, so a name can never disagree
+	// with the note that sounds.
+	int32_t note = getState().harmonic.isoChromatic ? isoNoteChromatic(ci.local, y) : isoNoteAt(ci.local, y);
+	return (note >= 0 && note <= 127) ? note : -1;
+}
+
 uint8_t KeyboardLayoutHarmonic::buildVoicing(int16_t* out, uint8_t maxOut) {
 	// Gather + sort the base chord notes.
 	int16_t tmp[kMaxChordKeyboardSize];

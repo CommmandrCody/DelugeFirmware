@@ -68,6 +68,9 @@ private:
 	                           int16_t* notesOut, uint8_t maxNotes, uint8_t* rootPcOut, char* romanOut, char* absOut);
 	int32_t isoNoteAt(int32_t localX, int32_t y);        // in-key mapping (localX = iso column 0..6)
 	int32_t isoNoteChromatic(int32_t localX, int32_t y); // chromatic isomorphic mapping (localX 0..6)
+	/// The note a pad of the ISO block plays; -1 for the palette and the control columns, which play
+	/// chords and switches, not one note each. Cody, 2026-11-23: note names "in the iso in the harmonic mode".
+	int32_t noteAtPad(int32_t x, int32_t y) override;
 	// Expand the base chord (chordNotes) into the played/shown VOICING per the SPREAD + STACK controls.
 	uint8_t buildVoicing(int16_t* out, uint8_t maxOut);
 	bool takeRestrikeRequest() override {

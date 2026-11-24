@@ -1451,7 +1451,7 @@ void HIDSysex::sendPanelStateIfChanged(bool force) {
 //   F0 00 21 7B 01 02 52 <cols> <rows> <flats> <root> then rows x cols note bytes, bottom row first F7
 //
 // <cols> <rows> are 16 and 8 in a keyboard layout that has notes, and 0 0 anywhere else - and then the
-// frame ends after <root>. <flats> is 1 when the instrument's own spelling choice (Auto / Flats / Sharps,
+// frame ends after <root>. <flats> is 1 when the instrument is set to spell with flats (its "use sharps" default,
 // with Auto following the key) comes out as flats, so a host spells a note the way this instrument does
 // and never has an opinion of its own. <root> is the key's root as a pitch class. A pad that plays no
 // note is 7F.
@@ -1485,8 +1485,11 @@ void HIDSysex::sendPadNotesIfChanged(bool force) {
 		any = keyboardScreen.padNotes(notes);
 	}
 	const uint8_t root = (currentSong != nullptr) ? (uint8_t)(((currentSong->key.rootNote % 12) + 12) % 12) : 0;
-	const bool flats =
-	    (currentSong != nullptr) && deluge::gui::ui::keyboard::effectivePreferFlats(root, currentSong->key.modeNotes);
+	// THE INSTRUMENT'S OWN SETTING: the "use sharps" default that noteCodeToString() spells every note on
+	// its display with. 1.3.106 sent Chroma's key-following lean here, which is a different choice and
+	// came out as sharps on an instrument set to flats - Cody: "the notes need to follow delly, looks
+	// like flats not sharps".
+	const bool flats = !FlashStorage::defaultUseSharps;
 	put(any ? kDisplayWidth : 0);
 	put(any ? kDisplayHeight : 0);
 	put(flats ? 1 : 0);

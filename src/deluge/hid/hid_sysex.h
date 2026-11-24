@@ -80,6 +80,8 @@ void sendSampleStateIfChanged(bool force = false);
 /// Chroma (0x5B): about once a second, what the USB audio stream sent in that time. Silent while no host is
 /// streaming and nothing has changed.
 void sendHealthIfDue(bool force = false);
+/// Chroma (0x57): the chord being held on the keyboard, in the words the display uses. De-duped.
+void sendHeldChordIfChanged(bool force = false);
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

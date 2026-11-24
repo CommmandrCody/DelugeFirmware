@@ -128,6 +128,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendSampleStateIfChanged(true);
 		// ...and whether the USB audio stream is really sending.
 		sendHealthIfDue(true);
+		// ...and the chord being held, or that there is none.
+		sendHeldChordIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -161,6 +163,7 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendKeyboardColumnsIfChanged(); // a column's function changes with a button and no redraw
 		sendSampleStateIfChanged();     // hitting a kit pad selects its row and may redraw nothing
 		sendHealthIfDue();              // about once a second; the pad poll is the only steady clock a host gives
+		sendHeldChordIfChanged();       // a chord is held and let go with no display redraw a host can count on
 		break;
 
 	default:
@@ -1559,6 +1562,59 @@ void HIDSysex::sendHealthIfDue(bool force) {
 	lastAt = now;
 	lastFlags = flags;
 	last = health;
+	lastHidCable->sendSysex(msg, i);
+}
+
+// Chroma (0x57): THE CHORD BEING HELD on the keyboard, in the words the instrument's own display uses.
+//
+//   F0 00 21 7B 01 02 57 <len> <text> F7        len 0: no chord is held
+//
+// Cody, 2026-11-24, of the live note names beside the pads: "can we also include the calculated chord".
+// The Deluge already works the name out - two or more held notes are matched against its chord table and
+// scrolled across the display as "IV  Fmaj7". A host that named the chord itself could disagree with the
+// instrument it is mirroring; this sends the instrument's answer instead.
+//
+// Asked on the pad poll, like the pad notes. Reads the held notes and the key; draws and changes nothing.
+void HIDSysex::sendHeldChordIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	char name[64];
+	name[0] = '\0';
+	UI* ui = getCurrentUI();
+	if (currentSong != nullptr && ui != nullptr && ui->getUIType() == UIType::KEYBOARD_SCREEN) {
+		keyboardScreen.heldChordName(name);
+	}
+	name[63] = '\0';
+
+	uint8_t msg[7 + 1 + 64 + 1];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02;
+	msg[i++] = SysEx::SysexCommands::HeldChord;
+	uint32_t hash = 2166136261u;
+	const int32_t n = (int32_t)strlen(name);
+	msg[i++] = (uint8_t)n;
+	for (int32_t k = 0; k < n; k++) {
+		const uint8_t c = (uint8_t)name[k];
+		const uint8_t safe = (c >= 32 && c < 127) ? c : '?'; // 7-bit and printable, or the frame ends early
+		msg[i++] = safe;
+		hash = (hash ^ safe) * 16777619u;
+	}
+	hash = (hash ^ (uint8_t)n) * 16777619u;
+
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
+	if (!force && everSent && hash == lastHash) {
+		return;
+	}
+	lastHash = hash;
+	everSent = true;
+	msg[i++] = 0xf7;
 	lastHidCable->sendSysex(msg, i);
 }
 

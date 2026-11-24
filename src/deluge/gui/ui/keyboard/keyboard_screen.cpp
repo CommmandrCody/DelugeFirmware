@@ -1170,7 +1170,21 @@ void KeyboardScreen::drawNoteCode(int32_t noteCode) {
 // and show the name (Roman + absolute, spelled to the key). Returns false (caller shows the single
 // note) if fewer than 2 notes or no chord matched.
 bool KeyboardScreen::drawHeldChordName() {
-	if (currentNotesState.count < 2) {
+	char full[64];
+	if (!heldChordName(full)) {
+		return false;
+	}
+	display->setScrollingText(full);
+	return true;
+}
+
+// The name of the chord being held, exactly as drawHeldChordName() shows it: "IV  Fmaj7", or the absolute
+// name alone when it has no place in the key. False, and an empty string, when fewer than two notes are
+// held or they match no chord. Reads the held notes and the key; changes nothing and draws nothing, so a
+// host report (Chroma 0x57) can ask for the same name the display is given.
+bool KeyboardScreen::heldChordName(char full[64]) {
+	full[0] = '\0';
+	if (currentSong == nullptr || currentNotesState.count < 2) {
 		return false;
 	}
 	uint8_t notes[16];
@@ -1189,14 +1203,12 @@ bool KeyboardScreen::drawHeldChordName() {
 	if (!describeChordInKey(notes, count, currentSong->key.rootNote % 12, currentSong->key.modeNotes, absName, roman)) {
 		return false;
 	}
-	char full[64];
 	if (roman[0] != '\0') {
-		sprintf(full, "%s  %s", roman, absName);
+		snprintf(full, 64, "%s  %s", roman, absName);
 	}
 	else {
-		sprintf(full, "%s", absName);
+		snprintf(full, 64, "%s", absName);
 	}
-	display->setScrollingText(full);
 	return true;
 }
 

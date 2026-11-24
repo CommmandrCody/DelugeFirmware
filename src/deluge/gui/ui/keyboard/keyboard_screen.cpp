@@ -1277,6 +1277,32 @@ void KeyboardScreen::graphicsRoutine() {
 // drawing the grid needs to tell those copies from everything else that is lit - scale colours, the
 // root - and only the layout knows which pad is which note. Cody, 2026-11-23: "I want the white to
 // cascade across the grid like the played ones but lighter". A layout with no notes says nothing.
+// WHICH PADS THE SEQUENCE IS PLAYING: one byte per main-grid column, bit y per row. A pad counts when the
+// note it plays is one the clip is sounding right now - the recorded notes, lit on the keyboard as they
+// play back. Cody, 2026-11-24: "when playing back can we subtly show the note names ... for the pressed
+// (recorded) midi notes". Separate from soundingPads(), which is about fingers.
+void KeyboardScreen::playingPads(uint8_t columns[kDisplayWidth]) {
+	for (int32_t x = 0; x < kDisplayWidth; x++) {
+		columns[x] = 0;
+	}
+	InstrumentClip* clip = getCurrentInstrumentClip();
+	if (clip == nullptr) {
+		return;
+	}
+	KeyboardLayout* layout = layout_list[clip->keyboardState.currentLayout];
+	if (layout == nullptr) {
+		return;
+	}
+	for (int32_t x = 0; x < kDisplayWidth; x++) {
+		for (int32_t y = 0; y < kDisplayHeight; y++) {
+			const int32_t n = layout->noteAtPad(x, y);
+			if (n >= 0 && n < kHighestKeyboardNote && highlightedNotes[n] != 0) {
+				columns[x] |= (1 << y);
+			}
+		}
+	}
+}
+
 void KeyboardScreen::soundingPads(uint8_t columns[kDisplayWidth]) {
 	for (int32_t x = 0; x < kDisplayWidth; x++) {
 		columns[x] = 0;

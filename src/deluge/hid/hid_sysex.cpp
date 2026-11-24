@@ -1798,7 +1798,7 @@ bool HIDSysex::takeChordMod(uint8_t* modType, uint8_t* value) {
 void HIDSysex::sendPadGrid(MIDICable& cable) {
 	const int32_t W = kDisplayWidth + kSideBarWidth; // 18
 	const int32_t H = kDisplayHeight;                // 8
-	uint8_t raw[8 * 18 * 3 + 18 + 18];
+	uint8_t raw[8 * 18 * 3 + 18 + 18 + 18];
 	int32_t p = 0;
 	for (int32_t y = 0; y < H; y++) {
 		for (int32_t x = 0; x < W; x++) {
@@ -1838,6 +1838,15 @@ void HIDSysex::sendPadGrid(MIDICable& cable) {
 	}
 	for (int32_t x = 0; x < W; x++) {
 		raw[p++] = (x < kDisplayWidth) ? sounding[x] : 0;
+	}
+	// WHICH PADS THE SEQUENCE IS PLAYING (1.3.113): eighteen more, the same shape. In a keyboard layout
+	// these are the pads lit by the clip's recorded notes as they play back. All zero anywhere else.
+	uint8_t playing[kDisplayWidth] = {0};
+	if (padUI != nullptr && padUI->getUIType() == UIType::KEYBOARD_SCREEN) {
+		keyboardScreen.playingPads(playing);
+	}
+	for (int32_t x = 0; x < W; x++) {
+		raw[p++] = (x < kDisplayWidth) ? playing[x] : 0;
 	}
 	uint8_t reply_hdr[7] = {0xF0, 0x00, 0x21, 0x7B, 0x01, 0x02, 0x50};
 	uint8_t* reply = midiEngine.sysex_fmt_buffer;

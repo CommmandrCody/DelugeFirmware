@@ -46,6 +46,7 @@ public:
 	/// would be a second version of the thing drifting away from the first.
 	bool noteRange(int32_t& lo, int32_t& hi);
 	void soundingPads(uint8_t columns[kDisplayWidth]);
+	void playingPads(uint8_t columns[kDisplayWidth]);
 	bool padNotes(uint8_t notes[kDisplayHeight][kDisplayWidth]);
 	bool padVelocities(uint8_t velocities[kDisplayHeight][kDisplayWidth]);
 

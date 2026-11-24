@@ -1880,6 +1880,22 @@ void MidiFollow::readDefaultsFromFile() {
 	activeDeserializer->closeWriter();
 	successfullyReadDefaultsFromFile = true;
 
+	// A FILE THAT MAPS NOTHING IS A BROKEN FILE, NOT A CHOICE. The map was cleared above so the file could
+	// fill it; a file whose <cc_mappings> is empty (or missing) then leaves every controller mapped to
+	// nothing, MIDI Follow dead, and - because this same empty map is what gets written back - the file
+	// broken for good. Found on Cody's instrument twice: September 2026 and 24 November 2026, when a host
+	// sent cutoff ten times and nothing moved. So: no mapping at all means the defaults.
+	bool anyMapping = false;
+	for (uint8_t cc : soundParamToCC) {
+		anyMapping = anyMapping || (cc != MIDI_CC_NONE);
+	}
+	for (uint8_t cc : globalParamToCC) {
+		anyMapping = anyMapping || (cc != MIDI_CC_NONE);
+	}
+	if (!anyMapping) {
+		initDefaultMappings();
+	}
+
 	// Write the migrated settings back out over the <settings> block we just skipped
 	if (FlashStorage::areLegacyMidiFollowSettingsPending()) {
 		completeLegacyFlashMigration(writeDefaultsToFile());

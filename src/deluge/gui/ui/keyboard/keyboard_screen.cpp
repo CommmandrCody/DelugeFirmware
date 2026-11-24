@@ -941,6 +941,20 @@ void KeyboardScreen::selectLayout(int8_t offset) {
 		ChordService::clearPending();
 		captureClear(); // and drop the retrospective-capture buffer (fresh context)
 		display->displayPopup(l10n::get(layout_list[getCurrentInstrumentClip()->keyboardState.currentLayout]->name()));
+
+		// THE HARMONIC LAYOUT ARRIVES WITH ITS OWN SIDEBAR: the song's chord bank on the left, velocity on
+		// the right. Cody, 2026-11-23: "can we default to chord bank and velocity for the columns when we
+		// set the harmonic keyboard to active". The layout is for picking, voicing and banking chords, so
+		// the bank is the column it needs; the stock pair (velocity, mod) left the bank a menu away.
+		// Only on SWITCHING to it - a column the player changes afterwards stays changed.
+		if (getCurrentInstrumentClip()->keyboardState.currentLayout == KeyboardLayoutType::KeyboardLayoutTypeHarmonic) {
+			auto& columns = getCurrentInstrumentClip()->keyboardState.columnControl;
+			columns.leftColFunc = layout::SONG_CHORD_MEM;
+			columns.lastLeftFunc = layout::SONG_CHORD_MEM;
+			columns.leftCol = columns.getColumnForFunc(columns.leftColFunc);
+			columns.rightColFunc = layout::VELOCITY;
+			columns.rightCol = columns.getColumnForFunc(columns.rightColFunc);
+		}
 	}
 
 	// Ensure scale mode is as expected

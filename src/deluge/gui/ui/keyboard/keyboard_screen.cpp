@@ -215,23 +215,59 @@ struct CapturedNote {
 	uint32_t offSamples;
 	bool sounding;
 };
-constexpr int32_t kCaptureMax = 128;
+// THE LATEST PHRASE, NOT THE FIRST ONE. This buffer used to hold 128 notes and, once full, refused new
+// ones - "keep the earliest take" - and it never aged anything out. So it held the first 128 notes played
+// since the keyboard was opened, with every later note thrown away, and a dump wrote that old material
+// stretched over however long ago it began. Cody, 2026-11-23: "I played a riff of saved chords and used
+// the recall to capture and it's all off and not correct, like it didn't record the banked chords" - a
+// bank of chords is five or more notes a press, so 128 is used up within a couple of dozen chords.
+//
+// Now: the newest notes are kept and the oldest dropped when it fills, and a new phrase starts by itself
+// after two bars with nothing sounding - so what is dumped is what was just played.
+constexpr int32_t kCaptureMax = 512;
+constexpr int32_t kCaptureGapBars = 2;
 CapturedNote g_capture[kCaptureMax];
 int32_t g_captureCount = 0;
 uint32_t g_captureFirst = 0;
+uint32_t g_captureQuietSince = 0; // when the last sounding note was let go
 
+bool captureAnythingSounding() {
+	for (int32_t i = g_captureCount - 1; i >= 0; --i) {
+		if (g_capture[i].sounding) {
+			return true;
+		}
+	}
+	return false;
+}
+uint32_t capturePhraseGapSamples() {
+	uint32_t samplesPerTick = playbackHandler.getTimePerInternalTick();
+	uint32_t bar = (currentSong != nullptr) ? currentSong->getBarLength() : 0;
+	uint64_t gap = (uint64_t)samplesPerTick * bar * kCaptureGapBars;
+	if (gap < 2 * 44100u) {
+		gap = 2 * 44100u; // never less than two seconds, whatever the tempo says
+	}
+	return (gap > 0x7FFFFFFFu) ? 0x7FFFFFFFu : (uint32_t)gap;
+}
+void captureClear() {
+	g_captureCount = 0;
+}
 void captureNoteOn(int32_t note, uint8_t velocity) {
 	if (runtimeFeatureSettings.get(RuntimeFeatureSettingType::RetrospectiveCapture) != RuntimeFeatureStateToggle::On) {
 		return; // feature off — don't buffer
 	}
-	if (g_captureCount >= kCaptureMax) {
-		return; // buffer full; keep the earliest take rather than overwrite
-	}
 	uint32_t now = AudioEngine::audioSampleTimer;
-	if (g_captureCount == 0) {
-		g_captureFirst = now;
+	// A long silence ends a phrase: what was played before it is not what the player is about to capture.
+	if (g_captureCount > 0 && !captureAnythingSounding()
+	    && (uint32_t)(now - g_captureQuietSince) > capturePhraseGapSamples()) {
+		captureClear();
+	}
+	if (g_captureCount >= kCaptureMax) {
+		// Full: let go of the oldest note, never the newest.
+		memmove(&g_capture[0], &g_capture[1], sizeof(CapturedNote) * (kCaptureMax - 1));
+		g_captureCount = kCaptureMax - 1;
 	}
 	g_capture[g_captureCount++] = {note, velocity, now, now, true};
+	g_captureFirst = g_capture[0].onSamples; // the phrase begins at the oldest note still kept
 }
 void captureNoteOff(int32_t note) {
 	uint32_t now = AudioEngine::audioSampleTimer;
@@ -242,9 +278,9 @@ void captureNoteOff(int32_t note) {
 			break;
 		}
 	}
-}
-void captureClear() {
-	g_captureCount = 0;
+	if (!captureAnythingSounding()) {
+		g_captureQuietSince = now;
+	}
 }
 } // namespace
 
@@ -442,10 +478,15 @@ void KeyboardScreen::updateActiveNotes() {
 			                              currentNotesState.notes[idx].mpeValues);
 		}
 
+		// Retrospective MIDI capture: stash every note that was just SOUNDED, even when not recording - a
+		// brand new note and a re-struck one alike. This used to sit inside the "new notes only" block
+		// below, and a re-strike is exactly what happens to a note two chords in a row share: it was closed
+		// off by the note-off above and then never captured again, so each chord after the first lost every
+		// note it had in common with the one before. Played from a bank, that is most of the notes.
+		captureNoteOn(newNote, currentNotesState.notes[idx].velocity);
+
 		// Post sound logic for non-retrigger events
 		if (currentToLastIdx[idx] == -1) {
-			// Retrospective MIDI capture: stash every newly played note (even when not recording).
-			captureNoteOn(newNote, currentNotesState.notes[idx].velocity);
 			if (!currentNotesState.notes[idx].generatedNote) {
 				// If you're playing a chord (2+ notes held), name the chord; else the single note.
 				if (!drawHeldChordName()) {

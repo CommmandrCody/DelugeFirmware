@@ -32,6 +32,11 @@ public:
 	                         KeyboardLayout* layout) override;
 	void handlePad(ModelStackWithTimelineCounter* modelStackWithTimelineCounter, PressedPad pad,
 	               KeyboardLayout* layout) override;
+	/// The same ladder renderColumn() and handlePad() walk: velocityMin at the bottom, one step a row.
+	int32_t valueAtPad(int32_t y) override {
+		return (y < 0 || y >= kDisplayHeight) ? -1
+		                                      : (int32_t)((velocityMin + (uint32_t)y * velocityStep) >> kVelModShift);
+	}
 
 private:
 	// use higher precision internally so that scaling and stepping is cleaner

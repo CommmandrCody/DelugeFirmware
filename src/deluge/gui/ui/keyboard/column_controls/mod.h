@@ -31,6 +31,10 @@ public:
 	                         KeyboardLayout* layout) override;
 	void handlePad(ModelStackWithTimelineCounter* modelStackWithTimelineCounter, PressedPad pad,
 	               KeyboardLayout* layout) override;
+	/// The same ladder renderColumn() and handlePad() walk: modMin at the bottom, one step a row.
+	int32_t valueAtPad(int32_t y) override {
+		return (y < 0 || y >= kDisplayHeight) ? -1 : (int32_t)((modMin + (uint32_t)y * modStep) >> kVelModShift);
+	}
 
 private:
 	uint32_t modMax = 127 << kVelModShift;

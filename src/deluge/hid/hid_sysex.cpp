@@ -1571,37 +1571,78 @@ void HIDSysex::sendPadVelocitiesIfChanged(bool force) {
 	lastHidCable->sendSysex(msg, i);
 }
 
-// Chroma (0x54): WHAT THE KEYBOARD'S TWO SIDEBAR COLUMNS ARE SET TO.
+// Chroma (0x54): WHAT THE KEYBOARD'S TWO SIDEBAR COLUMNS ARE SET TO, and the value on each of their pads.
 //
-//   F0 00 21 7B 01 02 54 <left> <right> F7
+//   F0 00 21 7B 01 02 54 <left> <right> <leftHas> <rightHas> 8 x <left value> 8 x <right value> F7
 //
-// Each is the column's function: 0 velocity, 1 mod, 2 chord, 3 song chord memory, 4 chord memory,
-// 5 scale mode, 6 DX, 7 session. 7F 7F when the keyboard is not on screen. The two columns are eight
-// unlabelled pads each and their function changes with a button; Cody, 2026-11-23: "velocity, mod are
-// not labelled".
+// <left> <right> are each column's function: 0 velocity, 1 mod, 2 chord, 3 song chord memory, 4 chord
+// memory, 5 scale mode, 6 DX, 7 session; 7F 7F when the keyboard is not on screen. <leftHas> / <rightHas>
+// are 1 when that column's pads are VALUES (velocity, mod), and then its eight bytes are the value each
+// pad sets, bottom pad first; otherwise the eight bytes are 0 and mean nothing. (1.3.111 sent only the
+// first two bytes.)
+//
+// The two columns are eight unlabelled pads each. Cody, 2026-11-23: "velocity, mod are not labelled ...
+// I wanted specifically to have visual labels of the velocities and mod values".
 void HIDSysex::sendKeyboardColumnsIfChanged(bool force) {
 	if (lastHidCable == nullptr) {
 		return;
 	}
-	uint8_t left = 0x7f;
-	uint8_t right = 0x7f;
+	uint8_t msg[7 + 4 + 2 * kDisplayHeight + 1];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02;
+	msg[i++] = SysEx::SysexCommands::KeyboardColumns;
+	uint32_t hash = 2166136261u;
+	auto put = [&](uint8_t b) {
+		msg[i++] = b & 0x7f;
+		hash = (hash ^ b) * 16777619u;
+	};
+
+	uint8_t func[2] = {0x7f, 0x7f};
+	uint8_t has[2] = {0, 0};
+	uint8_t values[2][kDisplayHeight] = {};
 	UI* ui = getCurrentUI();
 	if (currentSong != nullptr && ui != nullptr && ui->getUIType() == UIType::KEYBOARD_SCREEN) {
 		InstrumentClip* clip = getCurrentInstrumentClip();
 		if (clip != nullptr) {
-			left = (uint8_t)clip->keyboardState.columnControl.leftColFunc & 0x7f;
-			right = (uint8_t)clip->keyboardState.columnControl.rightColFunc & 0x7f;
+			auto& columns = clip->keyboardState.columnControl;
+			func[0] = (uint8_t)columns.leftColFunc & 0x7f;
+			func[1] = (uint8_t)columns.rightColFunc & 0x7f;
+			deluge::gui::ui::keyboard::controls::ControlColumn* column[2] = {columns.leftCol, columns.rightCol};
+			for (int32_t c = 0; c < 2; c++) {
+				for (int32_t y = 0; y < kDisplayHeight; y++) {
+					const int32_t v = (column[c] != nullptr) ? column[c]->valueAtPad(y) : -1;
+					if (v >= 0) {
+						has[c] = 1;
+						values[c][y] = (uint8_t)(v > 127 ? 127 : v);
+					}
+				}
+			}
 		}
 	}
-	static uint8_t lastLeft = 0xff;
-	static uint8_t lastRight = 0xff;
-	if (!force && left == lastLeft && right == lastRight) {
+	put(func[0]);
+	put(func[1]);
+	put(has[0]);
+	put(has[1]);
+	for (int32_t c = 0; c < 2; c++) {
+		for (int32_t y = 0; y < kDisplayHeight; y++) {
+			put(values[c][y]);
+		}
+	}
+
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
+	if (!force && everSent && hash == lastHash) {
 		return;
 	}
-	lastLeft = left;
-	lastRight = right;
-	uint8_t msg[10] = {0xf0, 0x00, 0x21, 0x7b, 0x01, 0x02, SysEx::SysexCommands::KeyboardColumns, left, right, 0xf7};
-	lastHidCable->sendSysex(msg, sizeof(msg));
+	lastHash = hash;
+	everSent = true;
+	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
 }
 
 // Chroma (0x4E in, 0x4F out): a host changes one thing on the instrument, and is told what happened.

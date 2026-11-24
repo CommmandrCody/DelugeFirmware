@@ -37,6 +37,11 @@ public:
 	                                 KeyboardLayout* layout) = 0;
 	virtual void handlePad(ModelStackWithTimelineCounter* modelStackWithTimelineCounter, PressedPad pad,
 	                       KeyboardLayout* layout) = 0;
+
+	/// The value (0-127) the pad in row `y` of this column sets, or -1 if its pads are not values.
+	/// Velocity and mod answer; the chord, scale and session columns hold things, not numbers.
+	/// Cody, 2026-11-23: "I wanted specifically to have visual labels of the velocities and mod values".
+	virtual int32_t valueAtPad(int32_t y) { return -1; }
 };
 
 } // namespace deluge::gui::ui::keyboard::controls

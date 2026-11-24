@@ -81,6 +81,7 @@ enum SysexCommands : uint8_t {
 	KeyboardColumns = 0x54, // Chroma: outbound - what the keyboard's two sidebar columns are set to.
 	SampleState = 0x55,     // Chroma: outbound - the sample in focus: file, repeat mode, start, end and loop.
 	HeldChord = 0x57,       // Chroma: outbound - the chord being held on the keyboard, named as the display names it.
+	AnalogueProbe = 0x5C,   // Chroma: outbound - a diagnostic: the raw reading of each of the converter's eight inputs.
 	Health = 0x5B,          // Chroma: outbound - once a second: is the USB audio stream really sending.
 	SoundState = 0x4B,      // Chroma: outbound sound push - the sound in focus as the instrument holds it: engine,
 	                        // oscillator types, both filters, four envelopes and four LFOs. A host draws the

@@ -111,6 +111,9 @@ uint8_t batteryCurrentRegion = 2;
 uint16_t batteryMV;
 bool batteryLEDState = false;
 
+// Chroma (0x5C): the last raw reading of each of the converter's eight inputs, 0 until read.
+volatile uint16_t analogueProbe[8] = {0};
+
 void batteryLEDBlink() {
 	setOutputState(BATTERY_LED.port, BATTERY_LED.pin, batteryLEDState);
 	int32_t blinkPeriod = ((int32_t)batteryMV - 2630) * 3;
@@ -158,7 +161,19 @@ void inputRoutine() {
 	// Battery voltage
 	// If analog read is ready...
 
-	if (ADC.ADCSR & (1 << 15)) {
+	// Chroma (0x5C, 1.3.118): THE ANALOGUE PROBE. The converter has eight inputs (AN0-AN7, port 1 pins 8-15) and
+	// this routine has only ever converted one, the battery on AN5. Cody, 2026-11-24, on the panel's VOLUME knob:
+	// "so the knob is not readable at the hardware level???" - nobody had looked. So every other pass converts
+	// one of the eight in turn and keeps the reading for a host to see; the battery still converts every 200 ms.
+	// Reads only: AN5 is the battery and AN6 the analog clock input, and reading a pin's voltage does not
+	// change what the pin does.
+	static int32_t probeChannel = 0; // the input the converter was last pointed at, 0-7
+	static bool probeTurn = false;   // alternate: battery, probe, battery, probe
+	if ((ADC.ADCSR & (1 << 15)) && probeChannel != SYS_VOLT_SENSE_PIN) {
+		analogueProbe[probeChannel] = (&ADC.ADDRA)[probeChannel];
+	}
+	else if (ADC.ADCSR & (1 << 15)) {
+		analogueProbe[SYS_VOLT_SENSE_PIN] = ADC.ADDRF;
 		int32_t numericReading = ADC.ADDRF;
 		// Apply LPF
 		int32_t voltageReading = numericReading * 3300;
@@ -200,8 +215,17 @@ makeBattLEDSolid:
 		}
 	}
 
-	// Set up for next analog read
-	ADC.ADCSR = (1 << 13) | (0b011 << 6) | SYS_VOLT_SENSE_PIN;
+	// Set up for next analog read: the battery, or on alternate passes the next of the eight.
+	static int32_t probeNext = 0;
+	probeTurn = !probeTurn;
+	if (probeTurn) {
+		probeChannel = probeNext;
+		probeNext = (probeNext + 1) & 7;
+	}
+	else {
+		probeChannel = SYS_VOLT_SENSE_PIN;
+	}
+	ADC.ADCSR = (1 << 13) | (0b011 << 6) | probeChannel;
 
 	MIDIDeviceManager::slowRoutine();
 

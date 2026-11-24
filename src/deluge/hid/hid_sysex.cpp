@@ -130,6 +130,7 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendHealthIfDue(true);
 		// ...and the chord being held, or that there is none.
 		sendHeldChordIfChanged(true);
+		sendAnalogueProbeIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -164,6 +165,7 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendSampleStateIfChanged();     // hitting a kit pad selects its row and may redraw nothing
 		sendHealthIfDue();              // about once a second; the pad poll is the only steady clock a host gives
 		sendHeldChordIfChanged();       // a chord is held and let go with no display redraw a host can count on
+		sendAnalogueProbeIfChanged();   // the converter's eight inputs, when one moves
 		break;
 
 	default:
@@ -1615,6 +1617,56 @@ void HIDSysex::sendHeldChordIfChanged(bool force) {
 	lastHash = hash;
 	everSent = true;
 	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
+}
+
+// Chroma (0x5C): THE ANALOGUE PROBE - a diagnostic, not a feature.
+//
+//   F0 00 21 7B 01 02 5C <ver=1> 8 x (<hi> <lo>) F7      each a 14-bit reading, AN0 first
+//
+// The converter's eight inputs, as deluge.cpp last read them (it converts one every 200 ms, so a full round
+// takes 1.6 s). Built to answer one question - does turning the panel's VOLUME knob move any of them - and
+// to be taken out again once it is answered. Sent when any reading moves by more than a small margin, so
+// the noise on an input with nothing connected does not flood the wire.
+extern volatile uint16_t analogueProbe[8];
+void HIDSysex::sendAnalogueProbeIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	static uint16_t sent[8] = {0};
+	static bool everSent = false;
+	uint16_t now[8];
+	bool moved = force || !everSent;
+	for (int32_t c = 0; c < 8; c++) {
+		now[c] = (uint16_t)(analogueProbe[c] >> 2); // 16 bits held, 14 sent
+		const int32_t d = (int32_t)now[c] - (int32_t)sent[c];
+		if (d > 96 || d < -96) {
+			moved = true;
+		}
+	}
+	if (!moved) {
+		return;
+	}
+	if (lastHidCable->sendBufferSpace() < 64 || lastHidCable->sendBufferSpace() > 0x10000) {
+		return;
+	}
+	uint8_t msg[7 + 1 + 16 + 1];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02;
+	msg[i++] = SysEx::SysexCommands::AnalogueProbe;
+	msg[i++] = 1;
+	for (int32_t c = 0; c < 8; c++) {
+		msg[i++] = (uint8_t)((now[c] >> 7) & 0x7f);
+		msg[i++] = (uint8_t)(now[c] & 0x7f);
+		sent[c] = now[c];
+	}
+	msg[i++] = 0xf7;
+	everSent = true;
 	lastHidCable->sendSysex(msg, i);
 }
 

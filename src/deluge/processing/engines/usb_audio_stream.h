@@ -41,6 +41,26 @@ public:
 	/// Whether a host is streaming, and so whether stems are worth capturing.
 	static bool stemsWanted();
 
+	/// Chroma (0x5B): the stream's state and running totals, for a host's health report. Reads only.
+	struct Health {
+		bool streaming;        ///< a host has the streaming interface open
+		bool timerRunning;     ///< the write timer is running
+		bool transferInFlight; ///< the driver holds a transfer
+		bool dmaBusy;          ///< a packet is with the DMA controller
+		bool dmaConfigured;
+		bool primed;
+		uint32_t started;       ///< packets of audio handed to the controller, ever
+		uint32_t standby;       ///< packets of standby silence, ever
+		uint32_t retired;       ///< packets committed to the pipe, ever
+		uint32_t fifoNotReady;  ///< write attempts that found the pipe not ready, ever
+		uint32_t dmaBusyPasses; ///< write attempts that found the last packet still moving, ever
+		uint32_t recoveries;    ///< abandoned transfers ended by force, ever
+		uint32_t resyncs;       ///< times the reader was thrown forward, ever
+		uint32_t underruns;     ///< packets sent as silence for want of audio, ever
+		int32_t lead;           ///< frames the engine is ahead of the packet builder
+	};
+	static void readHealth(Health& out);
+
 	/// Clears the stem accumulators and settles the return's window. Once per render window, before any track.
 	static void beginRender(uint32_t numSamples);
 

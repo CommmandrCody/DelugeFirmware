@@ -248,6 +248,18 @@ volatile bool audioDmaBusy = false;
 /// Passes on which the transmit pipe has looked idle while a transfer is still outstanding.
 uint32_t stuckPasses = 0;
 
+/// Chroma (0x5B): running totals for a host's health report, so a stream that has stopped answering can be told
+/// from one that is sending silence. Only ever counted up here and read by readHealth(); a read that lands between
+/// two counts is off by one, which a once-a-second report does not care about.
+volatile uint32_t healthStarted = 0;      ///< packets of audio handed to the DMA controller
+volatile uint32_t healthStandby = 0;      ///< packets of standby silence handed over because the queue was empty
+volatile uint32_t healthRetired = 0;      ///< packets the controller finished and that were committed to the pipe
+volatile uint32_t healthFifoNotReady = 0; ///< timer passes that found the pipe's FIFO not ready to take a packet
+volatile uint32_t healthDmaBusy = 0;      ///< timer passes that found the previous packet still moving
+volatile uint32_t healthRecoveries = 0;   ///< abandoned driver transfers ended by force
+volatile uint32_t healthResyncs = 0;      ///< times the reader was thrown forward after falling a ring behind
+volatile uint32_t healthUnderruns = 0;    ///< packets sent as silence because the ring held too little
+
 /* ---- In: host to device ------------------------------------------------------------------------------------- */
 
 constexpr uint32_t kRxChannels = USB_CFG_PAUDIO_RX_CHANNELS;
@@ -821,11 +833,13 @@ uint32_t buildNextPacket(uint8_t* buffer) {
 	if (available >= kResyncFrames) {
 		readFrame = writeFrame - kLeadFrames;
 		available = kLeadFrames;
+		healthResyncs = healthResyncs + 1;
 	}
 
 	// Not enough for a full packet: silence rather than a runt, and the audio waits in the ring for the next one.
 	if (available < frames) {
 		memset(buffer, 0, frames * kFrameBytes);
+		healthUnderruns = healthUnderruns + 1;
 		return frames;
 	}
 
@@ -890,6 +904,7 @@ void endAbandonedTransfer() {
 		return;
 	}
 	stuckPasses = 0;
+	healthRecoveries = healthRecoveries + 1;
 	// Through the driver, which also releases its own record of the pipe.
 	usb_pstd_forced_termination(USB_CFG_PAUDIO_ISO_IN, kUsbDataStop);
 	transferInFlight = false;
@@ -923,6 +938,7 @@ void retireAudioDma() {
 	}
 	DMACn(kAudioDmaChannel).CHCTRL_n = kDmaChctrlClearEnd | kDmaChctrlClearTc;
 	usbRegisters()->D0FIFOCTR |= USB_BVAL;
+	healthRetired = healthRetired + 1;
 	if (audioDmaStandby) {
 		audioDmaStandby = false;
 	}
@@ -986,12 +1002,14 @@ void audioWriteTimerInterrupt(uint32_t /*intSense*/) {
 		// A finished transfer whose interrupt has not run yet. Retiring it here means one missed interrupt cannot
 		// stall the stream.
 		if ((DMACn(kAudioDmaChannel).CHSTAT_n & kDmaBusy) != 0u) {
+			healthDmaBusy = healthDmaBusy + 1;
 			return;
 		}
 		retireAudioDma();
 	}
 
 	if ((usbRegisters()->D0FIFOCTR & USB_FRDY) == 0u) {
+		healthFifoNotReady = healthFifoNotReady + 1;
 		return;
 	}
 
@@ -1000,12 +1018,17 @@ void audioWriteTimerInterrupt(uint32_t /*intSense*/) {
 		if (!startAudioDma(standbyPacket.data, standbyBytes)) {
 			audioDmaStandby = false;
 		}
+		else {
+			healthStandby = healthStandby + 1;
+		}
 		return;
 	}
 
 	// queueRead advances when the transfer retires, not here: the controller is still reading this slot.
 	const uint32_t slot = queueRead % kQueueSlots;
-	startAudioDma(packetQueue[slot].data, packetQueueBytes[slot]);
+	if (startAudioDma(packetQueue[slot].data, packetQueueBytes[slot])) {
+		healthStarted = healthStarted + 1;
+	}
 }
 
 void buildQueuedPackets() {
@@ -1193,6 +1216,24 @@ void USBAudioStream::service() {
 
 bool USBAudioStream::stemsWanted() {
 	return streamActive;
+}
+
+void USBAudioStream::readHealth(Health& out) {
+	out.streaming = streamActive;
+	out.timerRunning = audioTimerRunning;
+	out.transferInFlight = transferInFlight;
+	out.dmaBusy = audioDmaBusy;
+	out.dmaConfigured = audioDmaConfigured;
+	out.primed = primed;
+	out.started = healthStarted;
+	out.standby = healthStandby;
+	out.retired = healthRetired;
+	out.fifoNotReady = healthFifoNotReady;
+	out.dmaBusyPasses = healthDmaBusy;
+	out.recoveries = healthRecoveries;
+	out.resyncs = healthResyncs;
+	out.underruns = healthUnderruns;
+	out.lead = (int32_t)(writeFrame - readFrame);
 }
 
 void USBAudioStream::beginRender(uint32_t numSamples) {

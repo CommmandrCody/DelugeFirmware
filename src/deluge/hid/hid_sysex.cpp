@@ -34,6 +34,7 @@
 #include "modulation/params/param_set.h" // Chroma (0x4B)                       // Chroma: resync — read the live key/scale to push on handshake
 #include "playback/playback_handler.h" // Chroma: transport push - is it running, and where
 #include "processing/engines/audio_engine.h"
+#include "processing/engines/usb_audio_stream.h"   // Chroma (0x5B): the stream's own counters
 #include "processing/sound/sound_drum.h"           // Chroma (0x4B): a kit row's name
 #include "processing/sound/sound_instrument.h"     // Chroma (0x4B): the track's own sound
 #include "storage/flash_storage.h"                 // Chroma (0x4D): pad brightness
@@ -125,6 +126,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendKeyboardColumnsIfChanged(true);
 		// ...and the sample the sound in focus plays, or that there is none.
 		sendSampleStateIfChanged(true);
+		// ...and whether the USB audio stream is really sending.
+		sendHealthIfDue(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -157,6 +160,7 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendPadVelocitiesIfChanged();   // zooming or scrolling the drums layout moves every velocity
 		sendKeyboardColumnsIfChanged(); // a column's function changes with a button and no redraw
 		sendSampleStateIfChanged();     // hitting a kit pad selects its row and may redraw nothing
+		sendHealthIfDue();              // about once a second; the pad poll is the only steady clock a host gives
 		break;
 
 	default:
@@ -1469,6 +1473,95 @@ void HIDSysex::sendSampleStateIfChanged(bool force) {
 	lastHidCable->sendSysex(msg, length);
 }
 
+// Chroma (0x5B): HEALTH - is the USB audio stream really sending.
+//
+//   F0 00 21 7B 01 02 5B <ver=1> <flags> <interval ms x2> <started x2> <standby x2> <retired x2>
+//                        <notReady x2> <dmaBusy x2> <recoveries> <resyncs> <underruns x2> <lead x2, +8192> F7
+//
+// Cody, 2026-11-24: "after a while the scope and waveform gets stuck ... the wire is silent yet the scope is
+// stuck showing data". Measured that day: the computer was receiving the same quarter second of his last
+// note over and over, bit for bit. That is what a host does when an audio endpoint stops answering - it
+// replays what it has. Nothing on the wire said the stream had stopped, so a host drew the replay as live.
+//
+// The counts are what happened since the previous report, and <interval> is how long that was, so a host
+// can tell "a thousand packets a second" from "none". <flags>: 1 a host has the stream open, 2 the write
+// timer is running, 4 the driver holds a transfer, 8 a packet is with the DMA controller, 16 the DMA port
+// is set up, 32 the reader is primed. Counts stop at 16383, the two single-byte ones at 127.
+//
+// Reads only. About once a second, on the pad poll. Says nothing while no host is streaming and the flags
+// have not changed.
+void HIDSysex::sendHealthIfDue(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	using deluge::processing::engines::USBAudioStream;
+	static bool everSent = false;
+	static uint32_t lastAt = 0;
+	static uint8_t lastFlags = 0;
+	static USBAudioStream::Health last{};
+
+	const uint32_t now = AudioEngine::audioSampleTimer;
+	const uint32_t elapsed = now - lastAt;
+	if (!force && everSent && elapsed < kSampleRate) {
+		return;
+	}
+	USBAudioStream::Health health{};
+	USBAudioStream::readHealth(health);
+	const uint8_t flags =
+	    (uint8_t)((health.streaming ? 1 : 0) | (health.timerRunning ? 2 : 0) | (health.transferInFlight ? 4 : 0)
+	              | (health.dmaBusy ? 8 : 0) | (health.dmaConfigured ? 16 : 0) | (health.primed ? 32 : 0));
+	// A flag that only flickers (a transfer in flight, a packet with the controller) is not news by itself.
+	const uint8_t steady = flags & (1 | 2 | 16 | 32);
+	if (!force && everSent && !health.streaming && steady == (lastFlags & (1 | 2 | 16 | 32))) {
+		lastAt = now;
+		last = health;
+		return;
+	}
+	if (lastHidCable->sendBufferSpace() < 96 || lastHidCable->sendBufferSpace() > 0x10000) {
+		return; // not sent, so not remembered: the counts carry over to the next one
+	}
+
+	uint8_t msg[40];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02;
+	msg[i++] = SysEx::SysexCommands::Health;
+	auto put = [&](uint32_t b) { msg[i++] = (uint8_t)(b & 0x7f); };
+	auto put14 = [&](uint32_t v) {
+		if (v > 0x3fff) {
+			v = 0x3fff;
+		}
+		put(v >> 7);
+		put(v);
+	};
+	auto put7 = [&](uint32_t v) { put((v > 0x7f) ? 0x7f : v); };
+	put(1);
+	put(flags);
+	put14(everSent ? (uint32_t)(((uint64_t)elapsed * 1000u) / kSampleRate) : 0u);
+	put14(health.started - last.started);
+	put14(health.standby - last.standby);
+	put14(health.retired - last.retired);
+	put14(health.fifoNotReady - last.fifoNotReady);
+	put14(health.dmaBusyPasses - last.dmaBusyPasses);
+	put7(health.recoveries - last.recoveries);
+	put7(health.resyncs - last.resyncs);
+	put14(health.underruns - last.underruns);
+	int32_t lead = health.lead;
+	lead = (lead < -8192) ? -8192 : ((lead > 8191) ? 8191 : lead);
+	put14((uint32_t)(lead + 8192));
+	msg[i++] = 0xf7;
+
+	everSent = true;
+	lastAt = now;
+	lastFlags = flags;
+	last = health;
+	lastHidCable->sendSysex(msg, i);
+}
+
 // The 14-bit hash a host names a Features setting by: FNV-1a over the name it is stored under on the card.
 // Positions in the settings enum move between firmware builds; the stored name does not.
 static uint16_t settingNameHash(std::string_view name) {
@@ -1494,7 +1587,7 @@ static void saveFeaturesIfNeeded() {
 // Chroma (0x4D): the device's own state - which track the player is on, how bright the pads are, and every
 // Features setting. Three things a host otherwise learns only by walking a menu or reading the card.
 //
-//   F0 00 21 7B 01 02 4D <track> <brightness> <count> then count x (<hashHi> <hashLo> <value>) F7
+//   F0 00 21 7B 01 02 4D <track> <brightness> <count> then count x (<hashHi> <hashLo> <value>) <master> F7
 //
 // <track> is the position of the current clip's track in the 0x49 list, 7F for none. <brightness> is 1-25.
 // Each setting is named by settingNameHash() of its stored name; <value> is its value, capped at 127.
@@ -1502,7 +1595,7 @@ void HIDSysex::sendDeviceStateIfChanged(bool force) {
 	if (lastHidCable == nullptr) {
 		return;
 	}
-	uint8_t msg[7 + 3 + RuntimeFeatureSettingType::MaxElement * 3 + 1];
+	uint8_t msg[7 + 3 + RuntimeFeatureSettingType::MaxElement * 3 + 1 + 1];
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -1569,6 +1662,24 @@ void HIDSysex::sendDeviceStateIfChanged(bool force) {
 		put((uint8_t)(name & 0x7f));
 		put((uint8_t)((setting.value > 127) ? 127 : setting.value));
 	}
+
+	// THE SONG'S MASTER LEVEL (1.3.115), one byte after the settings: the level of the whole song, the
+	// one the LEVEL knob sets in song view, as the 0-50 the display shows for it. 7F when there is no
+	// song to ask. Cody, 2026-11-24: "add the master output level knob to the upper left of the app ...
+	// and track it just like the gold knobs". This rides the pad poll, so a turn is seen within a poll.
+	//
+	// NOT the VOLUME knob on the panel: that one is analogue, sits after the converter, and is not
+	// wired to anything this firmware can read.
+	uint8_t master = 0x7f;
+	if (currentSong != nullptr && currentSong->paramManager.containsAnyMainParamCollections()) {
+		UnpatchedParamSet* unpatched = currentSong->paramManager.getUnpatchedParamSet();
+		if (unpatched != nullptr) {
+			int32_t level = computeCurrentValueForStandardMenuItem(
+			    unpatched->getValue(deluge::modulation::params::UNPATCHED_VOLUME));
+			master = (uint8_t)((level < 0) ? 0 : ((level > kMaxMenuValue) ? kMaxMenuValue : level));
+		}
+	}
+	put(master);
 
 	static uint32_t lastHash = 0;
 	static bool everSent = false;

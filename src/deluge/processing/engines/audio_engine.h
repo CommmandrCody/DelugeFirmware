@@ -212,6 +212,8 @@ extern bool bypassCulling;
 extern uint32_t i2sTXBufferPos;
 extern uint32_t i2sRXBufferPos;
 extern int32_t cpuDireness;
+extern uint32_t healthCulls;   // Chroma (0x5B)
+extern uint32_t healthClipped; // Chroma (0x5B)
 extern InputMonitoringMode inputMonitoringMode;
 extern bool audioRoutineLocked;
 extern bool routineBeenCalled;

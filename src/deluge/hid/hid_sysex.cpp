@@ -1619,7 +1619,7 @@ void HIDSysex::sendHealthIfDue(bool force) {
 		return; // not sent, so not remembered: the counts carry over to the next one
 	}
 
-	uint8_t msg[48];
+	uint8_t msg[64];
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -1673,6 +1673,38 @@ void HIDSysex::sendHealthIfDue(bool force) {
 			lastMoves[k] = modEncoderMoves[k];
 			lastReversals[k] = modEncoderReversals[k];
 		}
+	}
+	// 1.3.127: THE ENGINE AND MEMORY. Cody, 2026-11-24, on a dense chord across his BOD patches: "I can tell this
+	// track is clipping ... the BOD patches are costly for CPU" and "a way to track Delly CPU and memory usage while
+	// we're watching the device". The Deluge's own strain figure (cpuDireness, 0-14: what it culls voices by), the
+	// voices sounding, renders that cut voices and output samples at the ceiling since the last report, and the RAM
+	// still free, in KB: internal (its own SRAM) and external (SDRAM, where samples and their cache live).
+	{
+		static uint32_t lastCulls = 0, lastClipped = 0;
+		put7((uint32_t)(AudioEngine::cpuDireness < 0 ? 0 : AudioEngine::cpuDireness));
+		put7((uint32_t)AudioEngine::getNumVoices());
+		put14(AudioEngine::healthCulls - lastCulls);
+		put14(AudioEngine::healthClipped - lastClipped);
+		lastCulls = AudioEngine::healthCulls;
+		lastClipped = AudioEngine::healthClipped;
+		auto freeKb = [](std::initializer_list<int32_t> which) {
+			uint64_t bytes = 0;
+			for (int32_t r : which) {
+				auto& spaces = GeneralMemoryAllocator::get().regions[r].emptySpaces;
+				for (int32_t k = 0; k < spaces.getNumElements(); k++) {
+					bytes += static_cast<EmptySpaceRecord*>(spaces.getElementAddress(k))->length;
+				}
+			}
+			return (uint32_t)(bytes / 1024);
+		};
+		const uint32_t internalKb = freeKb({MEMORY_REGION_INTERNAL, MEMORY_REGION_INTERNAL_SMALL});
+		const uint32_t externalKb =
+		    freeKb({MEMORY_REGION_EXTERNAL, MEMORY_REGION_EXTERNAL_SMALL, MEMORY_REGION_STEALABLE});
+		put14(internalKb);
+		const uint32_t ext = (externalKb > 0x1fffff) ? 0x1fffff : externalKb;
+		put(ext >> 14);
+		put(ext >> 7);
+		put(ext);
 	}
 	msg[i++] = 0xf7;
 

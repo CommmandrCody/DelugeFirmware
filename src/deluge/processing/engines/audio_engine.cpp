@@ -161,6 +161,9 @@ SampleRecorder* firstRecorder = nullptr;
 
 // Let's keep these grouped - the stuff we're gonna access regularly during audio rendering
 int32_t cpuDireness = 0;
+// Chroma (0x5B, 1.3.127): running counts for a host's health report. Only counted up here.
+uint32_t healthCulls = 0;   ///< renders in which voices were cut for lack of time
+uint32_t healthClipped = 0; ///< output samples that hit the converter's ceiling, either channel
 uint32_t timeDirenessChanged;
 uint32_t timeThereWasLastSomeReverb = 0x8FFFFFFF;
 int32_t numSamplesLastTime = 0;
@@ -496,6 +499,9 @@ void cullVoices(size_t numSamples, int32_t numAudio, int32_t numVoice) {
 	last_num_samples_over = num_samples_over_limit;
 
 	// blink LED to alert the user
+	if (culled) {
+		healthCulls++;
+	}
 	if (culled && FlashStorage::highCPUUsageIndicator) {
 		if (indicator_leds::getLedBlinkerIndex(IndicatorLED::PLAY) == 255) {
 			indicator_leds::indicateAlertOnLed(IndicatorLED::PLAY);
@@ -1375,6 +1381,14 @@ bool doSomeOutputting() {
 
 		outputBufferForResampling[numSamplesOutputted].l = lshiftAndSaturate<AUDIO_OUTPUT_GAIN_DOUBLINGS>(lAdjusted);
 		outputBufferForResampling[numSamplesOutputted].r = lshiftAndSaturate<AUDIO_OUTPUT_GAIN_DOUBLINGS>(rAdjusted);
+		// Chroma (1.3.127): a sample at the ceiling is a clipped sample. Two compares per sample, counted for 0x5B.
+		{
+			const int32_t outL = outputBufferForResampling[numSamplesOutputted].l;
+			const int32_t outR = outputBufferForResampling[numSamplesOutputted].r;
+			if (outL == INT32_MAX || outL == INT32_MIN || outR == INT32_MAX || outR == INT32_MIN) {
+				healthClipped++;
+			}
+		}
 		if (!stemExport.processStarted || (stemExport.processStarted && !stemExport.renderOffline)) {
 			i2sTXBufferPosNow[0] = outputBufferForResampling[numSamplesOutputted].l;
 			i2sTXBufferPosNow[1] = outputBufferForResampling[numSamplesOutputted].r;

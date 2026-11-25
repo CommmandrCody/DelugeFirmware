@@ -127,17 +127,22 @@ Macro definitions
 #error "No channel-position mask defined for this return channel count"
 #endif
 
-// Isochronous, adaptive: a feedback endpoint would need a third isochronous pipe, so the device
-// absorbs the clock difference itself.
-#define AUDIO_RX_EP_ATTRIBUTES 0x09
+// Isochronous, ASYNCHRONOUS, paced by IMPLICIT FEEDBACK (1.3.129). A feedback endpoint would need a third
+// isochronous pipe and this part has two, so the return names the outgoing data endpoint as its synch endpoint
+// (bSynchAddress below): the host sends as many frames per packet as it receives, so both directions run on the
+// Deluge's clock. Cody, 2026-11-24: "why does Apple show 2 Deluges ... we need a single device". With the return
+// ADAPTIVE (host clock) and the outgoing ASYNCHRONOUS (Deluge clock) the two were in different clock domains, and
+// macOS makes a separate device for each clock domain.
+#define AUDIO_RX_EP_ATTRIBUTES 0x05
 
 #define AUDIO_NUM_CHANNELS USB_CFG_PAUDIO_CHANNELS
 #define AUDIO_SUBFRAME_BYTES 2
 #define AUDIO_BIT_RESOLUTION 16
 #define AUDIO_SAMPLE_RATE 44100
 
-// Isochronous, asynchronous: the Deluge's clock leads and the host follows the packet sizes.
-#define AUDIO_EP_ATTRIBUTES 0x05
+// Isochronous, asynchronous: the Deluge's clock leads and the host follows the packet sizes. Usage type
+// "implicit feedback data" (bits 5-4 = 10, USB 2.0 9.6.6): the return is paced by these packets (1.3.129).
+#define AUDIO_EP_ATTRIBUTES 0x25
 
 #define AUDIO_FRAME_BYTES (AUDIO_NUM_CHANNELS * AUDIO_SUBFRAME_BYTES)
 #define AUDIO_MAX_PACKET_SIZE (USB_CFG_PAUDIO_MAX_FRAMES * AUDIO_FRAME_BYTES)
@@ -437,7 +442,7 @@ uint8_t g_midi_configuration[TOTAL_CONFIG_LENGTH + (TOTAL_CONFIG_LENGTH % 2)] = 
     0x09,                                   // bLength - audio endpoints carry two extra bytes
     USB_DT_ENDPOINT,                        // bDescriptorType
     (uint8_t)(USB_EP_IN | USB_EP3),         // bEndpointAddress - MIDI uses EP1 IN and EP2 OUT
-    AUDIO_EP_ATTRIBUTES,                    // bmAttributes - isochronous, asynchronous
+    AUDIO_EP_ATTRIBUTES,                    // bmAttributes - isochronous, asynchronous, implicit feedback data
     (uint8_t)(AUDIO_MAX_PACKET_SIZE % 256), // wMaxPacketSize(L)
     (uint8_t)(AUDIO_MAX_PACKET_SIZE / 256), // wMaxPacketSize(H)
     0x01,                                   // bInterval - every frame; full speed requires 1
@@ -501,12 +506,12 @@ uint8_t g_midi_configuration[TOTAL_CONFIG_LENGTH + (TOTAL_CONFIG_LENGTH % 2)] = 
     0x09,                                      // bLength - audio endpoints carry two extra bytes
     USB_DT_ENDPOINT,                           // bDescriptorType
     (uint8_t)(USB_EP_OUT | USB_EP4),           // bEndpointAddress - MIDI has EP1 IN and EP2 OUT, audio out has EP3 IN
-    AUDIO_RX_EP_ATTRIBUTES,                    // bmAttributes - isochronous, adaptive
+    AUDIO_RX_EP_ATTRIBUTES,                    // bmAttributes - isochronous, asynchronous
     (uint8_t)(AUDIO_RX_MAX_PACKET_SIZE % 256), // wMaxPacketSize(L)
     (uint8_t)(AUDIO_RX_MAX_PACKET_SIZE / 256), // wMaxPacketSize(H)
     0x01,                                      // bInterval - every frame; full speed requires 1
     0x00,                                      // bRefresh
-    0x00,                                      // bSynchAddress - no feedback endpoint exists to name
+    (uint8_t)(USB_EP_IN | USB_EP3),            // bSynchAddress - the outgoing data endpoint: implicit feedback
 
     // Class-specific isochronous endpoint.
     0x07,             // bLength

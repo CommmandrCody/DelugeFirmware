@@ -20,6 +20,9 @@
 #include <cstdint>
 
 namespace deluge::hid::encoders {
+/// Chroma (0x5B): moves and direction reversals per gold knob, 0 lower, 1 upper. Counted up, never reset.
+extern uint32_t modEncoderMoves[2];
+extern uint32_t modEncoderReversals[2];
 
 /// Last AudioEngine::audioSampleTimer tick at which a mod encoder changed.
 /// Written here and by view.cpp to reset the "turned recently" window.

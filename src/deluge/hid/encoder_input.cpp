@@ -37,6 +37,11 @@
 namespace deluge::hid::encoders {
 
 uint32_t timeModEncoderLastTurned[2];
+// Chroma (0x5B, 1.3.123): how many times each gold knob moved, and how many of those moves reversed the one
+// before. A worn encoder chatters - back and forth - and Cody's upper knob is suspected of exactly that.
+uint32_t modEncoderMoves[2] = {0, 0};
+uint32_t modEncoderReversals[2] = {0, 0};
+static int8_t modEncoderLastSign[2] = {0, 0};
 static int8_t modEncoderInitialTurnDirection[2];
 
 static uint32_t timeNextSDTestAction = 0;
@@ -174,6 +179,12 @@ checkResult:
 			// If encoder turned...
 			if (offset != 0) {
 				anything = true;
+				const int8_t sign = (offset > 0) ? 1 : -1;
+				modEncoderMoves[e]++;
+				if (modEncoderLastSign[e] != 0 && sign != modEncoderLastSign[e]) {
+					modEncoderReversals[e]++;
+				}
+				modEncoderLastSign[e] = sign;
 
 				// Do it, only if
 				if (offset + modEncoderInitialTurnDirection[e] != 0) {

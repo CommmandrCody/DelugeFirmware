@@ -11,6 +11,7 @@
 #include "gui/views/view.h"
 #include "hid/display/oled.h"
 #include "hid/display/seven_segment.h"
+#include "hid/encoder_input.h" // Chroma (0x5B): gold knob move counts
 #include "hid/led/pad_leds.h"
 #include "hid/matrix/matrix_driver.h"
 #include "hid/sample_frame.h" // Chroma (0x55): the packing of the sample in focus
@@ -1187,6 +1188,38 @@ void HIDSysex::sendMenuContextIfChanged(bool force) {
 	lastHidCable->sendSysex(msg, i);
 }
 
+// THE CLIP THE PLAYER HAS SELECTED (1.3.123): the one the gold knobs are aimed at, found the way 0x4D finds the
+// selected track. The sound and sample reports used the song's CURRENT clip, which is the clip last OPENED and does
+// not follow a different track picked in the song grid - Cody, 2026-11-24: switching to another synth left the
+// previous synth's sample on the Sound page, "and that's a bug in my eyes". Null when the whole song is selected.
+// The knob focus pointer is only COMPARED against the song's own clips, never followed.
+static Clip* selectedClip() {
+	if (currentSong == nullptr) {
+		return nullptr;
+	}
+	TimelineCounter* focus =
+	    view.activeModControllableModelStack.toWithTimelineCounter()->getTimelineCounterAllowNull();
+	if (focus == nullptr) {
+		return currentSong->getCurrentClip();
+	}
+	if (focus == currentSong) {
+		return nullptr;
+	}
+	for (int32_t c = 0; c < currentSong->sessionClips.getNumElements(); c++) {
+		Clip* clip = currentSong->sessionClips.getClipAtIndex(c);
+		if (clip == focus) {
+			return clip;
+		}
+	}
+	for (int32_t c = 0; c < currentSong->arrangementOnlyClips.getNumElements(); c++) {
+		Clip* clip = currentSong->arrangementOnlyClips.getClipAtIndex(c);
+		if (clip == focus) {
+			return clip;
+		}
+	}
+	return currentSong->getCurrentClip();
+}
+
 // Chroma (0x4B): the sound in focus, as the instrument holds it.
 //
 // A host that draws a sound from its own copy of a patch is drawing a guess. This is what lets it
@@ -1234,13 +1267,12 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 			drumName = static_cast<SoundDrum*>(sound)->getDrumName();
 			soundName = drumName.c_str();
 		}
-		else if (currentSong != nullptr && currentSong->getCurrentClip() != nullptr
-		         && currentSong->getCurrentClip()->output != nullptr) {
-			soundName = currentSong->getCurrentClip()->output->name.get();
+		else if (selectedClip() != nullptr && selectedClip()->output != nullptr) {
+			soundName = selectedClip()->output->name.get();
 		}
 	}
 	else if (currentSong != nullptr) {
-		Clip* clip = currentSong->getCurrentClip();
+		Clip* clip = selectedClip();
 		if (clip != nullptr && clip->output != nullptr && clip->output->type == OutputType::SYNTH) {
 			sound = static_cast<SoundInstrument*>(clip->output);
 			paramManager = &clip->paramManager;
@@ -1307,8 +1339,8 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 		//   bit 0  edited since it was last loaded from or saved to the card
 		//   bit 1  believed to have a file on the card at all
 		uint8_t cardState = 0;
-		if (currentSong != nullptr && currentSong->getCurrentClip() != nullptr) {
-			Output* owner = currentSong->getCurrentClip()->output;
+		if (selectedClip() != nullptr) {
+			Output* owner = selectedClip()->output;
 			if (owner != nullptr && owner->type != OutputType::AUDIO) {
 				auto* instrument = static_cast<Instrument*>(owner);
 				cardState = (instrument->changedSinceCard ? 1 : 0) | (instrument->mightExistOnCard ? 2 : 0);
@@ -1368,7 +1400,7 @@ void HIDSysex::sendSampleStateIfChanged(bool force) {
 	sample_frame::Focus focus;
 	Sound* sound = nullptr;
 	ParamManager* paramManager = nullptr;
-	Clip* clip = (currentSong != nullptr) ? currentSong->getCurrentClip() : nullptr;
+	Clip* clip = selectedClip();
 	Output* output = (clip != nullptr) ? clip->output : nullptr;
 	Kit* kit = (output != nullptr && output->type == OutputType::KIT) ? static_cast<Kit*>(output) : nullptr;
 	Drum* rowDrum = nullptr; // the kit row this sound is, when it is one
@@ -1566,7 +1598,7 @@ void HIDSysex::sendHealthIfDue(bool force) {
 		return; // not sent, so not remembered: the counts carry over to the next one
 	}
 
-	uint8_t msg[40];
+	uint8_t msg[48];
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -1609,6 +1641,18 @@ void HIDSysex::sendHealthIfDue(bool force) {
 	put16(health.pipeControl);
 	put16(health.fifoSelect);
 	put16(health.fifoControl);
+	// 1.3.123: each gold knob's moves and direction reversals since the last report, lower knob first.
+	{
+		using namespace deluge::hid::encoders;
+		static uint32_t lastMoves[2] = {0, 0};
+		static uint32_t lastReversals[2] = {0, 0};
+		for (int32_t k = 0; k < 2; k++) {
+			put14(modEncoderMoves[k] - lastMoves[k]);
+			put14(modEncoderReversals[k] - lastReversals[k]);
+			lastMoves[k] = modEncoderMoves[k];
+			lastReversals[k] = modEncoderReversals[k];
+		}
+	}
 	msg[i++] = 0xf7;
 
 	everSent = true;

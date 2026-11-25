@@ -2260,6 +2260,25 @@ void HIDSysex::receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len) {
 				break;
 			}
 		}
+		else if (what == 6) {
+			// THE SONG'S MASTER LEVEL (1.3.124), 0-50 as the display shows it - the value 0x4D reports. Set the way
+			// turning the gold knob on the song does it (as user input, so the Deluge treats it like a hand on the
+			// knob), and reported back through 0x4D; the outcome never carries the value. Cody, 2026-11-24: "make
+			// that master in the app adjustable and mappable".
+			if (currentSong != nullptr && value <= kMaxMenuValue) {
+				char modelStackMemory[MODEL_STACK_MAX_SIZE];
+				ModelStackWithThreeMainThings* stack =
+				    currentSong->setupModelStackWithSongAsTimelineCounter(modelStackMemory);
+				ModelStackWithAutoParam* param =
+				    stack->getUnpatchedAutoParamFromId(deluge::modulation::params::UNPATCHED_VOLUME);
+				if (param != nullptr && param->autoParam != nullptr) {
+					param->autoParam->setCurrentValueInResponseToUserInput(computeFinalValueForStandardMenuItem(value),
+					                                                       param);
+					result = 0;
+					deviceChanged = true;
+				}
+			}
+		}
 		else if (what == 5) {
 			if (value >= kMinLedBrightness && value <= kMaxLedBrightness) {
 				FlashStorage::defaultPadBrightness = value;

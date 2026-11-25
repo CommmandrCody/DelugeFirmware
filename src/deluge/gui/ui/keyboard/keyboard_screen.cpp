@@ -1184,7 +1184,7 @@ bool KeyboardScreen::drawHeldChordName() {
 // host report (Chroma 0x57) can ask for the same name the display is given.
 bool KeyboardScreen::heldChordName(char full[64]) {
 	full[0] = '\0';
-	if (currentSong == nullptr || currentNotesState.count < 2) {
+	if (currentSong == nullptr) {
 		return false;
 	}
 	uint8_t notes[16];
@@ -1192,6 +1192,22 @@ bool KeyboardScreen::heldChordName(char full[64]) {
 	for (uint8_t i = 0; i < currentNotesState.count && count < 16; i++) {
 		int32_t n = currentNotesState.notes[i].note;
 		if (n >= 0 && n < 128) {
+			notes[count++] = (uint8_t)n;
+		}
+	}
+	// 1.3.131: and the notes held over MIDI. Cody, 2026-11-25: "incoming notes in MIDI also need to be processed for
+	// chords so they are displayed on the grid". A note arriving over MIDI is kept in highlightedNotes at its velocity
+	// (1-253; 254 and 255 are playback preview and a recalled chord) while it is held, when HIGHLIGHT INCOMING NOTES
+	// is on. Taken once each: a note both played and held over MIDI is one note of the chord.
+	for (int32_t n = 0; n < kHighestKeyboardNote && n < 128 && count < 16; n++) {
+		if (!midiHeld(n)) {
+			continue;
+		}
+		bool already = false;
+		for (int32_t k = 0; k < count; k++) {
+			already = already || notes[k] == n;
+		}
+		if (!already) {
 			notes[count++] = (uint8_t)n;
 		}
 	}
@@ -1331,7 +1347,8 @@ void KeyboardScreen::soundingPads(uint8_t columns[kDisplayWidth]) {
 	for (int32_t x = 0; x < kDisplayWidth; x++) {
 		for (int32_t y = 0; y < kDisplayHeight; y++) {
 			const int32_t n = layout->noteAtPad(x, y);
-			if (n >= 0 && held.noteEnabled((uint8_t)n)) {
+			// A note held over MIDI is held too (1.3.131): its pads are reported with the pressed ones.
+			if (n >= 0 && (held.noteEnabled((uint8_t)n) || midiHeld(n))) {
 				columns[x] |= (1 << y);
 			}
 		}

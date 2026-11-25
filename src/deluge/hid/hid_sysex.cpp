@@ -1278,6 +1278,25 @@ void HIDSysex::sendSoundStateIfChanged(bool force) {
 			paramManager = &clip->paramManager;
 			soundName = clip->output->name.get();
 		}
+		// A KIT: the row selected on the Deluge, with no editor open (1.3.125), the way 0x55 finds it. Cody: "kits are
+		// not showing up in the sound section AT ALL ... we need to be able to handle kits as easily as synths".
+		// Membership first - getDrumIndex only compares pointers - and only a row whose sound has its own
+		// parameters (they live with its notes) is reported.
+		else if (clip != nullptr && clip->output != nullptr && clip->output->type == OutputType::KIT
+		         && clip->type == ClipType::INSTRUMENT) {
+			Kit* kit = static_cast<Kit*>(clip->output);
+			if (kit->selectedDrum != nullptr && kit->getDrumIndex(kit->selectedDrum) >= 0
+			    && kit->selectedDrum->type == DrumType::SOUND) {
+				SoundDrum* drum = static_cast<SoundDrum*>(kit->selectedDrum);
+				NoteRow* noteRow = static_cast<InstrumentClip*>(clip)->getNoteRowForDrum(drum);
+				if (noteRow != nullptr) {
+					sound = drum;
+					paramManager = &noteRow->paramManager;
+					source = 2;
+					soundName = drum->getName();
+				}
+			}
+		}
 	}
 	if (sound != nullptr && (paramManager == nullptr || !paramManager->containsAnyMainParamCollections())) {
 		sound = nullptr; // a sound whose parameters cannot be read is not one a host can draw

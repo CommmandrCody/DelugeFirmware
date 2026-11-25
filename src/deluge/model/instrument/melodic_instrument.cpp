@@ -121,6 +121,10 @@ void MelodicInstrument::receivedNote(ModelStackWithTimelineCounter* modelStack, 
 			    && instrumentClip == getCurrentInstrumentClip()) {
 				highlightNoteValue = velocity;
 			}
+			// Retrospective capture hears MIDI too (1.3.131), for the clip on screen - the one a dump goes into.
+			if (instrumentClip != nullptr && instrumentClip == getCurrentInstrumentClip()) {
+				keyboardScreen.captureMidiNote(true, note, velocity);
+			}
 
 			// MPE stuff - if editing note, we need to record the initial values which might have been sent before this
 			// note-on.
@@ -237,6 +241,7 @@ justAuditionNote:
 			    && instrumentClip == getCurrentInstrumentClip()) {
 				highlightNoteValue = 0;
 			}
+			keyboardScreen.captureMidiNote(false, note, 0); // closes the note if capture holds it; nothing otherwise
 			// NoteRow must already be auditioning
 			if (notesAuditioned.contains(note)) {
 				if (noteRow) {

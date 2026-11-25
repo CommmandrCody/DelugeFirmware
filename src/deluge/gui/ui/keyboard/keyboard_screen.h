@@ -67,6 +67,8 @@ public:
 	void exitAuditionMode();
 
 	uint8_t highlightedNotes[kHighestKeyboardNote] = {0};
+	/// Retrospective capture of a note that arrived over MIDI (1.3.131).
+	void captureMidiNote(bool on, int32_t note, int32_t velocity);
 	/// A note being held over MIDI right now (1.3.131): highlightedNotes keeps an incoming note at its velocity,
 	/// 1-253, while it is held. 254 is a playback preview and 255 a recalled chord - neither is a held note.
 	inline bool midiHeld(int32_t n) const {

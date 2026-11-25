@@ -284,6 +284,18 @@ void captureNoteOff(int32_t note) {
 }
 } // namespace
 
+// 1.3.131: A NOTE ARRIVING OVER MIDI is captured like a pad press. Cody, 2026-11-25: "the MIDI retro capture also
+// needs to account for incoming MIDI from the controller(s)". Called by the instrument for notes that reach the
+// clip on screen, whatever view it is in; a note-off closes the note's length as a released pad does.
+void KeyboardScreen::captureMidiNote(bool on, int32_t note, int32_t velocity) {
+	if (on) {
+		captureNoteOn(note, (uint8_t)((velocity < 1) ? 1 : ((velocity > 127) ? 127 : velocity)));
+	}
+	else {
+		captureNoteOff(note);
+	}
+}
+
 // Dump the captured noodle into the current clip (melodic only for slice 1). Mirrors the live-record
 // path (getOrCreateNoteRowForYNote + attemptNoteAdd) but with positions we compute from elapsed time.
 static void captureDumpToCurrentClip() {

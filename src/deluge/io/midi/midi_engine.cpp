@@ -780,8 +780,13 @@ void MidiEngine::midiSysexReceived(MIDICable& cable, uint8_t* data, int32_t len)
 			    SysEx::DELUGE_SYSEX_ID_BYTE3, 0,
 			    // 14bit device family member LSB, MSB
 			    0, 0,
-			    // Four byte firmware version in human readable order
-			    FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH, 0, SysEx::SYSEX_END};
+			    // Four byte firmware version in human readable order. Every byte inside a sysex frame is 7 bits, and
+			    // a patch number of 128 or more does not fit one: at 1.3.129 the byte was dropped on the wire and the
+			    // reply arrived one short, so no host could read the version. The patch's low 7 bits go where it
+			    // always went and its high bits in the fourth byte, which was always 0 - unchanged below 128.
+			    (uint8_t)(FIRMWARE_VERSION_MAJOR & 0x7f), (uint8_t)(FIRMWARE_VERSION_MINOR & 0x7f),
+			    (uint8_t)(FIRMWARE_VERSION_PATCH & 0x7f), (uint8_t)((FIRMWARE_VERSION_PATCH >> 7) & 0x7f),
+			    SysEx::SYSEX_END};
 			cable.sendSysex(reply, sizeof(reply));
 		}
 		return;

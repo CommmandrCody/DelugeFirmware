@@ -1449,7 +1449,16 @@ bool USBAudioStream::readReturnChannel(uint32_t channel, StereoSample* buffer, u
 	return true;
 }
 
-void USBAudioStream::feedMix(uint32_t numSamples, uint32_t renderOffset) {
+uint32_t mainPairSetting = 0; // 1.3.132: 0 none, 1-4 the stereo pair the main mix goes out on
+
+void USBAudioStream::setMainPair(uint32_t pair) {
+	mainPairSetting = (pair <= kStemChannels / 2u) ? pair : 0u;
+}
+uint32_t USBAudioStream::getMainPair() {
+	return mainPairSetting;
+}
+
+void USBAudioStream::feedMix(uint32_t numSamples, uint32_t renderOffset, const StereoSample* mainMix) {
 	advanceReturnBy(numSamples);
 
 	if (!streamActive || numSamples == 0) {
@@ -1469,6 +1478,13 @@ void USBAudioStream::feedMix(uint32_t numSamples, uint32_t renderOffset) {
 		}
 		else {
 			memset(frame, 0, kFrameBytes);
+		}
+		// THE MAIN MIX on its pair (1.3.132), replacing what tracks put there. Cody, 2026-11-25: "so we can grab the
+		// Main feed". The samples are the ones the Deluge's own outputs play, already saturated to 32 bits.
+		if (mainMix != nullptr && mainPairSetting != 0u) {
+			const uint32_t c = (mainPairSetting - 1u) * 2u;
+			frame[c] = (int16_t)(mainMix[i].l >> 16);
+			frame[c + 1u] = (int16_t)(mainMix[i].r >> 16);
 		}
 		w++;
 	}

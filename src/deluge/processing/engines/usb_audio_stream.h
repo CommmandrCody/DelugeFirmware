@@ -85,7 +85,11 @@ public:
 
 	/// Hands numSamples of the captured stems to the stream as they reach the codec. renderOffset is where they
 	/// sit in the render window, which is output across several calls.
-	static void feedMix(uint32_t numSamples, uint32_t renderOffset);
+	static void feedMix(uint32_t numSamples, uint32_t renderOffset, const StereoSample* mainMix = nullptr);
+	/// 1.3.132: the stereo pair (1-4, 0 none) that carries the finished main mix - after the master compressor and
+	/// level, what the Deluge's own outputs play - in place of whatever tracks are routed to it. Not saved.
+	static void setMainPair(uint32_t pair);
+	static uint32_t getMainPair();
 
 	/* ---- In ---- */
 

@@ -1737,6 +1737,7 @@ void HIDSysex::sendHealthIfDue(bool force) {
 		put7(USBAudioStream::getReturnLevel());
 		put7(USBAudioStream::getCompensationMs());
 		put7(USBAudioStream::numReturnPairs());
+		put7(USBAudioStream::getMainPair()); // 1.3.132: the pair carrying the main mix, 0 none
 	}
 	msg[i++] = 0xf7;
 
@@ -2021,7 +2022,17 @@ void HIDSysex::sendEffectsIfChanged(bool force) {
 		sound = nullptr;
 	}
 
-	uint8_t msg[7 + 2 + 40 + 1];
+	// THE SONG ITSELF (1.3.132): with no sound in focus and the gold knobs on the song, its own effects are reported -
+	// `has` 2 - with the master compressor, the reverb room and the song's filters after the shared fields. Cody,
+	// 2026-11-25: "show only master stuff ... so we can look at the compressor and FX stuff".
+	bool songFocus = false;
+	if (sound == nullptr && currentSong != nullptr && currentSong->paramManager.containsAnyMainParamCollections()) {
+		TimelineCounter* focus =
+		    view.activeModControllableModelStack.toWithTimelineCounter()->getTimelineCounterAllowNull();
+		songFocus = (focus == currentSong);
+	}
+
+	uint8_t msg[7 + 2 + 64 + 1];
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -2037,7 +2048,73 @@ void HIDSysex::sendEffectsIfChanged(bool force) {
 		hash = (hash ^ b) * 16777619u;
 	};
 	put(1);
-	if (sound == nullptr) {
+	if (songFocus) {
+		put(2);
+		GlobalEffectableForSong& g = currentSong->globalEffectable;
+		UnpatchedParamSet* u = currentSong->paramManager.getUnpatchedParamSet();
+		auto flat = [&](int32_t p) { put(computeCurrentValueForStandardMenuItem(u->getValue(p))); };
+		auto put21 = [&](uint32_t v) {
+			v = (v > 0x1fffff) ? 0x1fffff : v;
+			msg[i++] = (uint8_t)((v >> 14) & 0x7f);
+			msg[i++] = (uint8_t)((v >> 7) & 0x7f);
+			msg[i++] = (uint8_t)(v & 0x7f);
+			hash = (hash ^ v) * 16777619u;
+		};
+		// The fields a sound has, in the same places: what the song has none of is 0, its arpeggiator 7F.
+		flat(UNPATCHED_VOLUME);
+		put(computeCurrentValueForPan(u->getValue(UNPATCHED_PAN)) + 32);
+		flat(UNPATCHED_DELAY_AMOUNT);
+		flat(UNPATCHED_DELAY_RATE);
+		put(g.delay.pingPong ? 1 : 0);
+		put(g.delay.analog ? 1 : 0);
+		put(util::to_underlying(g.delay.syncLevel));
+		put(util::to_underlying(g.delay.syncType));
+		flat(UNPATCHED_REVERB_SEND_AMOUNT);
+		put(util::to_underlying(g.getModFXType()));
+		flat(UNPATCHED_MOD_FX_RATE);
+		flat(UNPATCHED_MOD_FX_DEPTH);
+		flat(UNPATCHED_MOD_FX_FEEDBACK);
+		flat(UNPATCHED_MOD_FX_OFFSET);
+		flat(UNPATCHED_BASS);
+		flat(UNPATCHED_TREBLE);
+		flat(UNPATCHED_BASS_FREQ);
+		flat(UNPATCHED_TREBLE_FREQ);
+		flat(UNPATCHED_SAMPLE_RATE_REDUCTION);
+		flat(UNPATCHED_BITCRUSHING);
+		put(0); // wavefold: a sound's alone
+		put(g.clippingAmount);
+		flat(UNPATCHED_SIDECHAIN_SHAPE);
+		put(0); // portamento: a sound's alone
+		put(0x7f);
+		put(0);
+		put(0);
+		put(0);
+		put(0);
+		// THE MASTER COMPRESSOR, as its menu shows it: threshold 0-50, then the display values - ratio x100 (": 1"),
+		// attack ms x100, release ms x10, sidechain high-pass in Hz, blend in %.
+		put(computeCurrentValueForHalfPrecisionMenuItem(u->getValue(UNPATCHED_COMPRESSOR_THRESHOLD)));
+		put21((uint32_t)(g.compressor.getRatioForDisplay() * 100.0f + 0.5f));
+		put21((uint32_t)(g.compressor.getAttackMS() * 100.0f + 0.5f));
+		put21((uint32_t)(g.compressor.getReleaseMS() * 10.0f + 0.5f));
+		put21((uint32_t)(g.compressor.getSidechainForDisplay() + 0.5f));
+		put((int32_t)g.compressor.getBlendForDisplay());
+		// THE REVERB ROOM (one for the whole Deluge), as its menu shows it.
+		put((int32_t)std::round(AudioEngine::reverb.getRoomSize() * kMaxMenuValue));
+		put((int32_t)std::round(AudioEngine::reverb.getDamping() * kMaxMenuValue));
+		put((int32_t)std::round(AudioEngine::reverb.getWidth() * kMaxMenuValue));
+		put(computeCurrentValueForPan(AudioEngine::reverbPan) + 32);
+		put(util::to_underlying(AudioEngine::reverb.getModel()));
+		put((int32_t)std::round(AudioEngine::reverb.getLPF() * kMaxMenuValue));
+		put((int32_t)std::round(AudioEngine::reverb.getHPF() * kMaxMenuValue));
+		// THE SONG'S FILTERS.
+		put(util::to_underlying(g.lpfMode));
+		flat(UNPATCHED_LPF_FREQ);
+		flat(UNPATCHED_LPF_RES);
+		put(util::to_underlying(g.hpfMode));
+		flat(UNPATCHED_HPF_FREQ);
+		flat(UNPATCHED_HPF_RES);
+	}
+	else if (sound == nullptr) {
 		put(0);
 	}
 	else {
@@ -2699,6 +2776,14 @@ void HIDSysex::receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len) {
 					result = 0;
 					midiInputsChanged = true;
 				}
+			}
+		}
+		else if (what == 8) {
+			// THE MAIN MIX ON A USB PAIR (1.3.132): 0 none, 1-4 the pair. Reported back in 0x5B. Not saved: the
+			// Deluge starts with none, so a pair is only ever taken over because a host asked.
+			if (value <= deluge::processing::engines::USBAudioStream::kStemChannels / 2u) {
+				deluge::processing::engines::USBAudioStream::setMainPair(value);
+				result = 0;
 			}
 		}
 		else if (what == 6) {

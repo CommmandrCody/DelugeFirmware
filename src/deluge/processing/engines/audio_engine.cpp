@@ -1413,7 +1413,8 @@ bool doSomeOutputting() {
 
 	if (numSamplesOutputted) {
 
-		deluge::processing::engines::USBAudioStream::feedMix(numSamplesOutputted, renderOffsetAtStart);
+		deluge::processing::engines::USBAudioStream::feedMix(numSamplesOutputted, renderOffsetAtStart,
+		                                                     outputBufferForResampling.data());
 
 		i2sRXBufferPos += (numSamplesOutputted << (NUM_MONO_INPUT_CHANNELS_MAGNITUDE + 2));
 		if (i2sRXBufferPos >= (uint32_t)getRxBufferEnd()) {

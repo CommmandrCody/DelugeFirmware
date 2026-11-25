@@ -82,7 +82,8 @@ enum SysexCommands : uint8_t {
 	SampleState = 0x55,     // Chroma: outbound - the sample in focus: file, repeat mode, start, end and loop.
 	HeldChord = 0x57,       // Chroma: outbound - the chord being held on the keyboard, named as the display names it.
 	MidiInputs = 0x5D,      // Chroma: outbound - the MIDI channel each track listens on (its learned input).
-	AnalogueProbe = 0x5C,   // Chroma: outbound - a diagnostic: the raw reading of each of the converter's eight inputs.
+	KitRows = 0x58,         // Chroma: outbound - every row of the current kit: name, kind, muted, selected.
+	Effects = 0x59,         // Chroma: outbound - the effects of the sound in focus: delay, reverb, mod FX, EQ, arp...
 	Health = 0x5B,          // Chroma: outbound - once a second: is the USB audio stream really sending.
 	SoundState = 0x4B,      // Chroma: outbound sound push - the sound in focus as the instrument holds it: engine,
 	                        // oscillator types, both filters, four envelopes and four LFOs. A host draws the

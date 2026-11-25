@@ -83,7 +83,8 @@ void sendHealthIfDue(bool force = false);
 /// Chroma (0x57): the chord being held on the keyboard, in the words the display uses. De-duped.
 void sendHeldChordIfChanged(bool force = false);
 /// Chroma (0x5C): a diagnostic - the raw reading of each of the converter's eight inputs, when one moves.
-void sendAnalogueProbeIfChanged(bool force = false);
+void sendKitRowsIfChanged(bool force = false);
+void sendEffectsIfChanged(bool force = false);
 /// Chroma (0x46): sends a gold knob value held back by the 40 ms report gap, once the gap has passed.
 void flushGoldKnobs();
 /// Chroma (0x5D): the MIDI channel each track listens on, in track-list order. De-duped.

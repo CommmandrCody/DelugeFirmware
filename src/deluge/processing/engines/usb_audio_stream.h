@@ -62,6 +62,11 @@ public:
 		uint16_t pipeControl;   ///< the transmit pipe's PIPEnCTR as read now: PID, BSTS, INBUFM, PBUSY
 		uint16_t fifoSelect;    ///< D0FIFOSEL as read now: which pipe the DMA port has selected
 		uint16_t fifoControl;   ///< D0FIFOCTR as read now: FRDY, BVAL
+		// 1.3.128: THE RETURN - audio the host sends the Deluge.
+		bool returnActive;  ///< a host has the return interface open
+		uint32_t rxFrames;  ///< frames received into the ring, ever
+		uint32_t rxDropped; ///< frames that arrived with no room in the ring, ever
+		uint16_t rxPeak;    ///< the loudest sample received since the last read (0-32767); reading clears it
 	};
 	static void readHealth(Health& out);
 

@@ -20,6 +20,8 @@
 #include "io/midi/sysex.h"
 #include "memory/general_memory_allocator.h"
 #include "model/clip/instrument_clip.h"              // Chroma (0x48): keyboardState.currentLayout
+#include "model/drum/midi_drum.h"                    // Chroma (0x58): a MIDI row's channel and note
+#include "model/drum/non_audio_drum.h"               // Chroma (0x58): a gate row's channel
 #include "model/instrument/kit.h"                    // Chroma (0x55): the kit's selected row
 #include "model/instrument/midi_instrument.h"        // Chroma (0x49): channelSuffix, MIDI only
 #include "model/instrument/non_audio_instrument.h"   // Chroma (0x49): getChannel(), MIDI and CV
@@ -30,6 +32,7 @@
 #include "model/settings/runtime_feature_settings.h" // Chroma (0x4D): the Features settings
 #include "model/song/song.h"
 #include "model/usb_route.h"                 // Chroma (0x4E): the routing mask
+#include "modulation/arpeggiator.h"          // Chroma (0x59): the arpeggiator's settings
 #include "modulation/params/param.h"         // Chroma (0x4B): which parameters make up a sound
 #include "modulation/params/param_manager.h" // Chroma (0x4B)
 #include "modulation/params/param_set.h" // Chroma (0x4B)                       // Chroma: resync — read the live key/scale to push on handshake
@@ -131,7 +134,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendHealthIfDue(true);
 		// ...and the chord being held, or that there is none.
 		sendHeldChordIfChanged(true);
-		sendAnalogueProbeIfChanged(true);
+		sendKitRowsIfChanged(true);
+		sendEffectsIfChanged(true);
 		sendMidiInputsIfChanged(true);
 		return;
 	}
@@ -167,7 +171,8 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendSampleStateIfChanged();     // hitting a kit pad selects its row and may redraw nothing
 		sendHealthIfDue();              // about once a second; the pad poll is the only steady clock a host gives
 		sendHeldChordIfChanged();       // a chord is held and let go with no display redraw a host can count on
-		sendAnalogueProbeIfChanged();   // the converter's eight inputs, when one moves
+		sendKitRowsIfChanged();         // a mute or a selected row redraws nothing a host can count on
+		sendEffectsIfChanged();         // the effects of the sound in focus, when one moves
 		flushGoldKnobs();               // a knob value held back by the 40 ms gap
 		sendMidiInputsIfChanged();      // a learn on the Deluge redraws nothing a host can count on
 		break;
@@ -1607,10 +1612,12 @@ void HIDSysex::sendHealthIfDue(bool force) {
 	USBAudioStream::readHealth(health);
 	const uint8_t flags =
 	    (uint8_t)((health.streaming ? 1 : 0) | (health.timerRunning ? 2 : 0) | (health.transferInFlight ? 4 : 0)
-	              | (health.dmaBusy ? 8 : 0) | (health.dmaConfigured ? 16 : 0) | (health.primed ? 32 : 0));
+	              | (health.dmaBusy ? 8 : 0) | (health.dmaConfigured ? 16 : 0) | (health.primed ? 32 : 0)
+	              | (health.returnActive ? 64 : 0));
 	// A flag that only flickers (a transfer in flight, a packet with the controller) is not news by itself.
-	const uint8_t steady = flags & (1 | 2 | 16 | 32);
-	if (!force && everSent && !health.streaming && steady == (lastFlags & (1 | 2 | 16 | 32))) {
+	const uint8_t steady = flags & (1 | 2 | 16 | 32 | 64);
+	if (!force && everSent && !health.streaming && !health.returnActive
+	    && steady == (lastFlags & (1 | 2 | 16 | 32 | 64))) {
 		lastAt = now;
 		last = health;
 		return;
@@ -1619,7 +1626,7 @@ void HIDSysex::sendHealthIfDue(bool force) {
 		return; // not sent, so not remembered: the counts carry over to the next one
 	}
 
-	uint8_t msg[64];
+	uint8_t msg[80];
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -1706,6 +1713,31 @@ void HIDSysex::sendHealthIfDue(bool force) {
 		put(ext >> 7);
 		put(ext);
 	}
+	// 1.3.128: THE RETURN, audio the computer sends the Deluge. Cody, 2026-11-24: "I can make the inputs work but
+	// the outputs do not". Frames received and frames dropped since the last report, the loudest sample since the
+	// last report (0-32767: frames of silence still count as frames), then the settings that decide where it goes:
+	// the pair mixed into the master (0 none), the return level (0-50), the latency compensation in ms, and how
+	// many pairs the return carries.
+	{
+		static uint32_t lastRxFrames = 0, lastRxDropped = 0;
+		auto put21 = [&](uint32_t v) {
+			if (v > 0x1fffff) {
+				v = 0x1fffff;
+			}
+			put(v >> 14);
+			put(v >> 7);
+			put(v);
+		};
+		put21(health.rxFrames - lastRxFrames);
+		put14(health.rxDropped - lastRxDropped);
+		put16(health.rxPeak);
+		lastRxFrames = health.rxFrames;
+		lastRxDropped = health.rxDropped;
+		put7(USBAudioStream::getMasterReturnPair());
+		put7(USBAudioStream::getReturnLevel());
+		put7(USBAudioStream::getCompensationMs());
+		put7(USBAudioStream::numReturnPairs());
+	}
 	msg[i++] = 0xf7;
 
 	everSent = true;
@@ -1776,29 +1808,220 @@ void HIDSysex::sendHeldChordIfChanged(bool force) {
 // takes 1.6 s). Built to answer one question - does turning the panel's VOLUME knob move any of them - and
 // to be taken out again once it is answered. Sent when any reading moves by more than a small margin, so
 // the noise on an input with nothing connected does not flood the wire.
-extern volatile uint16_t analogueProbe[8];
-void HIDSysex::sendAnalogueProbeIfChanged(bool force) {
+// Chroma (0x58): EVERY ROW OF THE CURRENT KIT, bottom row first - the order the grid stacks them.
+//
+//   F0 00 21 7B 01 02 58 01 <total> <first> <count> <selected> <scroll>
+//        count x ( <flags> <channel> <note> <len> <name...> ) F7
+//
+//   total     rows in the kit (7F capped); 0 with nothing after it: the track in focus is not a kit
+//   first     the index of the first row in this frame; a kit with more rows than fit is sent in pages
+//   selected  the row the Deluge has selected (7F none); scroll: the bottom row the grid shows
+//   flags     bits 0-1 kind (0 sound, 1 MIDI, 2 gate, 3 none), bit 2 muted, bit 3 its oscillator A plays a sample
+//   channel   MIDI/gate rows: the channel (0-15); note: a MIDI row's note. 0 for a sound row
+//
+// Cody, 2026-11-24: "this is kit management here ... organize the tab around ALL the sounds and collapse them".
+// 0x4B and 0x55 describe ONE row, the selected one; this is the list a host draws the others from.
+//
+// READS ONLY, of what is in memory. Skipped while the card routine holds its lock (a save relinks the rows), and
+// a skipped report stays owed. De-duped by a hash of everything sent.
+void HIDSysex::sendKitRowsIfChanged(bool force) {
+	static bool owed = false;
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
 	if (lastHidCable == nullptr) {
 		return;
 	}
-	static uint16_t sent[8] = {0};
-	static bool everSent = false;
-	uint16_t now[8];
-	bool moved = force || !everSent;
-	for (int32_t c = 0; c < 8; c++) {
-		now[c] = (uint16_t)(analogueProbe[c] >> 2); // 16 bits held, 14 sent
-		const int32_t d = (int32_t)now[c] - (int32_t)sent[c];
-		if (d > 96 || d < -96) {
-			moved = true;
+	owed = owed || force;
+	if (sdRoutineLock) {
+		return;
+	}
+	constexpr int32_t kMaxName = 12;
+	constexpr int32_t kPage = 16;
+	constexpr int32_t kMaxRows = 127;
+
+	Clip* clip = selectedClip();
+	InstrumentClip* kitClip = nullptr;
+	Kit* kit = nullptr;
+	if (clip != nullptr && clip->type == ClipType::INSTRUMENT && clip->output != nullptr
+	    && clip->output->type == OutputType::KIT) {
+		kitClip = static_cast<InstrumentClip*>(clip);
+		kit = static_cast<Kit*>(clip->output);
+	}
+
+	auto describe = [&](int32_t r, uint8_t& flags, uint8_t& channel, uint8_t& note, const char*& name) {
+		NoteRow* row = kitClip->noteRows.getElement(r);
+		flags = 3;
+		channel = 0;
+		note = 0;
+		name = "";
+		if (row == nullptr) {
+			return;
+		}
+		Drum* drum = row->drum;
+		if (drum != nullptr && kit->getDrumIndex(drum) >= 0) {
+			if (drum->type == DrumType::SOUND) {
+				SoundDrum* sound = static_cast<SoundDrum*>(drum);
+				flags = 0;
+				if (sound->sources[0].oscType == OscType::SAMPLE) {
+					flags |= 8;
+				}
+				name = sound->getName();
+			}
+			else if (drum->type == DrumType::MIDI) {
+				flags = 1;
+				channel = static_cast<MIDIDrum*>(drum)->channel & 0x0f;
+				note = static_cast<MIDIDrum*>(drum)->note & 0x7f;
+			}
+			else if (drum->type == DrumType::GATE) {
+				flags = 2;
+				channel = static_cast<NonAudioDrum*>(drum)->channel & 0x0f;
+			}
+		}
+		if (row->muted) {
+			flags |= 4;
+		}
+	};
+
+	int32_t total = 0;
+	uint8_t selected = 0x7f;
+	uint8_t scroll = 0;
+	uint32_t hash = 2166136261u;
+	auto mix = [&](uint8_t b) { hash = (hash ^ b) * 16777619u; };
+	if (kitClip != nullptr) {
+		total = kitClip->noteRows.getNumElements();
+		if (total > kMaxRows) {
+			total = kMaxRows;
+		}
+		scroll = (uint8_t)((kitClip->yScroll < 0) ? 0 : ((kitClip->yScroll > 126) ? 126 : kitClip->yScroll));
+		for (int32_t r = 0; r < total; r++) {
+			uint8_t flags, channel, note;
+			const char* name;
+			describe(r, flags, channel, note, name);
+			NoteRow* row = kitClip->noteRows.getElement(r);
+			if (row != nullptr && row->drum != nullptr && row->drum == kit->selectedDrum) {
+				selected = (uint8_t)r;
+			}
+			mix(flags);
+			mix(channel);
+			mix(note);
+			for (const char* c = name; *c != 0 && (c - name) < kMaxName; c++) {
+				mix((uint8_t)*c);
+			}
+			mix(0);
 		}
 	}
-	if (!moved) {
+	mix((uint8_t)total);
+	mix(selected);
+	mix(scroll);
+	mix(kitClip != nullptr ? 1 : 0);
+	if (!owed && everSent && hash == lastHash) {
 		return;
 	}
-	if (lastHidCable->sendBufferSpace() < 64 || lastHidCable->sendBufferSpace() > 0x10000) {
+	const int32_t pages = (total == 0) ? 1 : (total + kPage - 1) / kPage;
+	if (lastHidCable->sendBufferSpace() < pages * 300 || lastHidCable->sendBufferSpace() > 0x10000) {
+		owed = true; // not sent, so not remembered
 		return;
 	}
-	uint8_t msg[7 + 1 + 16 + 1];
+
+	uint8_t msg[7 + 6 + kPage * (4 + kMaxName) + 1];
+	for (int32_t first = 0; first == 0 || first < total; first += kPage) {
+		int32_t i = 0;
+		msg[i++] = 0xf0;
+		msg[i++] = 0x00;
+		msg[i++] = 0x21;
+		msg[i++] = 0x7b;
+		msg[i++] = 0x01;
+		msg[i++] = 0x02;
+		msg[i++] = SysEx::SysexCommands::KitRows;
+		msg[i++] = 1;
+		msg[i++] = (uint8_t)total;
+		if (kitClip != nullptr) {
+			const int32_t count = (total - first < kPage) ? (total - first) : kPage;
+			msg[i++] = (uint8_t)first;
+			msg[i++] = (uint8_t)count;
+			msg[i++] = selected;
+			msg[i++] = scroll;
+			for (int32_t r = first; r < first + count; r++) {
+				uint8_t flags, channel, note;
+				const char* name;
+				describe(r, flags, channel, note, name);
+				msg[i++] = flags;
+				msg[i++] = channel;
+				msg[i++] = note;
+				int32_t n = 0;
+				while (n < kMaxName && name[n] != 0) {
+					n++;
+				}
+				msg[i++] = (uint8_t)n;
+				for (int32_t k = 0; k < n; k++) {
+					const uint8_t c = (uint8_t)name[k] & 0x7f;
+					msg[i++] = (c >= 32) ? c : '?';
+				}
+			}
+		}
+		msg[i++] = 0xf7;
+		lastHidCable->sendSysex(msg, i);
+		if (kitClip == nullptr) {
+			break;
+		}
+	}
+	owed = false;
+	everSent = true;
+	lastHash = hash;
+}
+
+// Chroma (0x59): THE EFFECTS OF THE SOUND IN FOCUS - the same sound 0x4B describes (the sound editor's, else the
+// current synth, else the selected kit row), as the numbers its own menus show.
+//
+//   F0 00 21 7B 01 02 59 01 <has> [ fields ] F7              has 0: no sound in focus, nothing follows
+//
+//   fields, in order (0-50 unless said):
+//     volume  pan(0-64, 32 centre: the menu's -32..32 plus 32)
+//     delay: amount  rate  pingpong(0/1)  analog(0/1)  sync level(enum)  sync type(enum)
+//     reverb amount
+//     mod FX: type(enum)  rate  depth  feedback  offset
+//     EQ: bass  treble  bass freq  treble freq
+//     decimation  bitcrush  wavefold  saturation(the menu's raw value)
+//     sidechain shape  portamento
+//     arp: mode(enum)  rate  gate  octaves(raw)  preset(enum)
+//
+// Cody, 2026-11-24: "we need to add effects to the sound screen and arp and all the other settings from the Deluge
+// front panel ... I want this all cleanly exposed to avoid ANY menu diving". READS ONLY. De-duped by a hash.
+void HIDSysex::sendEffectsIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	using namespace deluge::modulation::params;
+	Sound* sound = nullptr;
+	ParamManager* paramManager = nullptr;
+	Clip* clip = selectedClip();
+	if (getCurrentUI() == &soundEditor && soundEditor.currentSound != nullptr
+	    && soundEditor.currentParamManager != nullptr) {
+		sound = soundEditor.currentSound;
+		paramManager = soundEditor.currentParamManager;
+	}
+	else if (clip != nullptr && clip->output != nullptr && clip->output->type == OutputType::SYNTH) {
+		sound = static_cast<SoundInstrument*>(clip->output);
+		paramManager = &clip->paramManager;
+	}
+	else if (!sdRoutineLock && clip != nullptr && clip->output != nullptr && clip->output->type == OutputType::KIT
+	         && clip->type == ClipType::INSTRUMENT) {
+		Kit* kit = static_cast<Kit*>(clip->output);
+		if (kit->selectedDrum != nullptr && kit->getDrumIndex(kit->selectedDrum) >= 0
+		    && kit->selectedDrum->type == DrumType::SOUND) {
+			SoundDrum* drum = static_cast<SoundDrum*>(kit->selectedDrum);
+			NoteRow* noteRow = static_cast<InstrumentClip*>(clip)->getNoteRowForDrum(drum);
+			if (noteRow != nullptr) {
+				sound = drum;
+				paramManager = &noteRow->paramManager;
+			}
+		}
+	}
+	if (sound != nullptr && (paramManager == nullptr || !paramManager->containsAnyMainParamCollections())) {
+		sound = nullptr;
+	}
+
+	uint8_t msg[7 + 2 + 40 + 1];
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -1806,15 +2029,86 @@ void HIDSysex::sendAnalogueProbeIfChanged(bool force) {
 	msg[i++] = 0x7b;
 	msg[i++] = 0x01;
 	msg[i++] = 0x02;
-	msg[i++] = SysEx::SysexCommands::AnalogueProbe;
-	msg[i++] = 1;
-	for (int32_t c = 0; c < 8; c++) {
-		msg[i++] = (uint8_t)((now[c] >> 7) & 0x7f);
-		msg[i++] = (uint8_t)(now[c] & 0x7f);
-		sent[c] = now[c];
+	msg[i++] = SysEx::SysexCommands::Effects;
+	uint32_t hash = 2166136261u;
+	auto put = [&](int32_t v) {
+		const uint8_t b = (uint8_t)((v < 0) ? 0 : ((v > 127) ? 127 : v));
+		msg[i++] = b;
+		hash = (hash ^ b) * 16777619u;
+	};
+	put(1);
+	if (sound == nullptr) {
+		put(0);
 	}
-	msg[i++] = 0xf7;
+	else {
+		put(1);
+		PatchedParamSet* patched = paramManager->getPatchedParamSet();
+		UnpatchedParamSet* unpatched = paramManager->getUnpatchedParamSet();
+		auto level = [&](int32_t p) { put(computeCurrentValueForStandardMenuItem(patched->getValue(p))); };
+		auto flat = [&](int32_t p) {
+			put((unpatched != nullptr) ? computeCurrentValueForStandardMenuItem(unpatched->getValue(p)) : 0);
+		};
+		level(GLOBAL_VOLUME_POST_FX);
+		put(computeCurrentValueForPan(patched->getValue(LOCAL_PAN)) + 32);
+		level(GLOBAL_DELAY_FEEDBACK);
+		level(GLOBAL_DELAY_RATE);
+		put(sound->delay.pingPong ? 1 : 0);
+		put(sound->delay.analog ? 1 : 0);
+		put(util::to_underlying(sound->delay.syncLevel));
+		put(util::to_underlying(sound->delay.syncType));
+		level(GLOBAL_REVERB_AMOUNT);
+		put(util::to_underlying(sound->getModFXType()));
+		level(GLOBAL_MOD_FX_RATE);
+		level(GLOBAL_MOD_FX_DEPTH);
+		flat(UNPATCHED_MOD_FX_FEEDBACK);
+		flat(UNPATCHED_MOD_FX_OFFSET);
+		flat(UNPATCHED_BASS);
+		flat(UNPATCHED_TREBLE);
+		flat(UNPATCHED_BASS_FREQ);
+		flat(UNPATCHED_TREBLE_FREQ);
+		flat(UNPATCHED_SAMPLE_RATE_REDUCTION);
+		flat(UNPATCHED_BITCRUSHING);
+		level(LOCAL_FOLD);
+		put(sound->clippingAmount);
+		flat(UNPATCHED_SIDECHAIN_SHAPE);
+		flat(UNPATCHED_PORTAMENTO);
+		// A synth's arpeggiator lives with its clip, a kit row's with the row: asked only of the clip that owns it.
+		ArpeggiatorSettings* arp = nullptr;
+		if (sound->isDrum()) {
+			arp = sound->getArpSettings(nullptr);
+		}
+		else if (clip != nullptr && clip->type == ClipType::INSTRUMENT && clip->output != nullptr
+		         && clip->output->type == OutputType::SYNTH
+		         && static_cast<Sound*>(static_cast<SoundInstrument*>(clip->output)) == sound) {
+			arp = sound->getArpSettings(static_cast<InstrumentClip*>(clip));
+		}
+		if (arp != nullptr) {
+			put(util::to_underlying(arp->mode));
+			level(GLOBAL_ARP_RATE);
+			flat(UNPATCHED_ARP_GATE);
+			put(arp->numOctaves);
+			put(util::to_underlying(arp->preset));
+		}
+		else {
+			put(0x7f);
+			put(0);
+			put(0);
+			put(0);
+			put(0);
+		}
+	}
+
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
+	if (!force && everSent && hash == lastHash) {
+		return;
+	}
+	if (lastHidCable->sendBufferSpace() < 64 || lastHidCable->sendBufferSpace() > 0x10000) {
+		return; // not sent, so not remembered
+	}
+	lastHash = hash;
 	everSent = true;
+	msg[i++] = 0xf7;
 	lastHidCable->sendSysex(msg, i);
 }
 
@@ -1901,7 +2195,7 @@ void HIDSysex::sendDeviceStateIfChanged(bool force) {
 	if (lastHidCable == nullptr) {
 		return;
 	}
-	uint8_t msg[7 + 3 + RuntimeFeatureSettingType::MaxElement * 3 + 1 + 1];
+	uint8_t msg[7 + 3 + RuntimeFeatureSettingType::MaxElement * 3 + 2 + 1];
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -1986,6 +2280,10 @@ void HIDSysex::sendDeviceStateIfChanged(bool force) {
 		}
 	}
 	put(master);
+	// THE DEFAULT KEYBOARD LAYOUT (1.3.128), after the master level: the layout a new track opens in, the same
+	// KeyboardLayoutType number 0x48 sends for the current one. Cody: "a setting for setting the default keyboard
+	// view so that I don't have to rotate through them". Read here; set from the Deluge's own menu.
+	put((uint8_t)util::to_underlying(FlashStorage::defaultKeyboardLayout));
 
 	static uint32_t lastHash = 0;
 	static bool everSent = false;

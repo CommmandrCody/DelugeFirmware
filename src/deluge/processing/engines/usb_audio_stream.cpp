@@ -315,6 +315,10 @@ PLACE_SDRAM_BSS int16_t rxRing[kRxRingFrames * kRxChannels];
 volatile uint32_t rxWriteFrame = 0;
 volatile uint32_t rxReadFrame = 0;
 bool rxRingCleared = false;
+/// 1.3.128: health counts for the return, read by readHealth. The peak is cleared by each read.
+uint32_t healthRxFrames = 0;
+uint32_t healthRxDropped = 0;
+uint16_t healthRxPeak = 0;
 bool rxPrimed = false;
 
 /// A host has the return interface selected.
@@ -428,6 +432,8 @@ void ingestReturnPacket(const uint8_t* data, uint32_t bytes) {
 	const uint32_t held = rxWriteFrame - rxReadFrame;
 	const uint32_t room = held >= kRxRingFrames ? 0u : kRxRingFrames - held;
 	const uint32_t toWrite = frames <= room ? frames : room;
+	healthRxFrames += toWrite;
+	healthRxDropped += frames - toWrite;
 	const int16_t* samples = (const int16_t*)data;
 	const uint32_t w = rxWriteFrame;
 	for (uint32_t f = 0; f < toWrite; f++) {
@@ -572,15 +578,21 @@ void drainReturnDma() {
 	const uint32_t room = held >= kRxRingFrames ? 0u : kRxRingFrames - held;
 	uint32_t frames = available / kRxFrameBytes;
 	if (frames > room) {
+		healthRxDropped += frames - room;
 		frames = room;
 	}
+	healthRxFrames += frames;
+	int32_t peak = healthRxPeak;
 	uint32_t offset = rxDmaReadOffset;
 	uint32_t w = rxWriteFrame;
 	for (uint32_t f = 0; f < frames; f++) {
 		const int16_t* const src = (const int16_t*)(base + offset);
 		int16_t* const dst = &rxRing[(w & kRxRingMask) * kRxChannels];
 		for (uint32_t c = 0; c < kRxChannels; c++) {
-			dst[c] = src[c];
+			const int32_t v = src[c];
+			dst[c] = (int16_t)v;
+			const int32_t a = (v < 0) ? -v : v;
+			peak = (a > peak) ? a : peak;
 		}
 		offset += kRxFrameBytes;
 		if (offset >= kRxDmaBytes) {
@@ -589,6 +601,7 @@ void drainReturnDma() {
 		w++;
 	}
 	rxWriteFrame = w;
+	healthRxPeak = (uint16_t)((peak > 32767) ? 32767 : peak);
 	// Past everything the controller produced, including anything dropped for want of room, so the two never drift.
 	rxDmaReadOffset = writeOffset;
 }
@@ -1258,6 +1271,11 @@ void USBAudioStream::readHealth(Health& out) {
 	out.pipeControl = *pipeControl(USB_CFG_PAUDIO_ISO_IN);
 	out.fifoSelect = usbRegisters()->D0FIFOSEL;
 	out.fifoControl = usbRegisters()->D0FIFOCTR;
+	out.returnActive = returnActive;
+	out.rxFrames = healthRxFrames;
+	out.rxDropped = healthRxDropped;
+	out.rxPeak = healthRxPeak;
+	healthRxPeak = 0;
 }
 
 void USBAudioStream::beginRender(uint32_t numSamples) {

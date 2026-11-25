@@ -1056,9 +1056,27 @@ void renderReverb(size_t numSamples) {
 			reverbAmplitudeL = reverbAmplitudeR = reverbOutputVolume;
 		}
 
-		// Mix reverb into main render
+		// Mix reverb into main render - or, when a host has asked for the reverb on its own USB pair and is streaming,
+		// out on that pair instead (1.3.133). Cody, 2026-11-25: "I routed everything to USB 1 and I still hear
+		// something, is this the send effects? how do we route those?" With no host streaming it stays in the mix,
+		// so a set never loses its reverb to a cable.
 		reverb.setPanLevels(reverbAmplitudeL, reverbAmplitudeR);
-		reverb.process(reverbBuffer, renderingBuffer);
+		using deluge::processing::engines::USBAudioStream;
+		if (USBAudioStream::getReverbPair() != 0 && USBAudioStream::stemsWanted()
+		    && numSamples <= SSI_TX_BUFFER_NUM_SAMPLES) {
+			static StereoSample wet[SSI_TX_BUFFER_NUM_SAMPLES];
+			memset(wet, 0, numSamples * sizeof(StereoSample));
+			reverb.process(reverbBuffer, std::span<StereoSample>{wet, numSamples});
+			if (!USBAudioStream::takeReverb(wet, numSamples)) {
+				for (size_t i = 0; i < numSamples; i++) {
+					renderingBuffer[i].l += wet[i].l;
+					renderingBuffer[i].r += wet[i].r;
+				}
+			}
+		}
+		else {
+			reverb.process(reverbBuffer, renderingBuffer);
+		}
 		logAction("Reverb complete");
 	}
 }

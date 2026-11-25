@@ -1458,6 +1458,29 @@ uint32_t USBAudioStream::getMainPair() {
 	return mainPairSetting;
 }
 
+uint32_t reverbPairSetting = 0; // 1.3.133: 0 the reverb stays in the main mix, 1-4 the pair it goes out on instead
+
+void USBAudioStream::setReverbPair(uint32_t pair) {
+	reverbPairSetting = (pair <= kStemChannels / 2u) ? pair : 0u;
+}
+uint32_t USBAudioStream::getReverbPair() {
+	return reverbPairSetting;
+}
+bool USBAudioStream::takeReverb(const StereoSample* wet, uint32_t numSamples) {
+	if (reverbPairSetting == 0u || !streamActive || wet == nullptr || numSamples > stemWindowSamples) {
+		return false;
+	}
+	// Assigned, like the first track onto a channel: the reverb takes the pair's place, and a track routed there later
+	// in the window would add to it. In the mix's own scale, as a track's copy is.
+	const uint32_t c = (reverbPairSetting - 1u) * 2u;
+	for (uint32_t i = 0; i < numSamples; i++) {
+		stemAccumulator[c][i] = wet[i].l;
+		stemAccumulator[c + 1u][i] = wet[i].r;
+	}
+	channelsWritten |= (uint16_t)((1u << c) | (1u << (c + 1u)));
+	return true;
+}
+
 void USBAudioStream::feedMix(uint32_t numSamples, uint32_t renderOffset, const StereoSample* mainMix) {
 	advanceReturnBy(numSamples);
 

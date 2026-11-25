@@ -90,6 +90,12 @@ public:
 	/// level, what the Deluge's own outputs play - in place of whatever tracks are routed to it. Not saved.
 	static void setMainPair(uint32_t pair);
 	static uint32_t getMainPair();
+	/// 1.3.133: THE REVERB RETURN - the stereo pair (1-4, 0 the main mix) the shared reverb goes out on instead of the
+	/// main mix, like a desk's aux return. Not saved. takeReverb puts one render window of reverb on that pair and says
+	/// whether it did; when it does not (no host streaming, no pair), the caller mixes it into the main mix as before.
+	static void setReverbPair(uint32_t pair);
+	static uint32_t getReverbPair();
+	static bool takeReverb(const StereoSample* wet, uint32_t numSamples);
 
 	/* ---- In ---- */
 

@@ -2556,11 +2556,6 @@ void Song::renderAudio(std::span<StereoSample> outputBuffer, int32_t* reverbBuff
 			output->renderOutput(modelStack, outputBuffer, reverbBuffer, volumePostFX >> 1, sideChainHitPending,
 			                     !isClipActiveNow, isClipActiveNow);
 
-			// The USB copy is taken BEFORE the fader, like a direct out: what a computer records does not
-			// change when a level is ridden on the instrument.
-			if (wantsCopy) {
-				USBAudioStream::captureStem(route, mixRaw, numSamples);
-			}
 			if (mixerScales) {
 				for (uint32_t s = 0; s < numSamples * 2; s++) {
 					const int64_t share = (int64_t)mixRaw[s] - mixerMixBefore[s];
@@ -2570,6 +2565,13 @@ void Song::renderAudio(std::span<StereoSample> outputBuffer, int32_t* reverbBuff
 					const int64_t share = (int64_t)reverbBuffer[s] - mixerReverbBefore[s];
 					reverbBuffer[s] = mixerReverbBefore[s] + (int32_t)((share * mixerGain) >> 30);
 				}
+			}
+			// The USB copy is taken AFTER the fader (1.3.133): mute, solo and level reach the USB channel as they reach
+			// the mix. Cody, 2026-11-25: "I tried to solo tracks sent to USB and set levels and they only affect the
+			// out to the master, not to the USB channel ... what gives". (It was taken before the fader, like a direct
+			// out.)
+			if (wantsCopy) {
+				USBAudioStream::captureStem(route, mixRaw, numSamples);
 			}
 			if (wantsOut) {
 				USBAudioStream::removeTrackFromMix(mixRaw, numSamples);

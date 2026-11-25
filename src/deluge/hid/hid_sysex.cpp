@@ -1737,7 +1737,8 @@ void HIDSysex::sendHealthIfDue(bool force) {
 		put7(USBAudioStream::getReturnLevel());
 		put7(USBAudioStream::getCompensationMs());
 		put7(USBAudioStream::numReturnPairs());
-		put7(USBAudioStream::getMainPair()); // 1.3.132: the pair carrying the main mix, 0 none
+		put7(USBAudioStream::getMainPair());   // 1.3.132: the pair carrying the main mix, 0 none
+		put7(USBAudioStream::getReverbPair()); // 1.3.133: the pair carrying the reverb return, 0 the main mix
 	}
 	msg[i++] = 0xf7;
 
@@ -2776,6 +2777,13 @@ void HIDSysex::receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len) {
 					result = 0;
 					midiInputsChanged = true;
 				}
+			}
+		}
+		else if (what == 9) {
+			// THE REVERB RETURN ON A USB PAIR (1.3.133): 0 the main mix, 1-4 the pair instead. Reported in 0x5B.
+			if (value <= deluge::processing::engines::USBAudioStream::kStemChannels / 2u) {
+				deluge::processing::engines::USBAudioStream::setReverbPair(value);
+				result = 0;
 			}
 		}
 		else if (what == 8) {

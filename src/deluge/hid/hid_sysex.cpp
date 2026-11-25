@@ -132,6 +132,7 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		// ...and the chord being held, or that there is none.
 		sendHeldChordIfChanged(true);
 		sendAnalogueProbeIfChanged(true);
+		sendMidiInputsIfChanged(true);
 		return;
 	}
 	// first three bytes are already used, next is command
@@ -168,6 +169,7 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		sendHeldChordIfChanged();       // a chord is held and let go with no display redraw a host can count on
 		sendAnalogueProbeIfChanged();   // the converter's eight inputs, when one moves
 		flushGoldKnobs();               // a knob value held back by the 40 ms gap
+		sendMidiInputsIfChanged();      // a learn on the Deluge redraws nothing a host can count on
 		break;
 
 	default:
@@ -1784,6 +1786,56 @@ void HIDSysex::sendAnalogueProbeIfChanged(bool force) {
 	lastHidCable->sendSysex(msg, i);
 }
 
+// Chroma (0x5D): THE MIDI CHANNEL EACH TRACK LISTENS ON - its learned MIDI input, in track-list (0x49) order.
+//
+//   F0 00 21 7B 01 02 5D <count> count x <channel> F7       channel 0-15; 16/17 an MPE zone; 7F none (or audio)
+//
+// Cody, 2026-11-24: "I need to be able to get Chordion to send signals to one of my tracks ... an easy MIDI routing
+// table". A host can only aim a controller at a track if it knows which channel that track hears. De-duped.
+void HIDSysex::sendMidiInputsIfChanged(bool force) {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	constexpr int32_t kMaxTracks = 24;
+	uint8_t msg[7 + 1 + kMaxTracks + 1];
+	int32_t i = 0;
+	msg[i++] = 0xf0;
+	msg[i++] = 0x00;
+	msg[i++] = 0x21;
+	msg[i++] = 0x7b;
+	msg[i++] = 0x01;
+	msg[i++] = 0x02;
+	msg[i++] = SysEx::SysexCommands::MidiInputs;
+	const int32_t countAt = i++;
+	uint32_t hash = 2166136261u;
+	int32_t n = 0;
+	if (currentSong != nullptr) {
+		for (Output* output = currentSong->firstOutput; output != nullptr && n < kMaxTracks;
+		     output = output->next, n++) {
+			uint8_t ch = 0x7f;
+			if (output->type != OutputType::AUDIO) {
+				Instrument* instrument = static_cast<Instrument*>(output);
+				if (instrument->midiInput.containsSomething() && instrument->midiInput.channelOrZone < 18) {
+					ch = (uint8_t)instrument->midiInput.channelOrZone;
+				}
+			}
+			msg[i++] = ch;
+			hash = (hash ^ ch) * 16777619u;
+		}
+	}
+	msg[countAt] = (uint8_t)n;
+	hash = (hash ^ (uint8_t)n) * 16777619u;
+	static uint32_t lastHash = 0;
+	static bool everSent = false;
+	if (!force && everSent && hash == lastHash) {
+		return;
+	}
+	lastHash = hash;
+	everSent = true;
+	msg[i++] = 0xf7;
+	lastHidCable->sendSysex(msg, i);
+}
+
 // The 14-bit hash a host names a Features setting by: FNV-1a over the name it is stored under on the card.
 // Positions in the settings enum move between firmware builds; the stored name does not.
 static uint16_t settingNameHash(std::string_view name) {
@@ -2204,6 +2256,7 @@ void HIDSysex::receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len) {
 	uint8_t result = 3;
 	bool tracksChanged = false;
 	bool deviceChanged = false;
+	bool midiInputsChanged = false;
 	if (len >= 7) {
 		const uint8_t a = data[3] & 0x7f;
 		const uint8_t b = data[4] & 0x7f;
@@ -2279,6 +2332,45 @@ void HIDSysex::receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len) {
 				break;
 			}
 		}
+		else if (what == 7) {
+			// A TRACK'S MIDI INPUT (1.3.126): the channel it listens on, 0-15, from any device; 127 clears it. What
+			// holding the track's pad and playing a note does on the Deluge (MIDI learn), from a host. Cody,
+			// 2026-11-24: "I need to be able to get Chordion to send signals to one of my tracks ... an easy MIDI
+			// routing table". Addressed like a mixer command: position and name hash, refused if they disagree.
+			Output* output = (currentSong != nullptr) ? currentSong->firstOutput : nullptr;
+			for (uint8_t n = 0; output != nullptr && n < a; n++) {
+				output = output->next;
+			}
+			if (output == nullptr) {
+				result = 1;
+			}
+			else {
+				uint32_t h = 2166136261u;
+				const char* name = output->name.get();
+				for (int32_t k = 0; name != nullptr && name[k] != 0 && k < 12; k++) {
+					const uint8_t c = (uint8_t)name[k] & 0x7f;
+					h = (h ^ ((c >= 32) ? c : '?')) * 16777619u;
+				}
+				if ((uint8_t)((h ^ (h >> 7) ^ (h >> 14) ^ (h >> 21)) & 0x7f) != b) {
+					result = 2;
+				}
+				else if (output->type == OutputType::AUDIO || (value > 15 && value != 127)) {
+					result = 3;
+				}
+				else {
+					Instrument* instrument = static_cast<Instrument*>(output);
+					if (value == 127) {
+						instrument->midiInput.clear();
+					}
+					else {
+						instrument->midiInput.cable = nullptr; // from any device
+						instrument->midiInput.channelOrZone = value;
+					}
+					result = 0;
+					midiInputsChanged = true;
+				}
+			}
+		}
 		else if (what == 6) {
 			// THE SONG'S MASTER LEVEL (1.3.124), 0-50 as the display shows it - the value 0x4D reports. Set the way
 			// turning the gold knob on the song does it (as user input, so the Deluge treats it like a hand on the
@@ -2308,6 +2400,9 @@ void HIDSysex::receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len) {
 		}
 	}
 	uint8_t reply[10] = {0xf0, 0x00, 0x21, 0x7b, 0x01, 0x02, SysEx::SysexCommands::CommandOutcome, seq, result, 0xf7};
+	if (midiInputsChanged) {
+		sendMidiInputsIfChanged();
+	}
 	cable.sendSysex(reply, sizeof(reply));
 	if (tracksChanged) {
 		sendTrackStateIfChanged(); // the state itself, from the one place it is always reported

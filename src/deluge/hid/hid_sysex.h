@@ -86,6 +86,8 @@ void sendHeldChordIfChanged(bool force = false);
 void sendAnalogueProbeIfChanged(bool force = false);
 /// Chroma (0x46): sends a gold knob value held back by the 40 ms report gap, once the gap has passed.
 void flushGoldKnobs();
+/// Chroma (0x5D): the MIDI channel each track listens on, in track-list order. De-duped.
+void sendMidiInputsIfChanged(bool force = false);
 // Chroma complete-sync WRITE direction: a host (CT/Companion) sends a voicing-mod (0x44); the Deluge applies it to
 // its OWN held chord and re-broadcasts 0x43, so every surface stays in sync. The MIDI-receive context only stashes
 // it in a one-slot inbox; the Harmonic layout drains it on the UI/graphics thread (where re-voicing + broadcast run

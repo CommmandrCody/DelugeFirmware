@@ -43,6 +43,7 @@
 #include "hid/display/seven_segment.h"
 #include "hid/encoder_input.h"
 #include "hid/encoders.h"
+#include "hid/hid_sysex.h"
 #include "hid/led/indicator_leds.h"
 #include "hid/led/pad_leds.h"
 #include "hid/matrix/matrix_driver.h"
@@ -603,6 +604,10 @@ void registerTasks() {
 
 	// 21-29: Low priority (30 for dyn tasks)
 	p = 21;
+	// Chroma (1.3.134): the pushes to a connected host - pads when they change, and the other change checks - in a
+	// task of their own that holds NO USB resource. They used to run inside "check usb midi", answering a host's pad
+	// poll, and held the USB resource the audio stream task needs every millisecond (hid_sysex.cpp, case 3).
+	addRepeatingTask([]() { HIDSysex::routine(); }, p++, 0.005, 0.01, 0.05, "chroma pushes", RESOURCE_NONE);
 	// these ones are actually "slow" -> file manager just checks if an sd card has been inserted, audio recorder checks
 	// if recordings are finished
 	addRepeatingTask([]() { audioFileManager.slowRoutine(); }, p++, 0.1, 0.1, 0.2, "audio file slow", RESOURCE_SD);

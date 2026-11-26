@@ -82,6 +82,7 @@ enum SysexCommands : uint8_t {
 	SampleState = 0x55,     // Chroma: outbound - the sample in focus: file, repeat mode, start, end and loop.
 	HeldChord = 0x57,       // Chroma: outbound - the chord being held on the keyboard, named as the display names it.
 	MidiInputs = 0x5D,      // Chroma: outbound - the MIDI channel each track listens on (its learned input).
+	PadDelta = 0x5E,        // Chroma: outbound - only the pads that changed since the last grid sent (1.3.134).
 	KitRows = 0x58,         // Chroma: outbound - every row of the current kit: name, kind, muted, selected.
 	Effects = 0x59,         // Chroma: outbound - the effects of the sound in focus: delay, reverb, mod FX, EQ, arp...
 	Health = 0x5B,          // Chroma: outbound - once a second: is the USB audio stream really sending.

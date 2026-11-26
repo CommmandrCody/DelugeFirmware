@@ -66,6 +66,7 @@ static void saveFeaturesIfNeeded();
 // Forward-declared: the resync handler below re-pushes the current view directly, and the table that
 // maps a UIType to its slug is defined further down with the rest of the view code.
 static const char* viewSlug(UIType t);
+static void requestPads(bool subscribe); // 1.3.134: the pad request only records what is wanted (see routine())
 
 void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 	lastHidCable = &cable;
@@ -158,23 +159,15 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 		break;
 
 	case 3:
-		sendPadGrid(cable); // Chroma: mirror the live pad-LED grid
-		// The panel rides the pad poll: a button light can change with no display redraw, and the pads
-		// are the one thing a host asks for continuously. De-duped, so an unchanged panel costs nothing.
-		sendPanelStateIfChanged();
-		// ...and so does the device state: selecting a track in the song grid redraws no display either.
-		sendDeviceStateIfChanged();
-		// ...and the pads' notes: scrolling a keyboard layout moves every note and redraws no display.
-		sendPadNotesIfChanged();
-		sendPadVelocitiesIfChanged();   // zooming or scrolling the drums layout moves every velocity
-		sendKeyboardColumnsIfChanged(); // a column's function changes with a button and no redraw
-		sendSampleStateIfChanged();     // hitting a kit pad selects its row and may redraw nothing
-		sendHealthIfDue();              // about once a second; the pad poll is the only steady clock a host gives
-		sendHeldChordIfChanged();       // a chord is held and let go with no display redraw a host can count on
-		sendKitRowsIfChanged();         // a mute or a selected row redraws nothing a host can count on
-		sendEffectsIfChanged();         // the effects of the sound in focus, when one moves
-		flushGoldKnobs();               // a knob value held back by the 40 ms gap
-		sendMidiInputsIfChanged();      // a learn on the Deluge redraws nothing a host can count on
+		// THE PAD REQUEST ONLY RECORDS WHAT IS WANTED (1.3.134). This runs inside the "check usb midi" task, which
+		// holds the USB resource - the same one the USB audio stream task needs every millisecond. Building the grid
+		// (144 x prepareColour), packing it and running every change check here starved the audio stream: measured
+		// 2026-11-25, with a host polling 12.5 times a second the Deluge's USB audio stalled within minutes of notes
+		// being played, and without the poll it did not stall in 12 minutes. The work is done in routine(), a task
+		// of its own that holds no USB resource.
+		//   03 01   subscribe: send the grid now and then whatever changes, for 5 s - renewed by asking again
+		//   03 00   (older hosts) one grid, as before
+		requestPads(len >= 3 && data[2] == 1);
 		break;
 
 	default:
@@ -2862,10 +2855,141 @@ bool HIDSysex::takeChordMod(uint8_t* modType, uint8_t* value) {
 // Chroma: F0 00 21 7B 01 02 50 <packed 8x18 RGB, 8-bit->7-bit> F7. Mirrors the live pad-LED grid the user
 // sees — exact colours, and it reflects ANY control change because the host just renders the lit pads.
 // Reads PadLEDs::image (the buffer that drives the physical LEDs, always valid, incl. on 7-seg units).
+namespace {
+constexpr int32_t kPadRawBytes = 8 * 18 * 3 + 18 + 18 + 18; // colours, then held, sounding and playing columns
+uint32_t padLeaseUntil = 0;                                 // audio-sample time a subscription runs to
+bool padSubscribed = false;
+bool padOneShotOwed = false; // an older host's single request, answered by routine()
+bool padFullOwed = false;    // the next push is a whole grid (a new subscription)
+uint8_t padLastSent[kPadRawBytes];
+bool padHaveLast = false;
+uint32_t padLastPushAt = 0, checksLastAt = 0;
+} // namespace
+
+static void requestPads(bool subscribe) {
+	if (subscribe) {
+		if (!padSubscribed) {
+			padFullOwed = true; // a host that has just (re)subscribed has nothing to apply a delta to
+		}
+		padSubscribed = true;
+		padLeaseUntil = AudioEngine::audioSampleTimer + 5 * kSampleRate;
+	}
+	else {
+		padOneShotOwed = true;
+	}
+}
+
+// The grid as a pad sees it, into `raw`; returns the bytes written.
+static int32_t buildPadFrame(uint8_t* raw);
+
 void HIDSysex::sendPadGrid(MIDICable& cable) {
+	uint8_t raw[kPadRawBytes];
+	const int32_t p = buildPadFrame(raw);
+	uint8_t reply_hdr[7] = {0xF0, 0x00, 0x21, 0x7B, 0x01, 0x02, 0x50};
+	uint8_t* reply = midiEngine.sysex_fmt_buffer;
+	memcpy(reply, reply_hdr, 7);
+	int32_t packed = pack_8bit_to_7bit(reply + 7, 600, raw, p);
+	if (packed < 0) {
+		return;
+	}
+	reply[7 + packed] = 0xf7;
+	cable.sendSysex(reply, packed + 8);
+	memcpy(padLastSent, raw, (size_t)p);
+	padHaveLast = true;
+}
+
+// THE PADS THAT CHANGED (0x5E, 1.3.134): F0 00 21 7B 01 02 5E <packed: ver=1, n, n x (index, r, g, b), held[18],
+// sounding[18], playing[18]> F7. Index is y * 18 + x, as in the grid. A note press changes a handful of pads, so this
+// is a tenth of a whole grid; past 64 changed pads the whole grid is cheaper and is sent instead.
+static void pushPadsIfChanged(MIDICable& cable) {
+	uint8_t raw[kPadRawBytes];
+	const int32_t p = buildPadFrame(raw);
+	if (!padHaveLast || padFullOwed) {
+		padFullOwed = false;
+		HIDSysex::sendPadGrid(cable);
+		return;
+	}
+	constexpr int32_t kColourBytes = 8 * 18 * 3;
+	uint8_t delta[2 + 64 * 4 + 54];
+	int32_t n = 0, d = 2;
+	for (int32_t k = 0; k < 144; k++) {
+		const uint8_t* now = &raw[k * 3];
+		const uint8_t* was = &padLastSent[k * 3];
+		if (now[0] == was[0] && now[1] == was[1] && now[2] == was[2]) {
+			continue;
+		}
+		if (++n > 64) {
+			HIDSysex::sendPadGrid(cable);
+			return;
+		}
+		delta[d++] = (uint8_t)k;
+		delta[d++] = now[0];
+		delta[d++] = now[1];
+		delta[d++] = now[2];
+	}
+	const bool columnsMoved = memcmp(&raw[kColourBytes], &padLastSent[kColourBytes], (size_t)(p - kColourBytes)) != 0;
+	if (n == 0 && !columnsMoved) {
+		return; // nothing changed: nothing is sent
+	}
+	delta[0] = 1;
+	delta[1] = (uint8_t)n;
+	memcpy(&delta[d], &raw[kColourBytes], (size_t)(p - kColourBytes));
+	d += p - kColourBytes;
+	uint8_t* reply = midiEngine.sysex_fmt_buffer;
+	const uint8_t hdr[7] = {0xF0, 0x00, 0x21, 0x7B, 0x01, 0x02, SysEx::SysexCommands::PadDelta};
+	memcpy(reply, hdr, 7);
+	const int32_t packed = pack_8bit_to_7bit(reply + 7, 600, delta, d);
+	if (packed < 0) {
+		return;
+	}
+	reply[7 + packed] = 0xf7;
+	cable.sendSysex(reply, packed + 8);
+	memcpy(padLastSent, raw, (size_t)p);
+}
+
+// THE PUSHES' OWN TASK (1.3.134), registered in deluge.cpp at low priority with no USB resource. While a host holds a
+// pad subscription: the pads whenever they change (at most every 40 ms), and the other change checks every 100 ms -
+// the clock the host's pad poll used to provide, now the instrument's own. An older host's one-off request is
+// answered here too, with the same checks it always brought.
+void HIDSysex::routine() {
+	if (lastHidCable == nullptr) {
+		return;
+	}
+	const uint32_t now = AudioEngine::audioSampleTimer;
+	if (padSubscribed && (int32_t)(now - padLeaseUntil) > 0) {
+		padSubscribed = false; // not renewed: the host has gone, and nothing is sent to nobody
+	}
+	const bool oneShot = padOneShotOwed;
+	padOneShotOwed = false;
+	if (oneShot) {
+		sendPadGrid(*lastHidCable);
+	}
+	else if (padSubscribed && (uint32_t)(now - padLastPushAt) >= kSampleRate / 25) {
+		padLastPushAt = now;
+		pushPadsIfChanged(*lastHidCable);
+	}
+	if (!oneShot && !(padSubscribed && (uint32_t)(now - checksLastAt) >= kSampleRate / 10)) {
+		return;
+	}
+	checksLastAt = now;
+	// The panel: a button light can change with no display redraw. De-duped, so an unchanged panel costs nothing.
+	sendPanelStateIfChanged();
+	sendDeviceStateIfChanged();     // selecting a track in the song grid redraws no display either
+	sendPadNotesIfChanged();        // scrolling a keyboard layout moves every note and redraws no display
+	sendPadVelocitiesIfChanged();   // zooming or scrolling the drums layout moves every velocity
+	sendKeyboardColumnsIfChanged(); // a column's function changes with a button and no redraw
+	sendSampleStateIfChanged();     // hitting a kit pad selects its row and may redraw nothing
+	sendHealthIfDue();              // about once a second
+	sendHeldChordIfChanged();       // a chord is held and let go with no display redraw a host can count on
+	sendKitRowsIfChanged();         // a mute or a selected row redraws nothing a host can count on
+	sendEffectsIfChanged();         // the effects of the sound in focus, when one moves
+	flushGoldKnobs();               // a knob value held back by the 40 ms gap
+	sendMidiInputsIfChanged();      // a learn on the Deluge redraws nothing a host can count on
+}
+
+static int32_t buildPadFrame(uint8_t* raw) {
 	const int32_t W = kDisplayWidth + kSideBarWidth; // 18
 	const int32_t H = kDisplayHeight;                // 8
-	uint8_t raw[8 * 18 * 3 + 18 + 18 + 18];
 	int32_t p = 0;
 	for (int32_t y = 0; y < H; y++) {
 		for (int32_t x = 0; x < W; x++) {
@@ -2915,15 +3039,7 @@ void HIDSysex::sendPadGrid(MIDICable& cable) {
 	for (int32_t x = 0; x < W; x++) {
 		raw[p++] = (x < kDisplayWidth) ? playing[x] : 0;
 	}
-	uint8_t reply_hdr[7] = {0xF0, 0x00, 0x21, 0x7B, 0x01, 0x02, 0x50};
-	uint8_t* reply = midiEngine.sysex_fmt_buffer;
-	memcpy(reply, reply_hdr, 7);
-	int32_t packed = pack_8bit_to_7bit(reply + 7, 600, raw, p);
-	if (packed < 0) {
-		return;
-	}
-	reply[7 + packed] = 0xf7;
-	cable.sendSysex(reply, packed + 8);
+	return p;
 }
 
 void HIDSysex::sendOLEDDataDelta(MIDICable& cable, bool force) {

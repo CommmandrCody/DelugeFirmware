@@ -99,4 +99,6 @@ bool takeChordMod(uint8_t* modType, uint8_t* value); // UI drain: pop the pendin
 // Chroma: mirror the actual pad-LED grid (8 rows x 18 cols RGB) the user sees, so the host shows EXACTLY
 // the device surface and reflects every control change. Reads the live LED buffer; polled by the host.
 void sendPadGrid(MIDICable& cable);
+/// 1.3.134: the pushes, run by their own scheduler task - never inside the USB MIDI task (see hid_sysex.cpp).
+void routine();
 } // namespace HIDSysex

@@ -1951,14 +1951,16 @@ PLACE_SDRAM_BSS usb_audio::ReturnLevel usbAudioReturnLevelMenu{STRING_FOR_USB_RE
                                                                STRING_FOR_USB_RETURN_LEVEL};
 PLACE_SDRAM_BSS usb_audio::Compensation usbAudioCompensationMenu{STRING_FOR_USB_COMPENSATION,
                                                                  STRING_FOR_USB_COMPENSATION};
+PLACE_SDRAM_BSS usb_audio::MainOut usbAudioMainOutMenu{STRING_FOR_USB_MAIN_OUT, STRING_FOR_USB_MAIN_OUT};
+PLACE_SDRAM_BSS usb_audio::ReverbOut usbAudioReverbOutMenu{STRING_FOR_USB_REVERB_OUT, STRING_FOR_USB_REVERB_OUT};
 
 PLACE_SDRAM_BSS Submenu usbAudioSettingsMenu{
     STRING_FOR_USB_AUDIO,
     STRING_FOR_USB_AUDIO,
     {
-        &usbAudioReturnMenu,
-        &usbAudioReturnLevelMenu,
-        &usbAudioCompensationMenu,
+        &usbAudioReturnMenu, &usbAudioReturnLevelMenu, &usbAudioCompensationMenu,
+        &usbAudioMainOutMenu,   // Chroma 1.3.135, appended
+        &usbAudioReverbOutMenu, // Chroma 1.3.135, appended
     },
 };
 

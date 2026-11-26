@@ -90,6 +90,8 @@ extern uint8_t screensaverTimeoutMinutes;
 extern uint8_t usbAudioReturnPair;
 extern uint8_t usbAudioReturnLevel;
 extern uint8_t usbAudioCompensationMs;
+extern uint8_t usbAudioMainPair;   // Chroma 1.3.135: the USB pair the main mix goes out on, 0 none
+extern uint8_t usbAudioReverbPair; // Chroma 1.3.135: the USB pair the reverb return goes out on, 0 the main mix
 
 extern ThresholdRecordingMode defaultThresholdRecordingMode;
 

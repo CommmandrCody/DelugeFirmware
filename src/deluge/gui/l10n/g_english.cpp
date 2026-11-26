@@ -1041,6 +1041,8 @@ PLACE_SDRAM_DATA Language english{
         {STRING_FOR_USB_COMPENSATION, "Delay Compensation"},
         {STRING_FOR_USB_AUDIO, "USB Audio"},
         {STRING_FOR_USB_INPUT, "USB"},
+        {STRING_FOR_USB_MAIN_OUT, "Main Mix Out"},
+        {STRING_FOR_USB_REVERB_OUT, "Reverb Out"},
     },
 };
 } // namespace deluge::l10n::built_in

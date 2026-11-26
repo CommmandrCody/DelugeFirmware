@@ -62,6 +62,7 @@ static UIType lastSentView = UIType::NONE;
 static bool fxContextSent = false;
 // Chroma (0x4E): defined beside the command that needs it; called from the display poll.
 static void saveFeaturesIfNeeded();
+static bool usbSettingsNeedSaving = false; // 1.3.135: a host changed a saved USB audio setting; routine() writes it
 
 // Forward-declared: the resync handler below re-pushes the current view directly, and the table that
 // maps a UIType to its slug is defined further down with the rest of the view code.
@@ -2776,6 +2777,8 @@ void HIDSysex::receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len) {
 			// THE REVERB RETURN ON A USB PAIR (1.3.133): 0 the main mix, 1-4 the pair instead. Reported in 0x5B.
 			if (value <= deluge::processing::engines::USBAudioStream::kStemChannels / 2u) {
 				deluge::processing::engines::USBAudioStream::setReverbPair(value);
+				FlashStorage::usbAudioReverbPair = value; // kept across a restart (1.3.135), saved from routine()
+				usbSettingsNeedSaving = true;
 				result = 0;
 			}
 		}
@@ -2784,6 +2787,8 @@ void HIDSysex::receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len) {
 			// Deluge starts with none, so a pair is only ever taken over because a host asked.
 			if (value <= deluge::processing::engines::USBAudioStream::kStemChannels / 2u) {
 				deluge::processing::engines::USBAudioStream::setMainPair(value);
+				FlashStorage::usbAudioMainPair = value; // kept across a restart (1.3.135), saved from routine()
+				usbSettingsNeedSaving = true;
 				result = 0;
 			}
 		}
@@ -2952,6 +2957,12 @@ static void pushPadsIfChanged(MIDICable& cable) {
 // the clock the host's pad poll used to provide, now the instrument's own. An older host's one-off request is
 // answered here too, with the same checks it always brought.
 void HIDSysex::routine() {
+	// A USB audio setting a host changed is written to flash here, in a task with no USB resource, never in the
+	// command handler that runs inside "check usb midi" (1.3.135).
+	if (usbSettingsNeedSaving && !sdRoutineLock) {
+		usbSettingsNeedSaving = false;
+		FlashStorage::writeSettings();
+	}
 	if (lastHidCable == nullptr) {
 		return;
 	}

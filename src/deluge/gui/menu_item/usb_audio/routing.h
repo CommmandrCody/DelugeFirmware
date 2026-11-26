@@ -111,6 +111,46 @@ public:
 	}
 };
 
+/// Chroma 1.3.135: the USB pair the finished main mix goes out on - off, or 1-2 .. 7-8 - in place of what tracks send
+/// there. The Deluge's analogue outputs always carry the main mix; USB carries only what is put on it.
+class MainOut final : public Selection {
+public:
+	using Selection::Selection;
+	void readCurrentValue() override {
+		this->setValue((int32_t)deluge::processing::engines::USBAudioStream::getMainPair());
+	}
+	void writeCurrentValue() override {
+		deluge::processing::engines::USBAudioStream::setMainPair((uint32_t)this->getValue());
+		FlashStorage::usbAudioMainPair = (uint8_t)this->getValue();
+	}
+	deluge::vector<std::string_view> getOptions(OptType optType) override {
+		return {l10n::getView(l10n::String::STRING_FOR_OFF), l10n::getView(l10n::String::STRING_FOR_USB_PAIR_12),
+		        l10n::getView(l10n::String::STRING_FOR_USB_PAIR_34),
+		        l10n::getView(l10n::String::STRING_FOR_USB_PAIR_56),
+		        l10n::getView(l10n::String::STRING_FOR_USB_PAIR_78)};
+	}
+};
+
+/// Chroma 1.3.135: where the shared reverb goes - into the main mix, or out on a USB pair instead (while a computer
+/// is listening), like a desk's aux return.
+class ReverbOut final : public Selection {
+public:
+	using Selection::Selection;
+	void readCurrentValue() override {
+		this->setValue((int32_t)deluge::processing::engines::USBAudioStream::getReverbPair());
+	}
+	void writeCurrentValue() override {
+		deluge::processing::engines::USBAudioStream::setReverbPair((uint32_t)this->getValue());
+		FlashStorage::usbAudioReverbPair = (uint8_t)this->getValue();
+	}
+	deluge::vector<std::string_view> getOptions(OptType optType) override {
+		return {l10n::getView(l10n::String::STRING_FOR_USB_MAIN), l10n::getView(l10n::String::STRING_FOR_USB_PAIR_12),
+		        l10n::getView(l10n::String::STRING_FOR_USB_PAIR_34),
+		        l10n::getView(l10n::String::STRING_FOR_USB_PAIR_56),
+		        l10n::getView(l10n::String::STRING_FOR_USB_PAIR_78)};
+	}
+};
+
 /// Level of the returning pair, 0-50 in 1.2 dB steps: 0 silence, 40 unity, 50 is +12 dB.
 class ReturnLevel final : public Integer {
 public:

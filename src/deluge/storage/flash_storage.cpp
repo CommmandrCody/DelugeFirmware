@@ -220,6 +220,8 @@ enum Entries {
 199: usbAudioReturnPair + 1 (0 = never written)
 200: usbAudioReturnLevel + 1 (0 = never written)
 201: usbAudioCompensationMs
+202: usbAudioMainPair + 1 (0 = never written)
+203: usbAudioReverbPair + 1 (0 = never written)
 */
 
 uint8_t defaultScale;
@@ -269,6 +271,8 @@ uint8_t screensaverTimeoutMinutes;
 uint8_t usbAudioReturnPair;
 uint8_t usbAudioReturnLevel;
 uint8_t usbAudioCompensationMs;
+uint8_t usbAudioMainPair;
+uint8_t usbAudioReverbPair;
 int32_t holdTime;
 
 uint8_t defaultSwingInterval;
@@ -390,6 +394,8 @@ void resetSettings() {
 	usbAudioReturnPair = 1;
 	usbAudioReturnLevel = deluge::processing::engines::USBAudioStream::kReturnLevelDefault;
 	usbAudioCompensationMs = 0;
+	usbAudioMainPair = 0;
+	usbAudioReverbPair = 0;
 
 	defaultSwingInterval = 8 - defaultMagnitude; // 16th notes
 
@@ -903,6 +909,11 @@ void readSettings() {
 		USBAudioStream::setMasterReturnPair(usbAudioReturnPair);
 		USBAudioStream::setReturnLevel(usbAudioReturnLevel);
 		USBAudioStream::setCompensationMs(usbAudioCompensationMs);
+		// Chroma 1.3.135: where the main mix and the reverb return go out over USB, kept across a restart.
+		usbAudioMainPair = (buffer[202] == 0 || buffer[202] > 5) ? 0 : (uint8_t)(buffer[202] - 1);
+		usbAudioReverbPair = (buffer[203] == 0 || buffer[203] > 5) ? 0 : (uint8_t)(buffer[203] - 1);
+		USBAudioStream::setMainPair(usbAudioMainPair);
+		USBAudioStream::setReverbPair(usbAudioReverbPair);
 	}
 }
 
@@ -1176,6 +1187,8 @@ void writeSettings() {
 	buffer[199] = (uint8_t)(usbAudioReturnPair + 1);
 	buffer[200] = (uint8_t)(usbAudioReturnLevel + 1);
 	buffer[201] = usbAudioCompensationMs;
+	buffer[202] = (uint8_t)(usbAudioMainPair + 1);
+	buffer[203] = (uint8_t)(usbAudioReverbPair + 1);
 
 	R_SFLASH_EraseSector(0x80000 - 0x1000, SPIBSC_CH, SPIBSC_CMNCR_BSZ_SINGLE, 1, SPIBSC_OUTPUT_ADDR_24);
 	R_SFLASH_ByteProgram(0x80000 - 0x1000, buffer.data(), 256, SPIBSC_CH, SPIBSC_CMNCR_BSZ_SINGLE, SPIBSC_1BIT,

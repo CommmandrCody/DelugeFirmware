@@ -1169,6 +1169,8 @@ enum class String : size_t {
 	STRING_FOR_USB_COMPENSATION,
 	STRING_FOR_USB_AUDIO,
 	STRING_FOR_USB_INPUT,
+	STRING_FOR_USB_MAIN_OUT,   // Chroma 1.3.135: the pair the main mix goes out on
+	STRING_FOR_USB_REVERB_OUT, // Chroma 1.3.135: the pair the reverb return goes out on
 
 	STRING_LAST
 };

@@ -591,6 +591,8 @@ PLACE_SDRAM_DATA Language seven_segment{
         {STRING_FOR_USB_COMPENSATION, "CMP"},
         {STRING_FOR_USB_AUDIO, "USB"},
         {STRING_FOR_USB_INPUT, "USB"},
+        {STRING_FOR_USB_MAIN_OUT, "MOUT"},
+        {STRING_FOR_USB_REVERB_OUT, "RVB"},
     },
     &built_in::english,
 };

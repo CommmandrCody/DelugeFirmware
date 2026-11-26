@@ -2873,9 +2873,11 @@ uint32_t padLastPushAt = 0, checksLastAt = 0;
 
 static void requestPads(bool subscribe) {
 	if (subscribe) {
-		if (!padSubscribed) {
-			padFullOwed = true; // a host that has just (re)subscribed has nothing to apply a delta to
-		}
+		// A WHOLE GRID ON EVERY RENEWAL (1.3.136), not only when a subscription starts. Found 2026-11-26: the app
+		// restarted while its subscription was still live, so the new bridge was never sent a grid, dropped every delta
+		// (it has nothing to apply one to) and showed no pads at all. One grid every 2 s is ~280 B/s, and it also puts
+		// right any delta that was lost, within 2 s.
+		padFullOwed = true;
 		padSubscribed = true;
 		padLeaseUntil = AudioEngine::audioSampleTimer + 5 * kSampleRate;
 	}

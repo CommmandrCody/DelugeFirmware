@@ -846,6 +846,25 @@ uint8_t KeyboardLayoutHarmonic::buildChordAtDegree(uint8_t deg, int32_t y, const
 	return count;
 }
 
+// A PALETTE CHORD IS NAMED BY ITS NOTES (Chroma 1.3.140), with the namer the rest of the firmware uses (nameHeldChord,
+// checked on every chord by chroma/tools/chord-oracle). Cody, 2026-11-27, holding C E G B in A minor with the screen
+// saying "C7  bIII7": the ladder's "7" rung is the scale's own seventh, which on C is a MAJOR seventh, and "C7" reads
+// as dominant; and the numeral was counted from the major scale. The rung names the button, not the chord. The
+// screen spelling: "CM7  IIIM7", matching what the app is told ("Cmaj7  III").
+static void namePaletteChord(const int16_t* notes, uint8_t n, uint8_t keyRoot, NoteSet scale, char* out) {
+	uint8_t u[kMaxChordKeyboardSize];
+	uint8_t m = 0;
+	for (uint8_t k = 0; k < n && m < kMaxChordKeyboardSize; k++) {
+		if (notes[k] >= 0 && notes[k] < 128) {
+			u[m++] = (uint8_t)notes[k];
+		}
+	}
+	char host[64];
+	if (!nameHeldChord(u, m, keyRoot, scale, out, host)) {
+		out[0] = '\0';
+	}
+}
+
 void KeyboardLayoutHarmonic::drawName(const char* roman, const char* abs) {
 	char full[80];
 	if (roman && roman[0]) {
@@ -983,10 +1002,10 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 						int16_t nbuf[kMaxChordKeyboardSize];
 						uint8_t rpc = 0;
 						char roman[32], abs[32];
-						buildChordAtDegree((uint8_t)ci.local, pressed.y, iv, sc, keyRoot, nbuf, kMaxChordKeyboardSize,
-						                   &rpc, roman, abs);
-						char buf[40];
-						snprintf(buf, sizeof buf, "%s  %s", roman, abs);
+						const uint8_t n0 = buildChordAtDegree((uint8_t)ci.local, pressed.y, iv, sc, keyRoot, nbuf,
+						                                      kMaxChordKeyboardSize, &rpc, roman, abs);
+						char buf[64];
+						namePaletteChord(nbuf, (uint8_t)n0, keyRoot, getScaleNotes(), buf);
 						display->displayPopup(buf);
 						// contextId = clean degree roman (triad row) + richness label of the row tapped.
 						int16_t nb2[kMaxChordKeyboardSize];
@@ -1066,7 +1085,9 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 			int8_t thisRich =
 			    (int8_t)((pressed.y < 0) ? 0 : (pressed.y >= kDisplayHeight ? kDisplayHeight - 1 : pressed.y));
 			if (deg != namedDeg || thisRich != namedRich) {
-				drawName(roman, abs);
+				char named[64];
+				namePaletteChord(notes, n, keyRoot, getScaleNotes(), named);
+				drawName(nullptr, named[0] ? named : abs);
 				namedDeg = (int8_t)deg;
 				namedRich = thisRich;
 			}

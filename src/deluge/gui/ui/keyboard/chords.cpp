@@ -542,13 +542,67 @@ bool nearFrom(const uint8_t* notes, int32_t count, int32_t rootPc, NamedChord& o
 	return best < 99;
 }
 
-// THE ORDER (Chroma 1.3.139), each step proven against tonal by chroma/tools/chord-oracle:
+// WHICH READING, when the notes are a chord from more than one root (Chroma 1.3.140): the plainest. Triads, then
+// sevenths, then sixths, then sus, then added notes, then ninths, then elevenths and thirteenths, then altered
+// chords. A tie goes to the root nearest above the bass. Fixed by the music, never by the alphabet: 1.3.139 tried
+// roots C, Db, D... in turn, so one shape read "Fsus4/C" in one key and "Bbsus2/C" in another (26 shapes, found by
+// chord-oracle's transposition law, 2026-11-27).
+int32_t plainness(const char* code) {
+	static const char* const kTiers[][7] = {
+	    {"M", "-", "DIM", "AUG"},
+	    {"7", "M7", "-7", "-7" FLAT_CHAR_STR "5", "FULLDIM", "-M7"},
+	    {"6", "-6"},
+	    {"SUS4", "SUS2", "7SUS4"},
+	    {"2", "ADD9", "-2", "-ADD9", "69"},
+	    {"9", "M9", "-9", "-9" FLAT_CHAR_STR "5", "-M9", "9SUS4", "-4"}, // m(add11) is rarer than 6/9
+	    {"11", "M11", "-11", "13", "M13", "-13", "M13#11"},
+	};
+	for (int32_t t = 0; t < 7; t++) {
+		for (const char* c : kTiers[t]) {
+			if (c != nullptr && strcmp(c, code) == 0) {
+				return t;
+			}
+		}
+	}
+	return 7; // the altered chords (7b9, 7#9, 7b5, 7#5, 7#11, 7b13, 13b9, -7b9, -7b5b9) and the rare 7sus2
+}
+
+// The best reading from any note but the bass: exact (`near` false) or with standard omissions, by fewest left out,
+// then plainness, then the root nearest above the bass.
+bool bestFromOtherRoots(const uint8_t* notes, int32_t count, const NoteSet& present, bool near, NamedChord& out) {
+	bool found = false;
+	int32_t bestMissing = 99, bestRank = 99;
+	for (int32_t step = 1; step < 12; step++) {
+		const int32_t pc = (out.bass + step) % 12;
+		if (!present.has(pc)) {
+			continue;
+		}
+		NamedChord candidate = out;
+		if (!(near ? nearFrom(notes, count, pc, candidate) : exactFrom(notes, count, pc, candidate))) {
+			continue;
+		}
+		const int32_t missing = candidate.intervals.count() - present.count();
+		const int32_t rank = plainness(candidate.code);
+		if (missing < bestMissing || (missing == bestMissing && rank < bestRank)) {
+			bestMissing = missing;
+			bestRank = rank;
+			out = candidate;
+			found = true;
+		}
+	}
+	return found;
+}
+
+// THE ORDER (Chroma 1.3.140), each step proven against tonal and music21 by chroma/tools/chord-oracle:
 //   1. an exact name from the bass                                   E G B D F    -> Em7b9
-//   2. four notes or more: from the bass, standard omissions only    C E G Bb A   -> C13 (no 9th)
-//   3. an exact name from another note, as a slash chord             C E A        -> Am/C (not C6 without its 5th)
-//   4. from the bass, standard omissions only                        C E Bb       -> C7 (no 5th)
+//   2. five notes or more: from the bass, standard omissions only    C E G Bb A   -> C13 (no 9th)
+//   3. an exact name from another note, as a slash chord, or        C E A        -> Am/C; Eb C D G -> Cm(add9)/Eb
+//   4. from the bass with standard omissions, whichever is plainer  C E Bb -> C7 (no 5th); C D E A -> C6/9
+//      (a tie to the exact one)
 //   5. from another note, standard omissions only, as a slash chord
 //   Two different notes are an interval, named from the lower.
+// 1.3.139 took step 2 from four notes, so a four-note chord with a plain slash reading got a big one instead
+// (Eb C D G "Ebmaj13", D C F G "Dm11"). Cody, 2026-11-27: "I want what makes sense".
 bool nameChord(const uint8_t* notes, int32_t count, NamedChord& out) {
 	if (count < 2) {
 		return false;
@@ -581,23 +635,25 @@ bool nameChord(const uint8_t* notes, int32_t count, NamedChord& out) {
 	if (exactFrom(notes, count, out.bass, out)) {
 		return true;
 	}
-	if (distinct >= 4 && nearFrom(notes, count, out.bass, out)) {
+	if (distinct >= 5 && nearFrom(notes, count, out.bass, out)) {
 		return true;
 	}
-	for (int32_t pc = 0; pc < 12; pc++) {
-		if (pc != out.bass && present.has(pc) && exactFrom(notes, count, pc, out)) {
-			return true;
-		}
-	}
-	if (nearFrom(notes, count, out.bass, out)) {
+	// 3 and 4 TOGETHER: the plainer of an exact reading from another note and a reading from the bass with standard
+	// omissions; a tie to the exact one (C F Bb is Fsus4/C, a whole triad, not C7sus4 without its 5th). C E A is Am/C
+	// (a triad) not C6 without its 5th; C D E A is C6/9 without its 5th, not D7sus2/C (1.3.140's first build took any
+	// exact reading first - the frozen record showed it).
+	NamedChord exactOther = out, nearBass = out;
+	const bool haveExact = bestFromOtherRoots(notes, count, present, false, exactOther);
+	const bool haveNear = nearFrom(notes, count, out.bass, nearBass);
+	if (haveExact && (!haveNear || plainness(exactOther.code) <= plainness(nearBass.code))) {
+		out = exactOther;
 		return true;
 	}
-	for (int32_t pc = 0; pc < 12; pc++) {
-		if (pc != out.bass && present.has(pc) && nearFrom(notes, count, pc, out)) {
-			return true;
-		}
+	if (haveNear) {
+		out = nearBass;
+		return true;
 	}
-	return false;
+	return bestFromOtherRoots(notes, count, present, true, out);
 }
 
 // HOW A NOTE IS SPELLED IN A KEY (Chroma 1.3.139): the key's own notes as the key spells them; a note off the key the

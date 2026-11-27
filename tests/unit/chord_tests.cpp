@@ -339,6 +339,34 @@ TEST(ChordTests, nearNamesOnlyLeaveOutWhatPlayersLeaveOut) {
 	STRCMP_EQUAL("C7  I", forHost({48, 52, 58}, 0, kCMajor).c_str());   // C E Bb: a C7 without its fifth
 }
 
+// WHAT MAKES SENSE (Chroma 1.3.140). Cody, 2026-11-27: "with chords I want what makes sense".
+TEST(ChordTests, aFourNoteChordWithAPlainSlashReadingGetsIt) {
+	STRCMP_EQUAL("Cm(add9)/Eb  i", forHost({51, 60, 62, 67}, 0, kCMajor).c_str()); // Eb C D G, not Ebmaj13
+	STRCMP_EQUAL("G7sus4/D  V", forHost({50, 60, 65, 67}, 0, kCMajor).c_str());    // D C F G, not Dm11
+}
+
+TEST(ChordTests, aCommonVoicingWithoutItsFifthBeatsAnObscureExactReading) {
+	STRCMP_EQUAL("C6/9  I", forHost({48, 62, 64, 69}, 0, kCMajor).c_str());   // C D E A, not D7sus2/C
+	STRCMP_EQUAL("Abadd9/C  bVI", forHost({48, 68, 70}, 0, kCMajor).c_str()); // C Ab Bb, not Bb7sus2/C
+}
+
+TEST(ChordTests, fiveNotesStillReadAsTheExtendedChordOverTheBass) {
+	STRCMP_EQUAL("C13  I", forHost({48, 52, 55, 58, 57}, 0, kCMajor).c_str()); // C E G Bb A
+}
+
+TEST(ChordTests, theSameShapeIsNamedTheSameInEveryKey) {
+	// C F Bb and its eleven transpositions: one reading, moved, never the alphabet's choice.
+	const char* const expected[12] = {"Fsus4/C",  "F#sus4/C#", "Gsus4/D",   "G#sus4/D#", "Asus4/E",   "A#sus4/F",
+	                                  "Bsus4/F#", "Csus4/G",   "C#sus4/G#", "Dsus4/A",   "D#sus4/A#", "Esus4/B"};
+	for (uint8_t t = 0; t < 12; t++) {
+		char display[64], host[64];
+		const uint8_t notes[3] = {(uint8_t)(48 + t), (uint8_t)(65 + t), (uint8_t)(70 + t)};
+		deluge::gui::ui::keyboard::nameHeldChord(notes, 3, 0, NoteSet(), display,
+		                                         host); // no seven-note key: no degree, sharps
+		STRCMP_EQUAL(expected[t], host);
+	}
+}
+
 // THE CORPUS FOR THE INDEPENDENT CHECK (Chroma 1.3.139). Cody, 2026-11-27: "I do NOT trust our calculator and naming
 // tools, I want real tests and ways to validate". Does nothing unless CHORD_CORPUS_OUT names a file; then it writes,
 // one JSON line per case, what the firmware's own namers say for every set of 2-6 pitch classes from every one of its

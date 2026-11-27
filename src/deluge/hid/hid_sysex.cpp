@@ -1634,11 +1634,11 @@ void HIDSysex::sendHealthIfDue(bool force) {
 		last = health;
 		return;
 	}
-	if (lastHidCable->sendBufferSpace() < 96 || lastHidCable->sendBufferSpace() > 0x10000) {
+	if (lastHidCable->sendBufferSpace() < 112 || lastHidCable->sendBufferSpace() > 0x10000) {
 		return; // not sent, so not remembered: the counts carry over to the next one
 	}
 
-	uint8_t msg[96]; // 1.3.144: 80 held the report to the reverb pair; the sync word fields need ten more
+	uint8_t msg[112]; // 1.3.144-145: 80 held the report to the reverb pair; the sync and receive fields need 23 more
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -1757,6 +1757,12 @@ void HIDSysex::sendHealthIfDue(bool force) {
 		put21(health.syncBad);
 		put21(health.syncSeq);
 		put7(health.syncEcho ? 1 : 0);
+		// 1.3.145: THE RETURN'S RECEIVE PATH - why frames stop arriving after the first ~50 ms.
+		put21(health.rxPipeControl);
+		put7((health.rxDmaRunning ? 1 : 0) | (health.rxBrdyEnabled ? 2 : 0));
+		put21(health.rxDmaWriteOffset);
+		put21(health.rxTeardowns);
+		put21(health.rxDriverPackets);
 	}
 	msg[i++] = 0xf7;
 

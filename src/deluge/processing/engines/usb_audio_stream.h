@@ -72,6 +72,13 @@ public:
 		uint32_t syncBad;  ///< words that failed their CRC, ever
 		uint16_t syncSeq;  ///< the last good word's sequence number
 		bool syncEcho;     ///< the return's fourth channel is being echoed onto the eighth outgoing channel
+		// 1.3.145: THE RETURN'S RECEIVE PATH, to find why frames stop arriving after the first ~50 ms.
+		uint16_t rxPipeControl;    ///< PIPE(ISO OUT)CTR as read now: PID (bits 0-1), PBUSY (5), INBUFM (14), BSTS (15)
+		bool rxDmaRunning;         ///< the DMA controller owns the return pipe
+		uint32_t rxDmaWriteOffset; ///< where the controller is writing in its buffer, bytes
+		uint32_t rxTeardowns;      ///< times the drain found the handover broken and tore it down, ever
+		uint32_t rxDriverPackets;  ///< packets the driver delivered (only the first should), ever
+		bool rxBrdyEnabled;        ///< the return pipe's ready interrupt is enabled (it must not be under DMA)
 	};
 	static void readHealth(Health& out);
 

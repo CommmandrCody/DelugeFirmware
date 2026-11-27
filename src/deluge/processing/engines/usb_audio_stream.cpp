@@ -372,6 +372,8 @@ const uint32_t rxDmaLinkDescriptor[] __attribute__((aligned(CACHE_LINE_SIZE))) =
 
 bool rxDmaRunning = false;
 uint32_t rxDmaReadOffset = 0;
+uint32_t rxTeardownCount = 0;     ///< 1.3.145 health: handovers the drain found broken
+uint32_t rxDriverPacketCount = 0; ///< 1.3.145 health: packets that came through the driver's path
 
 /// Level of the master return, 0-50 on the 1.2 dB ladder with unity at 40.
 uint32_t returnLevelSetting = USBAudioStream::kReturnLevelDefault;
@@ -438,6 +440,7 @@ volatile uint16_t* pipeControl(uint16_t pipe) {
 /// Copies one packet the driver delivered into the ring. Only ever reached for the transfer that configures the
 /// pipe; everything after it arrives through the DMA drain.
 void ingestReturnPacket(const uint8_t* data, uint32_t bytes) {
+	rxDriverPacketCount++;
 	const uint32_t frames = bytes / kRxFrameBytes;
 	const uint32_t held = rxWriteFrame - rxReadFrame;
 	const uint32_t room = held >= kRxRingFrames ? 0u : kRxRingFrames - held;
@@ -558,6 +561,7 @@ void drainReturnDma() {
 	const bool interruptBack = (reg->BRDYENB & (1u << USB_CFG_PAUDIO_ISO_OUT)) != 0u;
 	const bool pipeShut = (*pipeControl(USB_CFG_PAUDIO_ISO_OUT) & USB_PID_BUF) != USB_PID_BUF;
 	if (interruptBack || pipeShut) {
+		rxTeardownCount++;
 		stopReturnDma();
 		hw_usb_clear_brdyenb(USB_NULL, USB_CFG_PAUDIO_ISO_OUT);
 		rxTransferInFlight = false;
@@ -1289,6 +1293,12 @@ void USBAudioStream::readHealth(Health& out) {
 	out.syncBad = syncDecoder.bad;
 	out.syncSeq = syncLastSeq;
 	out.syncEcho = syncEchoFrames > 0u;
+	out.rxPipeControl = *pipeControl(USB_CFG_PAUDIO_ISO_OUT);
+	out.rxDmaRunning = rxDmaRunning;
+	out.rxDmaWriteOffset = rxDmaRunning ? (DMACn(kRxDmaChannel).CRDA_n - (uint32_t)rxDmaBuffer) % kRxDmaBytes : 0u;
+	out.rxTeardowns = rxTeardownCount;
+	out.rxDriverPackets = rxDriverPacketCount;
+	out.rxBrdyEnabled = (usbRegisters()->BRDYENB & (1u << USB_CFG_PAUDIO_ISO_OUT)) != 0u;
 	healthRxPeak = 0;
 }
 

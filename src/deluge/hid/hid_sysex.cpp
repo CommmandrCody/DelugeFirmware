@@ -411,9 +411,24 @@ void HIDSysex::sendChordState(uint8_t keyRoot, const int16_t* notes, uint8_t num
 	msg[i++] = (uint8_t)voicingSplit & 0x7f; // 0..24, always positive - no bias needed
 	// Chroma "Delly is the truth": the Deluge's OWN chord-name string, appended after the extras as
 	// [len][ASCII...]. Every host renders this verbatim instead of re-deriving. Old hosts ignore the tail.
+	// 1.3.142: NAMED HERE when the caller did not - by the one namer, from the voiced notes, in the song's key - so the
+	// bridge never names a chord itself (it used to, with a namer of its own, and the two could disagree).
+	char named[64], namedHost[64];
+	if ((chordName == nullptr || chordName[0] == '\0') && notes != nullptr && numNotes > 0 && currentSong != nullptr) {
+		uint8_t u[16];
+		uint8_t m = 0;
+		for (uint8_t k = 0; k < numNotes && m < 16; k++) {
+			if (notes[k] >= 0 && notes[k] < 128) {
+				u[m++] = (uint8_t)notes[k];
+			}
+		}
+		if (deluge::gui::ui::keyboard::nameHeldChord(u, m, keyRoot, currentSong->key.modeNotes, named, namedHost)) {
+			chordName = named;
+		}
+	}
 	uint8_t nn = 0;
 	if (chordName != nullptr) {
-		for (const char* c = chordName; *c && nn < 16; c++) {
+		for (const char* c = chordName; *c && nn < 48; c++) { // 1.3.142: 48 (a slash chord and its degree)
 			nn++;
 		}
 	}

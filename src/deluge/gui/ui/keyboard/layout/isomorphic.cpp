@@ -65,9 +65,9 @@ void KeyboardLayoutIsomorphic::nameHeldChordOnDisplay() {
 	if (n < 3) {
 		return; // a single note or dyad isn't a chord — don't name it (keeps melodic playing quiet)
 	}
-	char nm[48];
+	char nm[64], host[64]; // 1.3.142: the one namer, with the key
 	uint8_t keyRoot = (uint8_t)getRootNote();
-	if (nameChordFromNotes(notes, n, nm, effectivePreferFlats(keyRoot, getScaleNotes()))) {
+	if (nameHeldChord(notes, n, keyRoot, getScaleNotes(), nm, host)) {
 		if (display->haveOLED()) {
 			display->popupTextTemporary(nm);
 		}

@@ -519,6 +519,20 @@ int32_t SevenSegment::encodeText(std::string_view newText, uint8_t* destination,
 				*segments = 0b10011111;
 				break;
 
+			// 1.3.142: for chord names, which every screen now shows in one spelling ("C/G", "Cm(add9)"). These drew
+			// as blanks. Segments: a 0x40, b 0x20, c 0x10, d 0x08, e 0x04, f 0x02, g 0x01.
+			case '/': // b, g, e: the usual seven-segment slash
+				*segments = 0x25;
+				break;
+
+			case '(': // like C
+				*segments = 0x4E;
+				break;
+
+			case ')': // C mirrored: a, b, c, d
+				*segments = 0x78;
+				break;
+
 			default:
 				*segments = 0;
 			}

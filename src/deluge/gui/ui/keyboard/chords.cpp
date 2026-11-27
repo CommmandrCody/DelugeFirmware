@@ -771,7 +771,7 @@ bool nameChordFromNotes(const uint8_t* notes, int32_t count, char* out, bool pre
 	if (!nameChord(notes, count, n) || n.dyad) {
 		return false; // two notes are an interval, named by describeChordInKey
 	}
-	spellChord(n, Spell{preferFlats}, false, out);
+	spellChord(n, Spell{preferFlats}, true, out); // 1.3.142: the one standard spelling
 	return true;
 }
 
@@ -900,8 +900,8 @@ bool describeChordInKey(const uint8_t* notes, int32_t count, uint8_t keyRootPc, 
 		return false;
 	}
 	const Spell sp{effectivePreferFlats(keyRootPc, scale), keyRootPc, scale};
-	spellChord(n, sp, false, absOut);
-	chordDegree(n, keyRootPc, scale, false, romanOut);
+	spellChord(n, sp, true, absOut); // 1.3.142: the one standard spelling
+	chordDegree(n, keyRootPc, scale, true, romanOut);
 	return true;
 }
 
@@ -919,18 +919,21 @@ bool nameHeldChord(const uint8_t* notes, int32_t count, uint8_t keyRootPc, NoteS
 	const Spell sp{effectivePreferFlats(keyRootPc, scale), keyRootPc, scale};
 	NamedChord n;
 	if (nameChord(notes, count, n)) {
+		// ONE STRING, EVERYWHERE (Chroma 1.3.142). Cody, 2026-11-27: "any other place where we show the chord we need
+		// the same calculated value, this should only ever happen in one place so we have agreement across the
+		// platform". The Deluge's own screen, the app's label under its display, the grid, the line beside it and
+		// every report carry this one standard spelling ("Cmaj7  III"); 1.3.139-141 gave the screen the Deluge's old
+		// codes ("CM7  IIIM7") beside it. The 7-seg draws lowercase as capitals, and "/", "(" and ")" (1.3.142).
 		char name[40], degree[24];
-		for (int32_t host = 0; host < 2; host++) {
-			char* out = host ? hostOut : displayOut;
-			spellChord(n, sp, host, name);
-			chordDegree(n, keyRootPc, scale, host, degree);
-			if (degree[0] != '\0') {
-				snprintf(out, 64, "%s  %s", name, degree); // the name first, then its place in the key (1.3.138)
-			}
-			else {
-				snprintf(out, 64, "%s", name);
-			}
+		spellChord(n, sp, true, name);
+		chordDegree(n, keyRootPc, scale, true, degree);
+		if (degree[0] != '\0') {
+			snprintf(displayOut, 64, "%s  %s", name, degree); // the name first, then its place in the key (1.3.138)
 		}
+		else {
+			snprintf(displayOut, 64, "%s", name);
+		}
+		strcpy(hostOut, displayOut);
 		return true;
 	}
 	// NEVER NO NAME FOR A HELD CHORD (1.3.136): the notes themselves, each pitch once - the bass, then the others in

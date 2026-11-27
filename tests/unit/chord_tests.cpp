@@ -188,7 +188,7 @@ TEST(ChordTests, aDyadIsNamedFromItsLowestNoteAsPlayed) {
 TEST(ChordTests, aFifthIsAPowerChordWithItsNumeral) {
 	const Named n = name({55, 62}); // G3 D4
 	STRCMP_EQUAL("G5", n.abs.c_str());
-	STRCMP_EQUAL("V5", n.roman.c_str());
+	STRCMP_EQUAL("V", n.roman.c_str()); // 1.3.142: one degree form everywhere, the name says "5"
 }
 
 TEST(ChordTests, aMajorThirdIsUpperCaseAndAMinorThirdLower) {
@@ -241,9 +241,7 @@ std::string nameOf(std::vector<uint8_t> notes) {
 TEST(ChordTests, theReportedVoicingEGBDFIsEm7b9) {
 	// Every note accounted for from the bass: minor 3rd, 5th, minor 7th, flat 9th. Named by the named-only list, before
 	// a near match (G13/E, missing its 9th) is ever tried.
-	STRCMP_EQUAL("E-7\x81"
-	             "9",
-	             nameOf({52, 55, 59, 62, 65}).c_str()); // E3 G3 B3 D4 F4
+	STRCMP_EQUAL("Em7b9", nameOf({52, 55, 59, 62, 65}).c_str()); // E3 G3 B3 D4 F4
 }
 
 // (A first-inversion triad, E G C, reads "EAUG": kAug's interval set has a MINOR third - the known table bug with a
@@ -251,14 +249,12 @@ TEST(ChordTests, theReportedVoicingEGBDFIsEm7b9) {
 
 TEST(ChordTests, anExactNameFromAnotherNoteIsASlashChord) {
 	// G B D F Ab is G7b9; with B in the bass it is G7b9/B.
-	STRCMP_EQUAL("G7\x81"
-	             "9/B",
-	             nameOf({59, 62, 65, 67, 68}).c_str());
+	STRCMP_EQUAL("G7b9/B", nameOf({59, 62, 65, 67, 68}).c_str());
 }
 
 TEST(ChordTests, anExactMatchStillWinsOverANearOne) {
-	STRCMP_EQUAL("CM", nameOf({48, 52, 55}).c_str());      // C E G
-	STRCMP_EQUAL("A-7", nameOf({57, 60, 64, 67}).c_str()); // A C E G
+	STRCMP_EQUAL("C", nameOf({48, 52, 55}).c_str());       // C E G
+	STRCMP_EQUAL("Am7", nameOf({57, 60, 64, 67}).c_str()); // A C E G
 }
 
 TEST(ChordTests, aNearMatchKeepsTheBassAsRootWhereItCan) {
@@ -312,8 +308,8 @@ TEST(ChordTests, theDenseVoicingFromTheScreenshotIsDm13OverB) {
 }
 
 TEST(ChordTests, anInversionSaysItsBass) {
-	STRCMP_EQUAL("C/G  I", forHost({43, 48, 52}, 0, kCMajor).c_str()); // G C E
-	STRCMP_EQUAL("CM/G  IM", forScreen({43, 48, 52}, 0, kCMajor).c_str());
+	STRCMP_EQUAL("C/G  I", forHost({43, 48, 52}, 0, kCMajor).c_str());   // G C E
+	STRCMP_EQUAL("C/G  I", forScreen({43, 48, 52}, 0, kCMajor).c_str()); // 1.3.142: the screen says what the app says
 }
 
 TEST(ChordTests, threeNotesThatAreATriadOverItsThirdAreNotASixthWithoutItsFifth) {

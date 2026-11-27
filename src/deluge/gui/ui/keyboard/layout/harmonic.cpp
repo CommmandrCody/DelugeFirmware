@@ -1243,8 +1243,8 @@ void KeyboardLayoutHarmonic::evaluatePads(PressedPad presses[kMaxNumKeyboardPadP
 					nu[nc++] = (uint8_t)chordNotes[i];
 				}
 			}
-			char nm[48];
-			if (nameChordFromNotes(nu, nc, nm, effectivePreferFlats(keyRoot, getScaleNotes()))) {
+			char nm[64], host[64]; // 1.3.142: the one namer, with the key
+			if (nameHeldChord(nu, nc, (uint8_t)keyRoot, getScaleNotes(), nm, host)) {
 				drawName(nullptr, nm);
 			}
 		}

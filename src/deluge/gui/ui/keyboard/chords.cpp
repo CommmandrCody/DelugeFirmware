@@ -364,6 +364,28 @@ bool effectivePreferFlats(uint8_t keyRootPc, NoteSet scale) {
 	}
 }
 
+// CHORDS NAMED BUT NOT PLAYED (Chroma 1.3.137): common extended chords the chord keyboards do not offer, kept apart
+// from ChordList so its menus and lists are untouched. Matched exactly, after the table and before a near match.
+// Cody, 2026-11-26: "there has to be a logical name for the chord" - E G B D F is Em7b9, every note accounted for.
+struct NamedOnlyChord {
+	const char* name;
+	NoteSet intervals;
+};
+static const NamedOnlyChord kNamedOnlyChords[] = {
+    {"-7" FLAT_CHAR_STR "9", NoteSet({ROOT, MIN3, P5, MIN7, MIN2})},
+    {"7" FLAT_CHAR_STR "9", NoteSet({ROOT, MAJ3, P5, MIN7, MIN2})},
+    {"7#9", NoteSet({ROOT, MAJ3, P5, MIN7, MIN3})},
+    {"7" FLAT_CHAR_STR "5", NoteSet({ROOT, MAJ3, DIM5, MIN7})},
+    {"7#5", NoteSet({ROOT, MAJ3, AUG5, MIN7})},
+    {"7#11", NoteSet({ROOT, MAJ3, P5, MIN7, AUG4})},
+    {"7" FLAT_CHAR_STR "13", NoteSet({ROOT, MAJ3, P5, MIN7, MIN6})},
+    {"13" FLAT_CHAR_STR "9", NoteSet({ROOT, MAJ3, P5, MIN7, MIN2, MAJ6})},
+    {"ADD9", NoteSet({ROOT, MAJ3, P5, MAJ2})},
+    {"-ADD9", NoteSet({ROOT, MIN3, P5, MAJ2})},
+    {"9SUS4", NoteSet({ROOT, P4, P5, MIN7, MAJ2})},
+    {"-M9", NoteSet({ROOT, MIN3, P5, MAJ7, MAJ2})},
+};
+
 bool nameChordFromNotes(const uint8_t* notes, int32_t count, char* out, bool preferFlats) {
 	if (count < 2) {
 		return false;
@@ -380,29 +402,97 @@ bool nameChordFromNotes(const uint8_t* notes, int32_t count, char* out, bool pre
 		}
 		present.add(notes[i] % 12);
 	}
-	int32_t bassPc = bass % 12;
-
-	// Try the bass as the root first (root-position reading), then every other present pitch class
-	// (so inversions still resolve to a name).
-	for (int32_t attempt = -1; attempt < 12; attempt++) {
-		int32_t rootPc = (attempt < 0) ? bassPc : attempt;
-		if ((attempt >= 0 && rootPc == bassPc) || !present.has(rootPc)) {
-			continue;
-		}
+	const int32_t bassPc = bass % 12;
+	auto intervalsFrom = [&](int32_t rootPc) {
 		NoteSet intervals;
 		intervals.clear();
 		for (int32_t i = 0; i < count; i++) {
 			intervals.add((((notes[i] % 12) - rootPc) + 12) % 12);
 		}
+		return intervals;
+	};
+	auto write = [&](int32_t rootPc, const char* name, bool slash) {
+		if (slash && rootPc != bassPc) {
+			sprintf(out, "%s%s/%s", noteNameInKey(rootPc, preferFlats), name, noteNameInKey(bassPc, preferFlats));
+		}
+		else {
+			sprintf(out, "%s%s", noteNameInKey(rootPc, preferFlats), name);
+		}
+		return true;
+	};
+	// An exact name from `rootPc`: the chord table, then the named-only chords.
+	auto exactFrom = [&](int32_t rootPc, bool slash) {
+		const NoteSet intervals = intervalsFrom(rootPc);
 		for (int32_t c = 0; c < kUniqueChords; c++) {
 			const Chord& chord = chordList.chords[c];
 			if (chord.name[0] != '\0' && intervals == chord.intervalSet) {
-				sprintf(out, "%s%s", noteNameInKey(rootPc, preferFlats), chord.name);
-				return true;
+				return write(rootPc, chord.name, false); // the table's own inversions read as the chord, as before
 			}
 		}
+		for (const NamedOnlyChord& chord : kNamedOnlyChords) {
+			if (intervals == chord.intervals) {
+				return write(rootPc, chord.name, slash);
+			}
+		}
+		return false;
+	};
+	// The chord from `rootPc` that holds every note with the fewest of its own left out, at most `maxMissing`.
+	auto nearFrom = [&](int32_t rootPc, int32_t maxMissing, int32_t& missingOut) -> const char* {
+		const NoteSet intervals = intervalsFrom(rootPc);
+		const char* best = nullptr;
+		int32_t bestMissing = maxMissing + 1;
+		for (int32_t c = 0; c < kUniqueChords; c++) {
+			const Chord& chord = chordList.chords[c];
+			if (chord.name[0] == '\0' || !intervals.isSubsetOf(chord.intervalSet)) {
+				continue;
+			}
+			const int32_t missing = chord.intervalSet.count() - intervals.count();
+			if (missing < bestMissing) {
+				bestMissing = missing;
+				best = chord.name;
+			}
+		}
+		missingOut = bestMissing;
+		return best;
+	};
+
+	// THE ORDER (Chroma 1.3.137). Cody, 2026-11-26: "there has to be a logical name for the chord".
+	//   1. an exact name from the bass                       E G B D F    -> Em7b9
+	//   2. a near name from the bass, one note left out      C E G Bb A   -> C13 (no 9th)
+	//   3. an exact name from another note, as a slash chord
+	//   4. the nearest chord holding every note, any root, two left out at most, as a slash chord
+	// Three different notes at least for a near name: two are an interval, named elsewhere.
+	if (exactFrom(bassPc, true)) {
+		return true;
 	}
-	return false;
+	int32_t missing = 0;
+	if (present.count() >= 3) {
+		if (const char* name = nearFrom(bassPc, 1, missing)) {
+			return write(bassPc, name, false);
+		}
+	}
+	for (int32_t rootPc = 0; rootPc < 12; rootPc++) {
+		if (rootPc != bassPc && present.has(rootPc) && exactFrom(rootPc, true)) {
+			return true;
+		}
+	}
+	if (present.count() < 3) {
+		return false;
+	}
+	const char* bestName = nullptr;
+	int32_t bestRoot = -1, bestMissing = 3;
+	for (int32_t rootPc = 0; rootPc < 12; rootPc++) {
+		if (!present.has(rootPc)) {
+			continue;
+		}
+		const char* name = nearFrom(rootPc, 2, missing);
+		if (name != nullptr && missing < bestMissing) {
+			bestMissing = missing;
+			bestRoot = rootPc;
+			bestName = name;
+		}
+	}
+	return bestName != nullptr && write(bestRoot, bestName, true);
 }
 
 // Voice-leading distance: total minimal semitone movement to get from chord `a` to chord `b`

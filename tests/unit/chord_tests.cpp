@@ -8,6 +8,7 @@ using deluge::gui::ui::keyboard::ChordList;
 using deluge::gui::ui::keyboard::ChordSelection;
 using deluge::gui::ui::keyboard::describeChordInKey;
 using deluge::gui::ui::keyboard::MAJ3;
+using deluge::gui::ui::keyboard::nameChordFromNotes;
 using deluge::gui::ui::keyboard::NONE;
 using deluge::gui::ui::keyboard::P5;
 using deluge::gui::ui::keyboard::resolveChordNotes;
@@ -222,4 +223,49 @@ TEST(ChordTests, aDyadOnANoteOutsideTheKeyGetsNoNumeral) {
 	const Named n = name({61, 64}); // C# E in C major
 	STRCMP_EQUAL("", n.roman.c_str());
 	CHECK_TRUE(n.found);
+}
+
+// THE NEAR MATCH (1.3.137). Cody, 2026-11-26, on a chord-memory slot of E G B D F: "it shows a chord shape but no
+// name???" - no chord in the table is exactly those five pitches. The chord that holds them all with the fewest of its
+// own left out is G13 (missing its 9th), and E is in the bass.
+namespace {
+std::string nameOf(std::vector<uint8_t> notes) {
+	char out[48] = {0};
+	if (!nameChordFromNotes(notes.data(), (int32_t)notes.size(), out, false)) {
+		return "";
+	}
+	return out;
+}
+} // namespace
+
+TEST(ChordTests, theReportedVoicingEGBDFIsEm7b9) {
+	// Every note accounted for from the bass: minor 3rd, 5th, minor 7th, flat 9th. Named by the named-only list, before
+	// a near match (G13/E, missing its 9th) is ever tried.
+	STRCMP_EQUAL("E-7\x81"
+	             "9",
+	             nameOf({52, 55, 59, 62, 65}).c_str()); // E3 G3 B3 D4 F4
+}
+
+// (A first-inversion triad, E G C, reads "EAUG": kAug's interval set has a MINOR third - the known table bug with a
+// fix branch since 2026-09. Not this change's; fixing kAug is the next step, and a test for E G C -> CM goes with it.)
+
+TEST(ChordTests, anExactNameFromAnotherNoteIsASlashChord) {
+	// G B D F Ab is G7b9; with B in the bass it is G7b9/B.
+	STRCMP_EQUAL("G7\x81"
+	             "9/B",
+	             nameOf({59, 62, 65, 67, 68}).c_str());
+}
+
+TEST(ChordTests, anExactMatchStillWinsOverANearOne) {
+	STRCMP_EQUAL("CM", nameOf({48, 52, 55}).c_str());      // C E G
+	STRCMP_EQUAL("A-7", nameOf({57, 60, 64, 67}).c_str()); // A C E G
+}
+
+TEST(ChordTests, aNearMatchKeepsTheBassAsRootWhereItCan) {
+	// C E G Bb D F A minus the 11th and 9th: C E G Bb A is a 13 from C, left out two - and C is the bass.
+	STRCMP_EQUAL("C13", nameOf({48, 52, 55, 58, 57}).c_str());
+}
+
+TEST(ChordTests, twoNotesAreNotForcedIntoAChord) {
+	STRCMP_EQUAL("", nameOf({48, 51}).c_str());
 }

@@ -1779,7 +1779,9 @@ void HIDSysex::sendHeldChordIfChanged(bool force) {
 	msg[i++] = (uint8_t)n;
 	for (int32_t k = 0; k < n; k++) {
 		const uint8_t c = (uint8_t)name[k];
-		const uint8_t safe = (c >= 32 && c < 127) ? c : '?'; // 7-bit and printable, or the frame ends early
+		// The Deluge's own flat sign (FLAT_CHAR_STR, 0x81) goes as 'b' (1.3.137): it used to arrive as '?', so a
+		// m7b5 read "-7?5" on every host. Anything else outside printable 7-bit ASCII is still '?'.
+		const uint8_t safe = (c == 0x81) ? 'b' : ((c >= 32 && c < 127) ? c : '?');
 		msg[i++] = safe;
 		hash = (hash ^ safe) * 16777619u;
 	}

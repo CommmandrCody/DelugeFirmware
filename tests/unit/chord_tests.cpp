@@ -269,3 +269,98 @@ TEST(ChordTests, aNearMatchKeepsTheBassAsRootWhereItCan) {
 TEST(ChordTests, twoNotesAreNotForcedIntoAChord) {
 	STRCMP_EQUAL("", nameOf({48, 51}).c_str());
 }
+
+// THE CORPUS FOR THE INDEPENDENT CHECK (Chroma 1.3.139). Cody, 2026-11-27: "I do NOT trust our calculator and naming
+// tools, I want real tests and ways to validate". Does nothing unless CHORD_CORPUS_OUT names a file; then it writes,
+// one JSON line per case, what the firmware's own namers say for every set of 2-6 pitch classes from every one of its
+// notes as the bass, in C major and in A minor. chroma/tools/chord-oracle reads it and checks every name against an
+// independent reference (tonal): the notes a name means must be the notes that were played.
+#include <cstdio>
+#include <cstdlib>
+namespace {
+void jsonString(FILE* f, const char* s) {
+	fputc('"', f);
+	for (const unsigned char* p = (const unsigned char*)s; *p; p++) {
+		if (*p == '"' || *p == '\\') {
+			fprintf(f, "\\%c", *p);
+		}
+		else if (*p < 0x20 || *p >= 0x7f) {
+			fprintf(f, "\\u%04x", *p);
+		}
+		else {
+			fputc(*p, f);
+		}
+	}
+	fputc('"', f);
+}
+} // namespace
+
+TEST(ChordTests, writesTheCorpusForTheIndependentCheckWhenAsked) {
+	const char* path = std::getenv("CHORD_CORPUS_OUT");
+	if (path == nullptr || path[0] == '\0') {
+		return;
+	}
+	FILE* f = std::fopen(path, "w");
+	CHECK(f != nullptr);
+	struct Key {
+		const char* name;
+		uint8_t root;
+		NoteSet scale;
+	};
+	const Key keys[] = {{"C major", 0, NoteSet({0, 2, 4, 5, 7, 9, 11})},
+	                    {"A minor", 9, NoteSet({0, 2, 3, 5, 7, 8, 10})}};
+	int32_t cases = 0;
+	for (uint32_t bits = 1; bits < 4096; bits++) {
+		const int32_t size = __builtin_popcount(bits);
+		if (size < 2 || size > 6) {
+			continue;
+		}
+		for (int32_t bassPc = 0; bassPc < 12; bassPc++) {
+			if (!((bits >> bassPc) & 1)) {
+				continue;
+			}
+			// The bass in octave 3, every other note once in the octave above it.
+			uint8_t notes[6];
+			int32_t n = 0;
+			notes[n++] = (uint8_t)(48 + bassPc);
+			for (int32_t pc = 0; pc < 12; pc++) {
+				if (pc != bassPc && ((bits >> pc) & 1)) {
+					notes[n++] = (uint8_t)(60 + pc);
+				}
+			}
+			char general[64] = "";
+			const bool g = nameChordFromNotes(notes, n, general, true);
+			fprintf(f, "{\"notes\":[");
+			for (int32_t k = 0; k < n; k++) {
+				fprintf(f, "%s%d", k ? "," : "", notes[k]);
+			}
+			fprintf(f, "],\"general\":");
+			if (g) {
+				jsonString(f, general);
+			}
+			else {
+				fprintf(f, "null");
+			}
+			fprintf(f, ",\"inKey\":{");
+			for (int32_t kk = 0; kk < 2; kk++) {
+				char abs[64] = "", roman[16] = "";
+				const bool ok = describeChordInKey(notes, n, keys[kk].root, keys[kk].scale, abs, roman);
+				fprintf(f, "%s\"%s\":", kk ? "," : "", keys[kk].name);
+				if (ok) {
+					fprintf(f, "{\"name\":");
+					jsonString(f, abs);
+					fprintf(f, ",\"degree\":");
+					jsonString(f, roman);
+					fprintf(f, "}");
+				}
+				else {
+					fprintf(f, "null");
+				}
+			}
+			fprintf(f, "}}\n");
+			cases++;
+		}
+	}
+	std::fclose(f);
+	CHECK(cases > 10000);
+}

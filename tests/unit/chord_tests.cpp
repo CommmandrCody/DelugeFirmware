@@ -270,6 +270,75 @@ TEST(ChordTests, twoNotesAreNotForcedIntoAChord) {
 	STRCMP_EQUAL("", nameOf({48, 51}).c_str());
 }
 
+// THE HELD CHORD, AS THE APP IS TOLD IT (Chroma 1.3.139): the standard spelling, the degree counted in the key's own
+// scale with one quality mark. Cody, 2026-11-26, beside Scaler, Orchid and Chordion: "it confuses me big time". The
+// chords are the ones in his screenshots, in A minor; every rule is also proven on every chord by chord-oracle.
+namespace {
+const NoteSet kAMinor = NoteSet({0, 2, 3, 5, 7, 8, 10});
+std::string forHost(std::vector<uint8_t> notes, uint8_t keyRoot = 9, NoteSet scale = kAMinor) {
+	char display[64], host[64];
+	deluge::gui::ui::keyboard::nameHeldChord(notes.data(), (int32_t)notes.size(), keyRoot, scale, display, host);
+	return host;
+}
+std::string forScreen(std::vector<uint8_t> notes, uint8_t keyRoot = 9, NoteSet scale = kAMinor) {
+	char display[64], host[64];
+	deluge::gui::ui::keyboard::nameHeldChord(notes.data(), (int32_t)notes.size(), keyRoot, scale, display, host);
+	return display;
+}
+} // namespace
+
+TEST(ChordTests, inAMinorCIsTheThirdStepNotAFlatThird) {
+	STRCMP_EQUAL("Cmaj9/E  III", forHost({52, 55, 60, 62, 71}).c_str()); // E G C D B: E in the bass says so
+}
+
+TEST(ChordTests, cMaj9InRootPositionIsIII) {
+	STRCMP_EQUAL("Cmaj9  III", forHost({48, 52, 55, 59, 62}).c_str()); // C E G B D
+}
+
+TEST(ChordTests, aDiminishedTriadIsDimWithADegreeSign) {
+	STRCMP_EQUAL("Bdim  iio", forHost({47, 50, 53}).c_str()); // B D F: ii, diminished
+}
+
+TEST(ChordTests, aFullyDiminishedSeventhIsDim7) {
+	STRCMP_EQUAL("G#dim7  #viio", forHost({56, 59, 62, 65}).c_str()); // G# B D F: off natural A minor, sharp VII
+}
+
+TEST(ChordTests, aHalfDiminishedSeventhIsM7b5WithH) {
+	STRCMP_EQUAL("Bm7b5  iih", forHost({47, 50, 53, 57}).c_str()); // B D F A
+}
+
+TEST(ChordTests, theDenseVoicingFromTheScreenshotIsDm13OverB) {
+	STRCMP_EQUAL("Dm13/B  iv", forHost({47, 50, 53, 57, 60, 64}).c_str()); // B1 D2 F2 A2 C3 E3, tonal agrees
+}
+
+TEST(ChordTests, anInversionSaysItsBass) {
+	STRCMP_EQUAL("C/G  I", forHost({43, 48, 52}, 0, kCMajor).c_str()); // G C E
+	STRCMP_EQUAL("CM/G  IM", forScreen({43, 48, 52}, 0, kCMajor).c_str());
+}
+
+TEST(ChordTests, threeNotesThatAreATriadOverItsThirdAreNotASixthWithoutItsFifth) {
+	STRCMP_EQUAL("Am/C  vi", forHost({48, 52, 57}, 0, kCMajor).c_str()); // C E A
+}
+
+TEST(ChordTests, anAugmentedTriadHasAMajorThird) {
+	STRCMP_EQUAL("Caug  III+", forHost({48, 52, 56}).c_str());         // C E G#: III of A minor, augmented
+	STRCMP_EQUAL("C/E  I", forHost({52, 60, 67}, 0, kCMajor).c_str()); // E G C is C over E, never "EAUG"
+}
+
+TEST(ChordTests, aBorrowedChordIsFlattenedFromTheStepAbove) {
+	STRCMP_EQUAL("Bb  bVII", forHost({46, 50, 53}, 0, kCMajor).c_str()); // Bb D F in C major
+}
+
+TEST(ChordTests, theScreensCodesAreSpelledAsMusiciansReadThem) {
+	STRCMP_EQUAL("Cm(add9)  vi", forHost({48, 51, 55, 62}, 3, kCMajor).c_str()); // the screen's "C-2", in Eb major
+	STRCMP_EQUAL("Cadd9  I", forHost({48, 52, 55, 62}, 0, kCMajor).c_str());     // the screen's "C2"
+}
+
+TEST(ChordTests, nearNamesOnlyLeaveOutWhatPlayersLeaveOut) {
+	STRCMP_EQUAL("C Db Eb", forHost({48, 49, 51}, 0, kCMajor).c_str()); // not "C-7b5b9": two of its notes absent
+	STRCMP_EQUAL("C7  I", forHost({48, 52, 58}, 0, kCMajor).c_str());   // C E Bb: a C7 without its fifth
+}
+
 // THE CORPUS FOR THE INDEPENDENT CHECK (Chroma 1.3.139). Cody, 2026-11-27: "I do NOT trust our calculator and naming
 // tools, I want real tests and ways to validate". Does nothing unless CHORD_CORPUS_OUT names a file; then it writes,
 // one JSON line per case, what the firmware's own namers say for every set of 2-6 pitch classes from every one of its
@@ -343,19 +412,26 @@ TEST(ChordTests, writesTheCorpusForTheIndependentCheckWhenAsked) {
 			}
 			fprintf(f, ",\"inKey\":{");
 			for (int32_t kk = 0; kk < 2; kk++) {
-				char abs[64] = "", roman[16] = "";
+				char abs[64] = "", roman[16] = "", display[64] = "", host[64] = "";
 				const bool ok = describeChordInKey(notes, n, keys[kk].root, keys[kk].scale, abs, roman);
+				const bool held =
+				    deluge::gui::ui::keyboard::nameHeldChord(notes, n, keys[kk].root, keys[kk].scale, display, host);
 				fprintf(f, "%s\"%s\":", kk ? "," : "", keys[kk].name);
 				if (ok) {
 					fprintf(f, "{\"name\":");
 					jsonString(f, abs);
 					fprintf(f, ",\"degree\":");
 					jsonString(f, roman);
-					fprintf(f, "}");
 				}
 				else {
-					fprintf(f, "null");
+					fprintf(f, "{\"name\":null");
 				}
+				// What the Deluge's screen and a host are given for this chord held on the keyboard (1.3.139).
+				fprintf(f, ",\"display\":");
+				jsonString(f, held ? display : "");
+				fprintf(f, ",\"host\":");
+				jsonString(f, held ? host : "");
+				fprintf(f, "}");
 			}
 			fprintf(f, "}}\n");
 			cases++;

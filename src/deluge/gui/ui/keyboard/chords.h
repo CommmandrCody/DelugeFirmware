@@ -75,6 +75,16 @@ struct ChordSuggestion {
 bool describeChordInKey(const uint8_t* notes, int32_t count, uint8_t keyRootPc, NoteSet scale, char* absOut,
                         char* romanOut);
 
+// THE HELD CHORD, NAMED ONCE AND SPELLED TWICE (Chroma 1.3.139): `displayOut` in the Deluge's own labels for its
+// screen ("CM9  IIIM9"), `hostOut` in the standard ones a musician reads ("Cmaj9  III"; a degree's quality mark is
+// o, h or +, which the bridge shows as the symbols). The name, two spaces, the place in the key; the notes themselves
+// when they make no chord. Both 64 bytes. False when fewer than two different notes are held.
+bool nameHeldChord(const uint8_t* notes, int32_t count, uint8_t keyRootPc, NoteSet scale, char* displayOut,
+                   char* hostOut);
+
+// A Deluge chord label ("-7" FLAT "5") in the standard spelling ("m7b5"); the label itself when they agree.
+const char* standardChordSpelling(const char* code);
+
 // The "brain": given the key root, the scale (NoteSet of intervals from root, 7-note scales only),
 // and the pitch class of the chord you're currently on, rank the diatonic chords you could go to next
 // by a deep-house-weighted functional pull + voice-leading smoothness (ported from chord_suggest.py).

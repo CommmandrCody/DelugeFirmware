@@ -5980,18 +5980,10 @@ bool InstrumentClipView::drawHeldChordName() {
 	if (count < 2) {
 		return false;
 	}
-	char absName[40];
-	char roman[16];
-	if (!ui::keyboard::describeChordInKey(notes, count, currentSong->key.rootNote % 12, currentSong->key.modeNotes,
-	                                      absName, roman)) {
+	char full[64], host[64]; // 1.3.139: the same namer as the keyboard
+	if (!ui::keyboard::nameHeldChord(notes, count, currentSong->key.rootNote % 12, currentSong->key.modeNotes, full,
+	                                 host)) {
 		return false;
-	}
-	char full[64];
-	if (roman[0] != '\0') {
-		sprintf(full, "%s  %s", absName, roman); // 1.3.138: the name first, as the keyboard shows it
-	}
-	else {
-		sprintf(full, "%s", absName);
 	}
 	display->setScrollingText(full);
 	return true;

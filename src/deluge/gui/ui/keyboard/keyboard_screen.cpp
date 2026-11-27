@@ -1190,11 +1190,12 @@ bool KeyboardScreen::drawHeldChordName() {
 	return true;
 }
 
-// The name of the chord being held, exactly as drawHeldChordName() shows it: "Fmaj7  IV", or the absolute
+// The name of the chord being held: for the screen as drawHeldChordName() shows it ("FM7  IVM7"), or for a host in
+// the standard spelling ("Fmaj7  IV", 1.3.139). Formerly: "Fmaj7  IV", or the absolute
 // name alone when it has no place in the key. False, and an empty string, when fewer than two notes are
 // held or they match no chord. Reads the held notes and the key; changes nothing and draws nothing, so a
 // host report (Chroma 0x57) can ask for the same name the display is given.
-bool KeyboardScreen::heldChordName(char full[64]) {
+bool KeyboardScreen::heldChordName(char full[64], bool forHost) {
 	full[0] = '\0';
 	if (currentSong == nullptr) {
 		return false;
@@ -1223,52 +1224,12 @@ bool KeyboardScreen::heldChordName(char full[64]) {
 			notes[count++] = (uint8_t)n;
 		}
 	}
-	if (count < 2) {
+	// 1.3.139: named once, spelled for the screen or for a host (nameHeldChord, checked by chroma/tools/chord-oracle).
+	char display[64], host[64];
+	if (!nameHeldChord(notes, count, currentSong->key.rootNote % 12, currentSong->key.modeNotes, display, host)) {
 		return false;
 	}
-	char absName[40];
-	char roman[16];
-	if (!describeChordInKey(notes, count, currentSong->key.rootNote % 12, currentSong->key.modeNotes, absName, roman)) {
-		// 1.3.136: NEVER NO NAME FOR A HELD CHORD. Cody, 2026-11-26: "some of the chords in the harmonic palette play
-		// but the chord shape doesn't display" - a chord memory slot whose voicing the key-aware namer has no entry
-		// for. Next the general namer (the one chord memory names a recalled chord with), and failing that the notes
-		// themselves, lowest first, so a host always has the instrument's own words to label the chord with.
-		const bool flats = effectivePreferFlats((uint8_t)(currentSong->key.rootNote % 12), currentSong->key.modeNotes);
-		if (nameChordFromNotes(notes, count, absName, flats)) {
-			snprintf(full, 64, "%s", absName);
-			return true;
-		}
-		uint8_t sorted[16];
-		for (int32_t k = 0; k < count; k++) {
-			sorted[k] = notes[k];
-		}
-		for (int32_t a = 1; a < count; a++) {
-			for (int32_t b = a; b > 0 && sorted[b - 1] > sorted[b]; b--) {
-				const uint8_t t = sorted[b];
-				sorted[b] = sorted[b - 1];
-				sorted[b - 1] = t;
-			}
-		}
-		int32_t p = 0;
-		uint16_t seen = 0;
-		for (int32_t k = 0; k < count && p < 56; k++) {
-			const int32_t pc = sorted[k] % 12;
-			if (seen & (1u << pc)) {
-				continue; // a pitch already named, in another octave
-			}
-			seen |= (uint16_t)(1u << pc);
-			p += snprintf(full + p, (size_t)(64 - p), "%s%s", p ? " " : "", noteNameInKey(pc, flats));
-		}
-		return p > 0;
-	}
-	// 1.3.138: THE NAME FIRST, its place in the key second. Cody, 2026-11-26: "I want the chord name first with the
-	// notation second, it seems really mixed up" ("ii-7b5  B-7b5" read as two names). Two spaces still part them.
-	if (roman[0] != '\0') {
-		snprintf(full, 64, "%s  %s", absName, roman);
-	}
-	else {
-		snprintf(full, 64, "%s", absName);
-	}
+	snprintf(full, 64, "%s", forHost ? host : display);
 	return true;
 }
 

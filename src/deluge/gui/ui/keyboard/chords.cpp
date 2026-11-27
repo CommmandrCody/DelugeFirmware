@@ -24,6 +24,7 @@
 #include <array>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 namespace deluge::gui::ui::keyboard {
 
@@ -160,11 +161,13 @@ PLACE_SDRAM_DATA const Chord kDim = {"DIM",
                                       {ROOT, OCT + MIN3, DIM5, -OCT, NONE, NONE, NONE}}};
 PLACE_SDRAM_DATA const Chord kFullDim = {
     "FULLDIM", NoteSet({ROOT, MIN3, DIM5, DIM7}), {{ROOT, MIN3, DIM5, DIM7, NONE, NONE, NONE}}};
+// 1.3.139: a MAJOR third. An augmented triad is root, major third, augmented fifth (C E G#); the table had a minor
+// third, so it played C Eb G# and named E G C "EAUG" - found by chroma/tools/chord-oracle against tonal.
 PLACE_SDRAM_DATA const Chord kAug = {"AUG",
-                                     NoteSet({ROOT, MIN3, AUG5}),
-                                     {{ROOT, MIN3, AUG5, NONE, NONE, NONE, NONE},
-                                      {ROOT, OCT + MIN3, AUG5, NONE, NONE, NONE, NONE},
-                                      {ROOT, OCT + MIN3, AUG5, -OCT, NONE, NONE, NONE}}};
+                                     NoteSet({ROOT, MAJ3, AUG5}),
+                                     {{ROOT, MAJ3, AUG5, NONE, NONE, NONE, NONE},
+                                      {ROOT, OCT + MAJ3, AUG5, NONE, NONE, NONE, NONE},
+                                      {ROOT, OCT + MAJ3, AUG5, -OCT, NONE, NONE, NONE}}};
 PLACE_SDRAM_DATA const Chord kSus2 = {"SUS2",
                                       NoteSet({ROOT, MAJ2, P5}),
                                       {{ROOT, MAJ2, P5, NONE, NONE, NONE, NONE},
@@ -365,7 +368,7 @@ bool effectivePreferFlats(uint8_t keyRootPc, NoteSet scale) {
 }
 
 // CHORDS NAMED BUT NOT PLAYED (Chroma 1.3.137): common extended chords the chord keyboards do not offer, kept apart
-// from ChordList so its menus and lists are untouched. Matched exactly, after the table and before a near match.
+// from ChordList so its menus and lists are untouched. Matched after the table.
 // Cody, 2026-11-26: "there has to be a logical name for the chord" - E G B D F is Em7b9, every note accounted for.
 struct NamedOnlyChord {
 	const char* name;
@@ -386,113 +389,334 @@ static const NamedOnlyChord kNamedOnlyChords[] = {
     {"-M9", NoteSet({ROOT, MIN3, P5, MAJ7, MAJ2})},
 };
 
-bool nameChordFromNotes(const uint8_t* notes, int32_t count, char* out, bool preferFlats) {
+// THE STANDARD SPELLING (Chroma 1.3.139), for hosts: the Deluge's labels were written for a four-character 7-seg and
+// read as codes. Cody, 2026-11-26, beside Scaler, Orchid and Chordion: "it confuses me big time compared to how they
+// name their chords". The display keeps its codes; a host is told the names a musician reads. Checked, every one, by
+// chroma/tools/chord-oracle against an independent library (tonal).
+struct Spelling {
+	const char* code;
+	const char* standard;
+};
+static const Spelling kStandardSpelling[] = {
+    {"M", ""},
+    {"-", "m"},
+    {"DIM", "dim"},
+    {"FULLDIM", "dim7"},
+    {"AUG", "aug"},
+    {"SUS2", "sus2"},
+    {"SUS4", "sus4"},
+    {"7SUS4", "7sus4"},
+    {"7SUS2", "7sus2"},
+    {"M7", "maj7"},
+    {"-7", "m7"},
+    {"-2", "m(add9)"},
+    {"-4", "m(add11)"},
+    {"-M7", "m(maj7)"},
+    {"-7" FLAT_CHAR_STR "5", "m7b5"},
+    {"-9" FLAT_CHAR_STR "5", "m9b5"},
+    {"-7" FLAT_CHAR_STR "5" FLAT_CHAR_STR "9", "m7b5b9"},
+    {"M9", "maj9"},
+    {"-9", "m9"},
+    {"M11", "maj11"},
+    {"-11", "m11"},
+    {"M13", "maj13"},
+    {"M13#11", "maj13#11"},
+    {"-13", "m13"},
+    {"2", "add9"},
+    {"69", "6/9"},
+    {"-6", "m6"},
+    {"-7" FLAT_CHAR_STR "9", "m7b9"},
+    {"7" FLAT_CHAR_STR "9", "7b9"},
+    {"7" FLAT_CHAR_STR "5", "7b5"},
+    {"7" FLAT_CHAR_STR "13", "7b13"},
+    {"13" FLAT_CHAR_STR "9", "13b9"},
+    {"ADD9", "add9"},
+    {"-ADD9", "m(add9)"},
+    {"9SUS4", "9sus4"},
+    {"-M9", "m(maj9)"},
+};
+
+const char* standardChordSpelling(const char* code) {
+	for (const Spelling& s : kStandardSpelling) {
+		if (strcmp(s.code, code) == 0) {
+			return s.standard;
+		}
+	}
+	return code; // the same in both: 7, 9, 11, 13, 6, 7#9, 7#5, 7#11
+}
+
+namespace {
+// A NAMED CHORD, before it is spelled: which note is its root, which is in the bass, and what it is. Spelled twice
+// from this one answer - for the display and for a host - so the two can never name different chords.
+struct NamedChord {
+	int32_t root = -1;
+	int32_t bass = -1;
+	const char* code = ""; // the table's label, or an interval for two notes
+	NoteSet intervals;     // the named chord's notes, from its root
+	bool dyad = false;
+};
+
+NoteSet intervalsFrom(const uint8_t* notes, int32_t count, int32_t rootPc) {
+	NoteSet intervals;
+	intervals.clear();
+	for (int32_t i = 0; i < count; i++) {
+		intervals.add((((notes[i] % 12) - rootPc) + 12) % 12);
+	}
+	return intervals;
+}
+
+ChordList& chordTable() {
+	static ChordList chordList; // the named-chord table, built once
+	return chordList;
+}
+
+// An exact name from `rootPc`: the chord table, then the named-only chords.
+bool exactFrom(const uint8_t* notes, int32_t count, int32_t rootPc, NamedChord& out) {
+	const NoteSet intervals = intervalsFrom(notes, count, rootPc);
+	ChordList& table = chordTable();
+	for (int32_t c = 0; c < kUniqueChords; c++) {
+		const Chord& chord = table.chords[c];
+		if (chord.name[0] != '\0' && intervals == chord.intervalSet) {
+			out.root = rootPc;
+			out.code = chord.name;
+			out.intervals = chord.intervalSet;
+			return true;
+		}
+	}
+	for (const NamedOnlyChord& chord : kNamedOnlyChords) {
+		if (intervals == chord.intervals) {
+			out.root = rootPc;
+			out.code = chord.name;
+			out.intervals = chord.intervals;
+			return true;
+		}
+	}
+	return false;
+}
+
+// THE NOTES A PLAYER LEAVES OUT, and still plays the chord (Chroma 1.3.139). The fifth of anything that has one; the
+// 9th and 11th of a 13th chord; the 3rd and 9th of an 11th chord. Anything else left out is a different chord, and
+// is not named as this one - 1.3.137 allowed any one or two notes, and named C Db Eb "C-7b5b9" (Gb and Bb absent).
+bool onlyStandardOmissions(const NoteSet& chord, const NoteSet& played) {
+	if (!played.isSubsetOf(chord)) {
+		return false;
+	}
+	const bool thirteenth = chord.has(MAJ6) && (chord.has(MIN7) || chord.has(MAJ7)) && chord.has(MAJ2);
+	const bool eleventh = chord.has(P4) && chord.has(MIN7) && chord.has(MAJ2);
+	for (int32_t iv = 1; iv < 12; iv++) {
+		if (!chord.has(iv) || played.has(iv)) {
+			continue;
+		}
+		const bool ok =
+		    iv == P5 || (thirteenth && (iv == MAJ2 || iv == P4)) || (eleventh && (iv == MAJ3 || iv == MAJ2));
+		if (!ok) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// The chord from `rootPc` holding every note, with only standard omissions, the fewest left out.
+bool nearFrom(const uint8_t* notes, int32_t count, int32_t rootPc, NamedChord& out) {
+	const NoteSet intervals = intervalsFrom(notes, count, rootPc);
+	ChordList& table = chordTable();
+	int32_t best = 99;
+	auto consider = [&](const char* name, const NoteSet& set) {
+		if (name[0] == '\0' || !onlyStandardOmissions(set, intervals)) {
+			return;
+		}
+		const int32_t missing = set.count() - intervals.count();
+		if (missing < best) {
+			best = missing;
+			out.root = rootPc;
+			out.code = name;
+			out.intervals = set;
+		}
+	};
+	for (int32_t c = 0; c < kUniqueChords; c++) {
+		consider(table.chords[c].name, table.chords[c].intervalSet);
+	}
+	for (const NamedOnlyChord& chord : kNamedOnlyChords) {
+		consider(chord.name, chord.intervals);
+	}
+	return best < 99;
+}
+
+// THE ORDER (Chroma 1.3.139), each step proven against tonal by chroma/tools/chord-oracle:
+//   1. an exact name from the bass                                   E G B D F    -> Em7b9
+//   2. four notes or more: from the bass, standard omissions only    C E G Bb A   -> C13 (no 9th)
+//   3. an exact name from another note, as a slash chord             C E A        -> Am/C (not C6 without its 5th)
+//   4. from the bass, standard omissions only                        C E Bb       -> C7 (no 5th)
+//   5. from another note, standard omissions only, as a slash chord
+//   Two different notes are an interval, named from the lower.
+bool nameChord(const uint8_t* notes, int32_t count, NamedChord& out) {
 	if (count < 2) {
 		return false;
 	}
-	static ChordList chordList; // the named-chord table, built once
-
-	// Bass = lowest absolute note; the set of pitch classes present.
 	uint8_t bass = notes[0];
 	NoteSet present;
 	present.clear();
 	for (int32_t i = 0; i < count; i++) {
-		if (notes[i] < bass) {
-			bass = notes[i];
-		}
+		bass = notes[i] < bass ? notes[i] : bass;
 		present.add(notes[i] % 12);
 	}
-	const int32_t bassPc = bass % 12;
-	auto intervalsFrom = [&](int32_t rootPc) {
-		NoteSet intervals;
-		intervals.clear();
-		for (int32_t i = 0; i < count; i++) {
-			intervals.add((((notes[i] % 12) - rootPc) + 12) % 12);
+	out.bass = bass % 12;
+	const int32_t distinct = present.count();
+	if (distinct == 2) {
+		int32_t other = out.bass;
+		for (int32_t pc = 0; pc < 12; pc++) {
+			other = (pc != out.bass && present.has(pc)) ? pc : other;
 		}
-		return intervals;
-	};
-	auto write = [&](int32_t rootPc, const char* name, bool slash) {
-		if (slash && rootPc != bassPc) {
-			sprintf(out, "%s%s/%s", noteNameInKey(rootPc, preferFlats), name, noteNameInKey(bassPc, preferFlats));
-		}
-		else {
-			sprintf(out, "%s%s", noteNameInKey(rootPc, preferFlats), name);
-		}
+		static const char* const kIntervalName[12] = {"",    " m2", " M2", " m3", " M3", " P4",
+		                                              " TT", "5",   " m6", " M6", " m7", " M7"};
+		out.root = out.bass;
+		out.code = kIntervalName[((other - out.bass) + 12) % 12];
+		out.intervals = intervalsFrom(notes, count, out.bass);
+		out.dyad = true;
 		return true;
-	};
-	// An exact name from `rootPc`: the chord table, then the named-only chords.
-	auto exactFrom = [&](int32_t rootPc, bool slash) {
-		const NoteSet intervals = intervalsFrom(rootPc);
-		for (int32_t c = 0; c < kUniqueChords; c++) {
-			const Chord& chord = chordList.chords[c];
-			if (chord.name[0] != '\0' && intervals == chord.intervalSet) {
-				return write(rootPc, chord.name, false); // the table's own inversions read as the chord, as before
-			}
-		}
-		for (const NamedOnlyChord& chord : kNamedOnlyChords) {
-			if (intervals == chord.intervals) {
-				return write(rootPc, chord.name, slash);
-			}
-		}
+	}
+	if (distinct < 2) {
 		return false;
-	};
-	// The chord from `rootPc` that holds every note with the fewest of its own left out, at most `maxMissing`.
-	auto nearFrom = [&](int32_t rootPc, int32_t maxMissing, int32_t& missingOut) -> const char* {
-		const NoteSet intervals = intervalsFrom(rootPc);
-		const char* best = nullptr;
-		int32_t bestMissing = maxMissing + 1;
-		for (int32_t c = 0; c < kUniqueChords; c++) {
-			const Chord& chord = chordList.chords[c];
-			if (chord.name[0] == '\0' || !intervals.isSubsetOf(chord.intervalSet)) {
-				continue;
-			}
-			const int32_t missing = chord.intervalSet.count() - intervals.count();
-			if (missing < bestMissing) {
-				bestMissing = missing;
-				best = chord.name;
-			}
-		}
-		missingOut = bestMissing;
-		return best;
-	};
-
-	// THE ORDER (Chroma 1.3.137). Cody, 2026-11-26: "there has to be a logical name for the chord".
-	//   1. an exact name from the bass                       E G B D F    -> Em7b9
-	//   2. a near name from the bass, one note left out      C E G Bb A   -> C13 (no 9th)
-	//   3. an exact name from another note, as a slash chord
-	//   4. the nearest chord holding every note, any root, two left out at most, as a slash chord
-	// Three different notes at least for a near name: two are an interval, named elsewhere.
-	if (exactFrom(bassPc, true)) {
+	}
+	if (exactFrom(notes, count, out.bass, out)) {
 		return true;
 	}
-	int32_t missing = 0;
-	if (present.count() >= 3) {
-		if (const char* name = nearFrom(bassPc, 1, missing)) {
-			return write(bassPc, name, false);
-		}
+	if (distinct >= 4 && nearFrom(notes, count, out.bass, out)) {
+		return true;
 	}
-	for (int32_t rootPc = 0; rootPc < 12; rootPc++) {
-		if (rootPc != bassPc && present.has(rootPc) && exactFrom(rootPc, true)) {
+	for (int32_t pc = 0; pc < 12; pc++) {
+		if (pc != out.bass && present.has(pc) && exactFrom(notes, count, pc, out)) {
 			return true;
 		}
 	}
-	if (present.count() < 3) {
-		return false;
+	if (nearFrom(notes, count, out.bass, out)) {
+		return true;
 	}
-	const char* bestName = nullptr;
-	int32_t bestRoot = -1, bestMissing = 3;
-	for (int32_t rootPc = 0; rootPc < 12; rootPc++) {
-		if (!present.has(rootPc)) {
-			continue;
-		}
-		const char* name = nearFrom(rootPc, 2, missing);
-		if (name != nullptr && missing < bestMissing) {
-			bestMissing = missing;
-			bestRoot = rootPc;
-			bestName = name;
+	for (int32_t pc = 0; pc < 12; pc++) {
+		if (pc != out.bass && present.has(pc) && nearFrom(notes, count, pc, out)) {
+			return true;
 		}
 	}
-	return bestName != nullptr && write(bestRoot, bestName, true);
+	return false;
+}
+
+// HOW A NOTE IS SPELLED IN A KEY (Chroma 1.3.139): the key's own notes as the key spells them; a note off the key the
+// way its degree is - flattened from the step above, sharpened when it lies above the seventh. So Bb in C major is
+// Bb, bVII, never "A#  bVII" (found by the firmware's own tests: the name and its degree spelled one note two ways).
+// `keyRoot` < 0: no key, the caller's lean decides.
+struct Spell {
+	bool flats;
+	int32_t keyRoot = -1;
+	NoteSet scale;
+};
+const char* spellNote(int32_t pc, const Spell& sp) {
+	if (sp.keyRoot < 0 || sp.scale.count() != 7) {
+		return noteNameInKey(pc, sp.flats);
+	}
+	const int32_t fromKey = ((pc - sp.keyRoot) % 12 + 12) % 12;
+	if (sp.scale.has(fromKey)) {
+		return noteNameInKey(pc, sp.flats);
+	}
+	for (int32_t i = fromKey + 1; i < 12; i++) {
+		if (sp.scale.has(i)) {
+			return noteNameInKey(pc, true);
+		}
+	}
+	return noteNameInKey(pc, false);
+}
+
+// The name, spelled for the display (the Deluge's own labels) or for a host (the standard ones). A chord whose bass
+// is not its root says so, "C/G", in both (1.3.139: an inversion read as root position before).
+void spellChord(const NamedChord& n, const Spell& sp, bool forHost, char* out) {
+	const char* quality = (forHost && !n.dyad) ? standardChordSpelling(n.code) : n.code;
+	if (!n.dyad && n.bass != n.root) {
+		sprintf(out, "%s%s/%s", spellNote(n.root, sp), quality, spellNote(n.bass, sp));
+	}
+	else {
+		sprintf(out, "%s%s", spellNote(n.root, sp), quality);
+	}
+}
+
+// THE DEGREE: the step of the key's OWN scale the root is on (Chroma 1.3.139). In A minor C is III; 1.3.138 and
+// before counted every scale from the major one and called it bIII. A root outside the scale is flattened from the
+// step above it (bVII in C major), or sharpened from the step below when there is none above. Upper case for a major
+// third (and for a chord with no third), lower case for a minor one. For the display the label follows, as before
+// ("iiFULLDIM"); for a host one quality mark - o diminished, h half-diminished, + augmented, spelled as the symbols
+// by the bridge - and no extensions ("vii" "o"). Seven-note scales only; empty otherwise, or for a dyad that is not a
+// third or a fifth.
+void chordDegree(const NamedChord& n, uint8_t keyRootPc, NoteSet scale, bool forHost, char* out) {
+	out[0] = '\0';
+	uint8_t steps[12];
+	int32_t stepCount = 0;
+	for (int32_t i = 0; i < 12; i++) {
+		if (scale.has(i)) {
+			steps[stepCount++] = i;
+		}
+	}
+	if (stepCount != 7) {
+		return;
+	}
+	const NoteSet& iv = n.intervals;
+	if (n.dyad && !iv.has(MIN3) && !iv.has(MAJ3) && !iv.has(P5)) {
+		return;
+	}
+	static const char* const kRoman[7] = {"I", "II", "III", "IV", "V", "VI", "VII"};
+	const int32_t fromKey = ((n.root - keyRootPc) % 12 + 12) % 12;
+	char acc = 0;
+	int32_t step = -1;
+	for (int32_t d = 0; d < 7; d++) {
+		step = steps[d] == fromKey ? d : step;
+	}
+	if (step < 0 && n.dyad) {
+		return; // an interval off the key does not say which borrowed chord it belongs to (1.3.117)
+	}
+	if (step < 0) {
+		for (int32_t d = 0; d < 7 && step < 0; d++) {
+			if (steps[d] > fromKey) {
+				step = d;
+				acc = 'b';
+			}
+		}
+		if (step < 0) {
+			step = 6;
+			acc = '#';
+		}
+	}
+	const bool lower = iv.has(MIN3) && !iv.has(MAJ3);
+	int32_t k = 0;
+	if (acc) {
+		out[k++] = acc;
+	}
+	for (const char* r = kRoman[step]; *r; r++) {
+		out[k++] = lower ? (char)(*r - 'A' + 'a') : *r;
+	}
+	out[k] = '\0';
+	if (n.dyad) {
+		if (iv.has(P5) && !forHost) {
+			strcat(out, "5");
+		}
+		return;
+	}
+	if (!forHost) {
+		strcat(out, n.code);
+		return;
+	}
+	if (iv.has(MIN3) && iv.has(DIM5) && !iv.has(P5)) {
+		strcat(out, iv.has(MIN7) ? "h" : "o");
+	}
+	else if (iv.has(MAJ3) && iv.has(AUG5) && !iv.has(P5)) {
+		strcat(out, "+");
+	}
+}
+} // namespace
+
+bool nameChordFromNotes(const uint8_t* notes, int32_t count, char* out, bool preferFlats) {
+	NamedChord n;
+	if (!nameChord(notes, count, n) || n.dyad) {
+		return false; // two notes are an interval, named by describeChordInKey
+	}
+	spellChord(n, Spell{preferFlats}, false, out);
+	return true;
 }
 
 // Voice-leading distance: total minimal semitone movement to get from chord `a` to chord `b`
@@ -615,117 +839,68 @@ int suggestNextChords(uint8_t keyRoot, NoteSet scaleNotes, uint8_t scaleCount, u
 bool describeChordInKey(const uint8_t* notes, int32_t count, uint8_t keyRootPc, NoteSet scale, char* absOut,
                         char* romanOut) {
 	romanOut[0] = '\0';
-	if (count < 2) {
+	NamedChord n;
+	if (!nameChord(notes, count, n)) {
 		return false;
 	}
-	static ChordList chordList;
-	bool flats = effectivePreferFlats(keyRootPc, scale);
+	const Spell sp{effectivePreferFlats(keyRootPc, scale), keyRootPc, scale};
+	spellChord(n, sp, false, absOut);
+	chordDegree(n, keyRootPc, scale, false, romanOut);
+	return true;
+}
 
-	uint8_t bass = notes[0];
+bool nameHeldChord(const uint8_t* notes, int32_t count, uint8_t keyRootPc, NoteSet scale, char* displayOut,
+                   char* hostOut) {
+	displayOut[0] = hostOut[0] = '\0';
 	NoteSet present;
 	present.clear();
 	for (int32_t i = 0; i < count; i++) {
-		if (notes[i] < bass) {
-			bass = notes[i];
-		}
 		present.add(notes[i] % 12);
 	}
-	int32_t bassPc = bass % 12;
-
-	// scale degrees as intervals from the key root (for the Roman numeral)
-	uint8_t scaleIv[12];
-	int32_t scaleCount = 0;
-	for (int32_t i = 0; i < 12; i++) {
-		if (scale.has(i)) {
-			scaleIv[scaleCount++] = i;
-		}
+	if (present.count() < 2) {
+		return false;
 	}
-	static const char* const kRoman[7] = {"I", "II", "III", "IV", "V", "VI", "VII"};
-	static const int8_t kMajorRef[7] = {0, 2, 4, 5, 7, 9, 11};
-	// The numeral for a root that is a degree of a seven-note scale, upper case for a major third, then the
-	// suffix. Writes nothing when the root is not a degree, or the scale does not have seven notes.
-	auto writeRoman = [&](int32_t rootPc, bool upper, const char* suffix) {
-		if (scaleCount != 7) {
-			return;
-		}
-		for (int32_t d = 0; d < 7; d++) {
-			if (((keyRootPc + scaleIv[d]) % 12) != (uint32_t)rootPc) {
-				continue;
+	const Spell sp{effectivePreferFlats(keyRootPc, scale), keyRootPc, scale};
+	NamedChord n;
+	if (nameChord(notes, count, n)) {
+		char name[40], degree[24];
+		for (int32_t host = 0; host < 2; host++) {
+			char* out = host ? hostOut : displayOut;
+			spellChord(n, sp, host, name);
+			chordDegree(n, keyRootPc, scale, host, degree);
+			if (degree[0] != '\0') {
+				snprintf(out, 64, "%s  %s", name, degree); // the name first, then its place in the key (1.3.138)
 			}
-			int32_t acc = scaleIv[d] - kMajorRef[d]; // -1 = flat, +1 = sharp degree
-			char num[8];
-			int32_t n = 0;
-			if (acc < 0) {
-				num[n++] = 'b';
+			else {
+				snprintf(out, 64, "%s", name);
 			}
-			else if (acc > 0) {
-				num[n++] = '#';
-			}
-			const char* numeral = kRoman[d];
-			for (int32_t k = 0; numeral[k] != '\0'; k++) {
-				num[n++] = upper ? numeral[k] : (char)(numeral[k] - 'A' + 'a');
-			}
-			num[n] = '\0';
-			sprintf(romanOut, "%s%s", num, suffix);
-			return;
-		}
-	};
-
-	for (int32_t attempt = -1; attempt < 12; attempt++) {
-		int32_t rootPc = (attempt < 0) ? bassPc : attempt;
-		if ((attempt >= 0 && rootPc == bassPc) || !present.has(rootPc)) {
-			continue;
-		}
-		NoteSet intervals;
-		intervals.clear();
-		for (int32_t i = 0; i < count; i++) {
-			intervals.add((((notes[i] % 12) - rootPc) + 12) % 12);
-		}
-		for (int32_t c = 0; c < kUniqueChords; c++) {
-			const Chord& chord = chordList.chords[c];
-			if (chord.name[0] == '\0' || !(intervals == chord.intervalSet)) {
-				continue;
-			}
-			// Absolute name, spelled to the key (e.g. "Db M7").
-			sprintf(absOut, "%s%s", noteNameInKey(rootPc, flats), chord.name);
-
-			// Roman numeral: only for 7-note scales when the root is a scale degree.
-			writeRoman(rootPc, chord.intervalSet.has(MAJ3), chord.name);
-			return true;
-		}
-	}
-
-	// TWO DIFFERENT NOTES (Chroma, 1.3.117): an interval, named from the lowest note. However many octaves of
-	// each are held, two pitch classes are a dyad - Cody, 2026-11-24, holding A6 C7 C8: "shows nothing, include
-	// dyads". None of the chord table's shapes has two notes, so before this a dyad named nothing at all.
-	//
-	// From the bass, as it is played: C under A is a major sixth, not an inverted A minor - an interval does not
-	// say which triad it belongs to, so this does not guess. A fifth is written the way players write it ("A5").
-	// A third or a fifth on a degree of the key gets its numeral, lower case for a minor third: those three
-	// imply the chord on that degree. The other intervals get none.
-	if (present.count() == 2) {
-		int32_t otherPc = bassPc;
-		for (int32_t pc = 0; pc < 12; pc++) {
-			if (pc != bassPc && present.has(pc)) {
-				otherPc = pc;
-			}
-		}
-		const int32_t interval = ((otherPc - bassPc) + 12) % 12;
-		static const char* const kIntervalName[12] = {"",    " m2", " M2", " m3", " M3", " P4",
-		                                              " TT", "5",   " m6", " M6", " m7", " M7"};
-		sprintf(absOut, "%s%s", noteNameInKey(bassPc, flats), kIntervalName[interval]);
-		if (interval == MIN3) {
-			writeRoman(bassPc, false, "");
-		}
-		else if (interval == MAJ3) {
-			writeRoman(bassPc, true, "");
-		}
-		else if (interval == P5) {
-			writeRoman(bassPc, true, "5");
 		}
 		return true;
 	}
-	return false;
+	// NEVER NO NAME FOR A HELD CHORD (1.3.136): the notes themselves, lowest first, each pitch once.
+	uint8_t sorted[16];
+	const int32_t m = count < 16 ? count : 16;
+	for (int32_t k = 0; k < m; k++) {
+		sorted[k] = notes[k];
+	}
+	for (int32_t a = 1; a < m; a++) {
+		for (int32_t b = a; b > 0 && sorted[b - 1] > sorted[b]; b--) {
+			const uint8_t t = sorted[b];
+			sorted[b] = sorted[b - 1];
+			sorted[b - 1] = t;
+		}
+	}
+	int32_t p = 0;
+	uint16_t seen = 0;
+	for (int32_t k = 0; k < m && p < 56; k++) {
+		const int32_t pc = sorted[k] % 12;
+		if (!(seen & (1u << pc))) {
+			seen |= (uint16_t)(1u << pc);
+			p += snprintf(displayOut + p, (size_t)(64 - p), "%s%s", p ? " " : "", spellNote(pc, sp));
+		}
+	}
+	strcpy(hostOut, displayOut);
+	return p > 0;
 }
 
 } // namespace deluge::gui::ui::keyboard

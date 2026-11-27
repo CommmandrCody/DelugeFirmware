@@ -1761,7 +1761,7 @@ void HIDSysex::sendHeldChordIfChanged(bool force) {
 	name[0] = '\0';
 	UI* ui = getCurrentUI();
 	if (currentSong != nullptr && ui != nullptr && ui->getUIType() == UIType::KEYBOARD_SCREEN) {
-		keyboardScreen.heldChordName(name);
+		keyboardScreen.heldChordName(name, true); // 1.3.139: the standard spelling
 	}
 	name[63] = '\0';
 

@@ -63,6 +63,9 @@ static bool fxContextSent = false;
 // Chroma (0x4E): defined beside the command that needs it; called from the display poll.
 static void saveFeaturesIfNeeded();
 static bool usbSettingsNeedSaving = false; // 1.3.135: a host changed a saved USB audio setting; routine() writes it
+// 1.3.143: a host asked to play (1) or stop (0); routine() presses PLAY if the Deluge is not already there. -1:
+// nothing.
+static int8_t transportOwed = -1;
 
 // Forward-declared: the resync handler below re-pushes the current view directly, and the table that
 // maps a UIType to its slug is defined further down with the rest of the view code.
@@ -2805,6 +2808,17 @@ void HIDSysex::receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len) {
 				}
 			}
 		}
+		else if (what == 10) {
+			// PLAY OR STOP (1.3.143). Cody, 2026-11-27: "I want a play pause button in the tool at the top". 1 play,
+			// 0 stop - never a toggle, so a repeated message or a press on the Deluge itself in between cannot turn it
+			// the wrong way. Only RECORDED here: this runs inside "check usb midi", which holds the USB resource the
+			// audio stream needs every millisecond (the 1.3.134 stall), and starting playback is real work. routine()
+			// presses PLAY, as the button does, and the transport push (0x47) reports what really happened.
+			if (value <= 1) {
+				transportOwed = (int8_t)value;
+				result = 0;
+			}
+		}
 		else if (what == 9) {
 			// THE REVERB RETURN ON A USB PAIR (1.3.133): 0 the main mix, 1-4 the pair instead. Reported in 0x5B.
 			if (value <= deluge::processing::engines::USBAudioStream::kStemChannels / 2u) {
@@ -2996,6 +3010,13 @@ void HIDSysex::routine() {
 	if (usbSettingsNeedSaving && !sdRoutineLock) {
 		usbSettingsNeedSaving = false;
 		FlashStorage::writeSettings();
+	}
+	if (transportOwed >= 0) {
+		const bool wantPlaying = transportOwed == 1;
+		transportOwed = -1;
+		if (wantPlaying != playbackHandler.isEitherClockActive()) {
+			playbackHandler.playButtonPressed(kInternalButtonPressLatency); // exactly what the PLAY button does
+		}
 	}
 	if (lastHidCable == nullptr) {
 		return;

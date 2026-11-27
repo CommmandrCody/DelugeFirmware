@@ -1195,8 +1195,11 @@ bool KeyboardScreen::drawHeldChordName() {
 // name alone when it has no place in the key. False, and an empty string, when fewer than two notes are
 // held or they match no chord. Reads the held notes and the key; changes nothing and draws nothing, so a
 // host report (Chroma 0x57) can ask for the same name the display is given.
-bool KeyboardScreen::heldChordName(char full[64], bool forHost) {
+bool KeyboardScreen::heldChordName(char full[64], bool forHost, uint8_t* notesOut, int32_t* countOut) {
 	full[0] = '\0';
+	if (countOut != nullptr) {
+		*countOut = 0;
+	}
 	if (currentSong == nullptr) {
 		return false;
 	}
@@ -1225,6 +1228,13 @@ bool KeyboardScreen::heldChordName(char full[64], bool forHost) {
 		}
 	}
 	// 1.3.139: named once, spelled for the screen or for a host (nameHeldChord, checked by chroma/tools/chord-oracle).
+	// 1.3.141: the notes named, for a host to check the name against (chord-oracle's live check in the bridge).
+	if (notesOut != nullptr && countOut != nullptr) {
+		for (int32_t k = 0; k < count; k++) {
+			notesOut[k] = notes[k];
+		}
+		*countOut = count;
+	}
 	char display[64], host[64];
 	if (!nameHeldChord(notes, count, currentSong->key.rootNote % 12, currentSong->key.modeNotes, display, host)) {
 		return false;

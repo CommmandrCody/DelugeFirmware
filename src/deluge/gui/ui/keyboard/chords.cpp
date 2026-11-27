@@ -933,25 +933,17 @@ bool nameHeldChord(const uint8_t* notes, int32_t count, uint8_t keyRootPc, NoteS
 		}
 		return true;
 	}
-	// NEVER NO NAME FOR A HELD CHORD (1.3.136): the notes themselves, lowest first, each pitch once.
-	uint8_t sorted[16];
-	const int32_t m = count < 16 ? count : 16;
-	for (int32_t k = 0; k < m; k++) {
-		sorted[k] = notes[k];
-	}
-	for (int32_t a = 1; a < m; a++) {
-		for (int32_t b = a; b > 0 && sorted[b - 1] > sorted[b]; b--) {
-			const uint8_t t = sorted[b];
-			sorted[b] = sorted[b - 1];
-			sorted[b - 1] = t;
-		}
+	// NEVER NO NAME FOR A HELD CHORD (1.3.136): the notes themselves, each pitch once - the bass, then the others in
+	// order upward from it. 1.3.141: by pitch class from the bass, not by where each was played, so the same cluster
+	// reads the same however it is voiced (chord-oracle's voicing law; it listed "Db C D" and "Db D C" for one chord).
+	uint8_t bass = notes[0];
+	for (int32_t k = 1; k < count; k++) {
+		bass = notes[k] < bass ? notes[k] : bass;
 	}
 	int32_t p = 0;
-	uint16_t seen = 0;
-	for (int32_t k = 0; k < m && p < 56; k++) {
-		const int32_t pc = sorted[k] % 12;
-		if (!(seen & (1u << pc))) {
-			seen |= (uint16_t)(1u << pc);
+	for (int32_t step = 0; step < 12 && p < 56; step++) {
+		const int32_t pc = (bass % 12 + step) % 12;
+		if (present.has(pc)) {
 			p += snprintf(displayOut + p, (size_t)(64 - p), "%s%s", p ? " " : "", spellNote(pc, sp));
 		}
 	}

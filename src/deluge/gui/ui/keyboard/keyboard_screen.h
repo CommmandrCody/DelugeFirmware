@@ -49,7 +49,7 @@ public:
 	void playingPads(uint8_t columns[kDisplayWidth]);
 	bool padNotes(uint8_t notes[kDisplayHeight][kDisplayWidth]);
 	/// The chord being held, named as the display names it; false and "" when there is none. Reads only.
-	bool heldChordName(char full[64], bool forHost = false);
+	bool heldChordName(char full[64], bool forHost = false, uint8_t* notesOut = nullptr, int32_t* countOut = nullptr);
 	bool padVelocities(uint8_t velocities[kDisplayHeight][kDisplayWidth]);
 
 	ActionResult verticalEncoderAction(int32_t offset, bool inCardRoutine) override;

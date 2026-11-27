@@ -1745,7 +1745,7 @@ void HIDSysex::sendHealthIfDue(bool force) {
 
 // Chroma (0x57): THE CHORD BEING HELD on the keyboard, in the words the instrument's own display uses.
 //
-//   F0 00 21 7B 01 02 57 <len> <text> F7        len 0: no chord is held
+//   F0 00 21 7B 01 02 57 <len> <text> [<count> <notes...>] F7        len 0: no chord is held; the notes since 1.3.141
 //
 // Cody, 2026-11-24, of the live note names beside the pads: "can we also include the calculated chord".
 // The Deluge already works the name out - two or more held notes are matched against its chord table and
@@ -1759,13 +1759,18 @@ void HIDSysex::sendHeldChordIfChanged(bool force) {
 	}
 	char name[64];
 	name[0] = '\0';
+	uint8_t notes[16];
+	int32_t noteCount = 0;
 	UI* ui = getCurrentUI();
 	if (currentSong != nullptr && ui != nullptr && ui->getUIType() == UIType::KEYBOARD_SCREEN) {
-		keyboardScreen.heldChordName(name, true); // 1.3.139: the standard spelling
+		keyboardScreen.heldChordName(name, true, notes, &noteCount); // 1.3.139: the standard spelling
 	}
 	name[63] = '\0';
+	if (name[0] == '\0') {
+		noteCount = 0;
+	}
 
-	uint8_t msg[7 + 1 + 64 + 1];
+	uint8_t msg[7 + 1 + 64 + 1 + 16 + 1];
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -1786,6 +1791,16 @@ void HIDSysex::sendHeldChordIfChanged(bool force) {
 		hash = (hash ^ safe) * 16777619u;
 	}
 	hash = (hash ^ (uint8_t)n) * 16777619u;
+	// 1.3.141: AND THE NOTES IT NAMED, after the text: <count> <note>... (MIDI numbers, 0-127). Cody, 2026-11-27: "can
+	// we calculate it more than once to compare results?" - the bridge checks every name against them as it arrives.
+	// A host that reads only the text still reads it: the text's length says where it ends.
+	if (n > 0 && noteCount > 0) {
+		msg[i++] = (uint8_t)noteCount;
+		for (int32_t k = 0; k < noteCount; k++) {
+			msg[i++] = notes[k] & 0x7f;
+			hash = (hash ^ notes[k]) * 16777619u;
+		}
+	}
 
 	static uint32_t lastHash = 0;
 	static bool everSent = false;

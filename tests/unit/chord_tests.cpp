@@ -461,7 +461,44 @@ TEST(ChordTests, writesTheCorpusForTheIndependentCheckWhenAsked) {
 				jsonString(f, held ? host : "");
 				fprintf(f, "}");
 			}
-			fprintf(f, "}}\n");
+			// THE SAME CHORD, VOICED OTHER WAYS (Chroma 1.3.141): the bass still lowest, the other notes spread,
+			// doubled, closed up, or the bass doubled an octave down. Cody, 2026-11-27: "can we calculate it more than
+			// once to compare results?" A correct namer gives every voicing over the same bass the same name;
+			// chord-oracle checks that they agree with the first. The app's spelling, in C major.
+			fprintf(f, "},\"voicings\":[");
+			for (int32_t v = 0; v < 4; v++) {
+				uint8_t vn[16];
+				int32_t m = 0;
+				if (v == 3) {
+					vn[m++] = (uint8_t)(36 + bassPc); // the bass doubled, an octave down
+				}
+				vn[m++] = (uint8_t)((v == 0 ? 36 : 48) + bassPc);
+				int32_t k = 0;
+				for (int32_t pc = 0; pc < 12; pc++) {
+					if (pc == bassPc || !((bits >> pc) & 1)) {
+						continue;
+					}
+					if (v == 0) { // spread: alternate octaves above
+						vn[m++] = (uint8_t)((k % 2 ? 72 : 60) + pc);
+					}
+					else if (v == 1) { // doubled: every upper note in two octaves
+						vn[m++] = (uint8_t)(60 + pc);
+						vn[m++] = (uint8_t)(72 + pc);
+					}
+					else if (v == 2) { // close: each note the nearest above the bass
+						vn[m++] = (uint8_t)((pc > bassPc ? 48 : 60) + pc);
+					}
+					else {
+						vn[m++] = (uint8_t)(60 + pc);
+					}
+					k++;
+				}
+				char vd[64] = "", vh[64] = "";
+				const bool ok = deluge::gui::ui::keyboard::nameHeldChord(vn, m, keys[0].root, keys[0].scale, vd, vh);
+				fprintf(f, "%s", v ? "," : "");
+				jsonString(f, ok ? vh : "");
+			}
+			fprintf(f, "]}\n");
 			cases++;
 		}
 	}

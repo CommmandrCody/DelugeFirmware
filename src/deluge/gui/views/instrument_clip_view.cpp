@@ -5988,7 +5988,7 @@ bool InstrumentClipView::drawHeldChordName() {
 	}
 	char full[64];
 	if (roman[0] != '\0') {
-		sprintf(full, "%s  %s", roman, absName);
+		sprintf(full, "%s  %s", absName, roman); // 1.3.138: the name first, as the keyboard shows it
 	}
 	else {
 		sprintf(full, "%s", absName);

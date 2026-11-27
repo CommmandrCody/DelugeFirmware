@@ -1190,7 +1190,7 @@ bool KeyboardScreen::drawHeldChordName() {
 	return true;
 }
 
-// The name of the chord being held, exactly as drawHeldChordName() shows it: "IV  Fmaj7", or the absolute
+// The name of the chord being held, exactly as drawHeldChordName() shows it: "Fmaj7  IV", or the absolute
 // name alone when it has no place in the key. False, and an empty string, when fewer than two notes are
 // held or they match no chord. Reads the held notes and the key; changes nothing and draws nothing, so a
 // host report (Chroma 0x57) can ask for the same name the display is given.
@@ -1261,8 +1261,10 @@ bool KeyboardScreen::heldChordName(char full[64]) {
 		}
 		return p > 0;
 	}
+	// 1.3.138: THE NAME FIRST, its place in the key second. Cody, 2026-11-26: "I want the chord name first with the
+	// notation second, it seems really mixed up" ("ii-7b5  B-7b5" read as two names). Two spaces still part them.
 	if (roman[0] != '\0') {
-		snprintf(full, 64, "%s  %s", roman, absName);
+		snprintf(full, 64, "%s  %s", absName, roman);
 	}
 	else {
 		snprintf(full, 64, "%s", absName);

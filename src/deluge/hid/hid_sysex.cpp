@@ -1749,8 +1749,8 @@ void HIDSysex::sendHealthIfDue(bool force) {
 //
 // Cody, 2026-11-24, of the live note names beside the pads: "can we also include the calculated chord".
 // The Deluge already works the name out - two or more held notes are matched against its chord table and
-// scrolled across the display as "IV  Fmaj7". A host that named the chord itself could disagree with the
-// instrument it is mirroring; this sends the instrument's answer instead.
+// scrolled across the display as "Fmaj7  IV" (the name first since 1.3.138). A host that named the chord itself could
+// disagree with the instrument it is mirroring; this sends the instrument's answer instead.
 //
 // Asked on the pad poll, like the pad notes. Reads the held notes and the key; draws and changes nothing.
 void HIDSysex::sendHeldChordIfChanged(bool force) {

@@ -67,6 +67,11 @@ public:
 		uint32_t rxFrames;  ///< frames received into the ring, ever
 		uint32_t rxDropped; ///< frames that arrived with no room in the ring, ever
 		uint16_t rxPeak;    ///< the loudest sample received since the last read (0-32767); reading clears it
+		// 1.3.144: THE HOST'S SYNC WORD (host_sync_word.h) - words read off the return's fourth channel.
+		uint32_t syncGood; ///< whole words with a good CRC, ever
+		uint32_t syncBad;  ///< words that failed their CRC, ever
+		uint16_t syncSeq;  ///< the last good word's sequence number
+		bool syncEcho;     ///< the return's fourth channel is being echoed onto the eighth outgoing channel
 	};
 	static void readHealth(Health& out);
 

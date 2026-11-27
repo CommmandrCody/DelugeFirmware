@@ -20,6 +20,7 @@
 #include "dsp/stereo_sample.h"
 #include "io/debug/print.h"
 #include "model/usb_route.h"
+#include "processing/engines/host_sync_word.h"
 #include "util/functions.h"
 #include <cstdint>
 #include <cstring>
@@ -319,6 +320,15 @@ bool rxRingCleared = false;
 uint32_t healthRxFrames = 0;
 uint32_t healthRxDropped = 0;
 uint16_t healthRxPeak = 0;
+
+/// THE HOST'S SYNC WORD (1.3.144): read off the return's fourth channel as the render consumes it, so a word's position
+/// in the Deluge's own timeline is known to the sample. Step 1 only measures: a word asking for an echo turns on, for
+/// kSyncEchoFrames, a sample-for-sample copy of that channel onto the eighth outgoing channel, and the plugin times the
+/// round trip and checks every bit came back. Nothing follows the host yet.
+deluge::hostsync::Decoder syncDecoder;
+uint16_t syncLastSeq = 0;
+uint32_t syncEchoFrames = 0;
+constexpr uint32_t kSyncEchoFrames = 4u * kSampleRate; ///< four seconds after the last echo request
 bool rxPrimed = false;
 
 /// A host has the return interface selected.
@@ -1275,6 +1285,10 @@ void USBAudioStream::readHealth(Health& out) {
 	out.rxFrames = healthRxFrames;
 	out.rxDropped = healthRxDropped;
 	out.rxPeak = healthRxPeak;
+	out.syncGood = syncDecoder.good;
+	out.syncBad = syncDecoder.bad;
+	out.syncSeq = syncLastSeq;
+	out.syncEcho = syncEchoFrames > 0u;
 	healthRxPeak = 0;
 }
 
@@ -1484,6 +1498,19 @@ bool USBAudioStream::takeReverb(const StereoSample* wet, uint32_t numSamples) {
 void USBAudioStream::feedMix(uint32_t numSamples, uint32_t renderOffset, const StereoSample* mainMix) {
 	advanceReturnBy(numSamples);
 
+	// THE HOST'S SYNC WORD (1.3.144): every return frame this window consumed - the drift catch-up frame included -
+	// goes through the decoder, before anything else, so a word is never missed for want of an outgoing stream.
+	for (uint32_t k = 0; k < returnConsumedFrames; k++) {
+		const uint16_t s =
+		    (uint16_t)rxRing[((returnConsumedFrom + k) & kRxRingMask) * kRxChannels + deluge::hostsync::kChannel];
+		if (syncDecoder.push(s)) {
+			syncLastSeq = syncDecoder.word().seq;
+			if (syncDecoder.word().flags & deluge::hostsync::kFlagEcho) {
+				syncEchoFrames = kSyncEchoFrames;
+			}
+		}
+	}
+
 	if (!streamActive || numSamples == 0) {
 		return;
 	}
@@ -1508,6 +1535,15 @@ void USBAudioStream::feedMix(uint32_t numSamples, uint32_t renderOffset, const S
 			const uint32_t c = (mainPairSetting - 1u) * 2u;
 			frame[c] = (int16_t)(mainMix[i].l >> 16);
 			frame[c + 1u] = (int16_t)(mainMix[i].r >> 16);
+		}
+		// THE ECHO (1.3.144, measurement only): the return's fourth channel, consumed this frame, onto the eighth
+		// outgoing channel, bit for bit - last, so nothing above overwrites it. Silence where the return ran dry.
+		if (syncEchoFrames > 0u) {
+			syncEchoFrames--;
+			frame[kStemChannels - 1u] =
+			    (i < returnConsumedFrames)
+			        ? rxRing[((returnConsumedFrom + i) & kRxRingMask) * kRxChannels + deluge::hostsync::kChannel]
+			        : (int16_t)0;
 		}
 		w++;
 	}

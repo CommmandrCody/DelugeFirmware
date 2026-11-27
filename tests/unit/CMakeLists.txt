@@ -104,6 +104,7 @@ add_executable(UnitTests
         waveform_peak_math_tests.cpp
         press_feedback_tests.cpp
         sample_frame_tests.cpp
+        host_sync_word_tests.cpp
 )
 add_test(NAME UnitTests
         COMMAND UnitTests)

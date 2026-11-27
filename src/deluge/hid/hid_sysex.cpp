@@ -1638,7 +1638,7 @@ void HIDSysex::sendHealthIfDue(bool force) {
 		return; // not sent, so not remembered: the counts carry over to the next one
 	}
 
-	uint8_t msg[80];
+	uint8_t msg[96]; // 1.3.144: 80 held the report to the reverb pair; the sync word fields need ten more
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -1751,6 +1751,12 @@ void HIDSysex::sendHealthIfDue(bool force) {
 		put7(USBAudioStream::numReturnPairs());
 		put7(USBAudioStream::getMainPair());   // 1.3.132: the pair carrying the main mix, 0 none
 		put7(USBAudioStream::getReverbPair()); // 1.3.133: the pair carrying the reverb return, 0 the main mix
+		// 1.3.144: THE HOST'S SYNC WORD - good and bad words ever, the last good word's sequence, and whether its echo
+		// is on (host_sync_word.h). Step 1 of the plugin following the host's transport: measured, not yet obeyed.
+		put21(health.syncGood);
+		put21(health.syncBad);
+		put21(health.syncSeq);
+		put7(health.syncEcho ? 1 : 0);
 	}
 	msg[i++] = 0xf7;
 

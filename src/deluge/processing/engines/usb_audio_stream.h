@@ -79,6 +79,10 @@ public:
 		uint32_t rxTeardowns;      ///< times the drain found the handover broken and tore it down, ever
 		uint32_t rxDriverPackets;  ///< packets the driver delivered (only the first should), ever
 		bool rxBrdyEnabled;        ///< the return pipe's ready interrupt is enabled (it must not be under DMA)
+		// 1.3.146: why the collector stops being asked (D1FIFO port re-pointed, DMA stopped, or a part-packet held).
+		uint16_t rxFifoSelect;  ///< D1FIFOSEL now: CURPIPE (0-3), DCLRM (13), DREQE (12), MBW (10-11)
+		uint16_t rxFifoControl; ///< D1FIFOCTR now: BVAL (15), BCLR (14), FRDY (13), DTLN (0-11)
+		uint32_t rxDmaStatus;   ///< DMA channel 1 CHSTAT now: EN 0, RQST 1, TACT 2, SUS 3, ER 4, END 5, TC 6
 	};
 	static void readHealth(Health& out);
 

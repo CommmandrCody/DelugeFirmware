@@ -1634,11 +1634,11 @@ void HIDSysex::sendHealthIfDue(bool force) {
 		last = health;
 		return;
 	}
-	if (lastHidCable->sendBufferSpace() < 112 || lastHidCable->sendBufferSpace() > 0x10000) {
+	if (lastHidCable->sendBufferSpace() < 128 || lastHidCable->sendBufferSpace() > 0x10000) {
 		return; // not sent, so not remembered: the counts carry over to the next one
 	}
 
-	uint8_t msg[112]; // 1.3.144-145: 80 held the report to the reverb pair; the sync and receive fields need 23 more
+	uint8_t msg[128]; // 1.3.144-146: the sync and receive-path fields after the reverb pair
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -1763,6 +1763,9 @@ void HIDSysex::sendHealthIfDue(bool force) {
 		put21(health.rxDmaWriteOffset);
 		put21(health.rxTeardowns);
 		put21(health.rxDriverPackets);
+		put21(health.rxFifoSelect); // 1.3.146
+		put21(health.rxFifoControl);
+		put21(health.rxDmaStatus & 0x1fffffu);
 	}
 	msg[i++] = 0xf7;
 

@@ -1299,6 +1299,9 @@ void USBAudioStream::readHealth(Health& out) {
 	out.rxTeardowns = rxTeardownCount;
 	out.rxDriverPackets = rxDriverPacketCount;
 	out.rxBrdyEnabled = (usbRegisters()->BRDYENB & (1u << USB_CFG_PAUDIO_ISO_OUT)) != 0u;
+	out.rxFifoSelect = usbRegisters()->D1FIFOSEL;
+	out.rxFifoControl = usbRegisters()->D1FIFOCTR;
+	out.rxDmaStatus = DMACn(kRxDmaChannel).CHSTAT_n;
 	healthRxPeak = 0;
 }
 

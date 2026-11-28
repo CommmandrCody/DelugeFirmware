@@ -63,6 +63,11 @@ static bool fxContextSent = false;
 // Chroma (0x4E): defined beside the command that needs it; called from the display poll.
 static void saveFeaturesIfNeeded();
 static bool usbSettingsNeedSaving = false; // 1.3.135: a host changed a saved USB audio setting; routine() writes it
+// 1.3.148: pad brightness set from a host is the SAVED default (Settings > Defaults > Pad brightness), written once the
+// slider has been still for 2 s so a drag does not write flash at every step. Cody: "set the brightness of the pads as
+// a default so I don't have to keep dropping the brightness to min".
+static bool brightnessNeedsSaving = false;
+static uint32_t brightnessSaveAt = 0;
 // 1.3.143: a host asked to play (1) or stop (0); routine() presses PLAY if the Deluge is not already there. -1:
 // nothing.
 static int8_t transportOwed = -1;
@@ -2876,6 +2881,8 @@ void HIDSysex::receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len) {
 			if (value >= kMinLedBrightness && value <= kMaxLedBrightness) {
 				FlashStorage::defaultPadBrightness = value;
 				PadLEDs::setBrightnessLevel(value);
+				brightnessNeedsSaving = true;
+				brightnessSaveAt = AudioEngine::audioSampleTimer + 2 * kSampleRate;
 				result = 0;
 				deviceChanged = true;
 			}
@@ -3022,6 +3029,10 @@ static void pushPadsIfChanged(MIDICable& cable) {
 void HIDSysex::routine() {
 	// A USB audio setting a host changed is written to flash here, in a task with no USB resource, never in the
 	// command handler that runs inside "check usb midi" (1.3.135).
+	if (brightnessNeedsSaving && !sdRoutineLock && (int32_t)(AudioEngine::audioSampleTimer - brightnessSaveAt) >= 0) {
+		brightnessNeedsSaving = false;
+		usbSettingsNeedSaving = true; // the same single write, below
+	}
 	if (usbSettingsNeedSaving && !sdRoutineLock) {
 		usbSettingsNeedSaving = false;
 		FlashStorage::writeSettings();

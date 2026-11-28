@@ -321,6 +321,47 @@ void LoadSongUI::queueLoadNextSongIfAvailable(int8_t offset) {
 	doQueueLoadNextSongIfAvailable(offset);
 }
 
+// LOAD A SONG BECAUSE A HOST ASKED (1.3.149, 0x56). Cody, 2026-11-27: "song should be the first tab ... so we can load
+// a song if we care to". It takes the same road as the automatic next-song load above - find the file in the browser's
+// own list, then performLoad() - so it inherits every safeguard performLoad() has (RAM, song swap while playing, the
+// fallback to a blank song). It never touches the CURRENT song's path: a load that fails must leave the song you had
+// still pointing at its own file, or the next SAVE would overwrite the song you asked for. Only the root folder SONGS/
+// is reachable this way; the caller has already refused anything with a slash in it. The unsaved-work guard is the
+// caller's (it answers "unsaved" and does nothing, and the host asks the player); this is called only once that is
+// settled, so it clears the recovery file exactly as a deliberate load from the browser does.
+uint8_t LoadSongUI::loadFromHost(char const* fileName) {
+	if (performingLoad || getCurrentUI() == this) {
+		return 5;
+	}
+	outputTypeToLoad = OutputType::NONE;
+	currentDir.set("SONGS");
+	if (arrivedInNewFolder(1, fileName, "SONGS") != Error::NONE || recencyMode || fileIndexSelected == -1) {
+		return 7;
+	}
+	FileItem* item = getCurrentFileItem();
+	if (item == nullptr || item->isFolder || !item->filename.equalsCaseIrrespective(fileName)) {
+		return 1; // the browser lands on the nearest name when the exact one is missing
+	}
+	const bool playing = playbackHandler.isEitherClockActive();
+	AudioEngine::logAction("load from host");
+	performLoad();
+	StorageManager::clearRecoveryFile();
+	if (FlashStorage::defaultStartupSongMode == StartupSongMode::LASTOPENED) {
+		runtimeFeatureSettings.writeSettingsToFile();
+	}
+	if (playing && preLoadedSong != nullptr) {
+		return 8;
+	}
+	// Loaded means the song in hand is now the one asked for: its name is the file's name without ".XML".
+	String asked;
+	asked.set(fileName);
+	const char* dot = strrchr(fileName, '.');
+	if (dot != nullptr) {
+		asked.shorten(dot - fileName);
+	}
+	return (currentSong != nullptr && currentSong->name.equalsCaseIrrespective(&asked)) ? 0 : 7;
+}
+
 // This method actually executes the loading of next song (by offset)
 void LoadSongUI::doQueueLoadNextSongIfAvailable(int8_t offset) {
 	outputTypeToLoad = OutputType::NONE;

@@ -69,6 +69,7 @@ void sendTrackStateIfChanged(bool force = false);
 void sendMenuContextIfChanged(bool force = false);
 void sendSoundStateIfChanged(bool force = false);
 void receiveMixerSet(MIDICable& cable, uint8_t* data, int32_t len);
+void receiveSongLoad(MIDICable& cable, uint8_t* data, int32_t len); // 0x56, 1.3.149
 void sendDeviceStateIfChanged(bool force = false);
 void sendPanelStateIfChanged(bool force = false);
 void sendPadNotesIfChanged(bool force = false);

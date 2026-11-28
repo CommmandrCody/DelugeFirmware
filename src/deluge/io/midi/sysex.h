@@ -62,18 +62,19 @@ enum SysexCommands : uint8_t {
 	Transport = 0x47,  // Chroma: outbound transport push - playing, tempo, and where the playhead is.
 	                   // "Show me where we are" is the one question a 4-character display cannot
 	                   // answer and a second screen exists to.
-	KeyboardState = 0x48,   // Chroma: outbound keyboard-state push - which layout, what key and scale, and
-	                        // the span of notes the grid is currently showing. All eight keyboard
-	                        // layouts report as the single view slug "keyboard" over 0x45, so a host had
-	                        // no way to tell isomorphic from in-key from piano; and root/scale only
-	                        // escaped via 0x43, which fires on harmonic palette picks alone. Cody: "I
-	                        // want the mode of the keyboard displayed clearly and the current root
-	                        // note/scale selected ... also note the range of notes C1-N".
-	GoldKnob = 0x46,        // Chroma: outbound gold-knob push — which knob, the level its LED column shows, and the
-	                        // parameter's name. The host's panel header draws the real knobs; without this it had
-	                        // nothing to draw them FROM and sat dark on every page but Design.
-	DeviceState = 0x4D,     // Chroma: outbound - current track, pad brightness and every Features setting.
-	MixerSet = 0x4E,        // Chroma: INBOUND, long form (01 02 4E ...) - set one track's level, mute or solo.
+	KeyboardState = 0x48, // Chroma: outbound keyboard-state push - which layout, what key and scale, and
+	                      // the span of notes the grid is currently showing. All eight keyboard
+	                      // layouts report as the single view slug "keyboard" over 0x45, so a host had
+	                      // no way to tell isomorphic from in-key from piano; and root/scale only
+	                      // escaped via 0x43, which fires on harmonic palette picks alone. Cody: "I
+	                      // want the mode of the keyboard displayed clearly and the current root
+	                      // note/scale selected ... also note the range of notes C1-N".
+	GoldKnob = 0x46,      // Chroma: outbound gold-knob push — which knob, the level its LED column shows, and the
+	                      // parameter's name. The host's panel header draws the real knobs; without this it had
+	                      // nothing to draw them FROM and sat dark on every page but Design.
+	DeviceState = 0x4D,   // Chroma: outbound - current track, pad brightness and every Features setting.
+	MixerSet = 0x4E,      // Chroma: INBOUND, long form (01 02 4E ...) - set one track's level, mute or solo.
+	SongLoad = 0x56, // Chroma: INBOUND, long form (01 02 56 ...) - load a song from SONGS/ by its file name (1.3.149).
 	CommandOutcome = 0x4F,  // Chroma: outbound - what became of a command, by its sequence number.
 	PanelState = 0x51,      // Chroma: outbound - which button lights are on and which buttons are held.
 	PadNotes = 0x52,        // Chroma: outbound - which note each pad of the main grid plays, and how to spell it.

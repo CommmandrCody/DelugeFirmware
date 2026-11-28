@@ -37,6 +37,10 @@ public:
 	bool opened() override;
 	void selectEncoderAction(int8_t offset) override;
 	void queueLoadNextSongIfAvailable(int8_t offset);
+	/// 1.3.149: load SONGS/<fileName> because a host asked (0x56), the way a press of LOAD then SELECT would. Returns
+	/// the 0x4F result: 0 loaded, 1 no such song, 5 busy, 7 the load failed, 8 armed (playing: the swap waits for
+	/// launch).
+	uint8_t loadFromHost(char const* fileName);
 	void performLoad();
 	void displayLoopsRemainingPopup();
 	bool isLoadingSong();

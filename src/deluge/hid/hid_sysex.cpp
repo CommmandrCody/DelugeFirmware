@@ -5,7 +5,9 @@
 #include "gui/menu_item/value_scaling.h" // Chroma (0x4B): the 0-50 the menus show           // Chroma (0x4A): the open menu's entries and cursor
 #include "gui/ui/keyboard/chords.h"          // Chroma: the synced spelling lean (gChromaSpelling) packed into 0x43
 #include "gui/ui/keyboard/keyboard_screen.h" // Chroma (0x48): keyboardScreen.noteRange()
-#include "gui/ui/sound_editor.h"             // Chroma (0x4A): which menu item is current
+#include "gui/ui/load/load_song_ui.h"        // Chroma (0x56): load a song a host asked for
+#include "gui/ui/root_ui.h"
+#include "gui/ui/sound_editor.h" // Chroma (0x4A): which menu item is current
 #include "gui/ui/ui.h"
 #include "gui/ui_timer_manager.h"
 #include "gui/views/view.h"
@@ -43,6 +45,7 @@
 #include "processing/sound/sound_instrument.h"     // Chroma (0x4B): the track's own sound
 #include "storage/flash_storage.h"                 // Chroma (0x4D): pad brightness
 #include "storage/multi_range/multisample_range.h" // Chroma (0x55): a sample oscillator's zones
+#include "storage/storage_manager.h"               // Chroma (0x56): songNeedsRecoverySave, the unsaved-work guard
 #include "util/pack.h"
 #include <cstring>
 #include <string>
@@ -63,6 +66,7 @@ static bool fxContextSent = false;
 // Chroma (0x4E): defined beside the command that needs it; called from the display poll.
 static void saveFeaturesIfNeeded();
 static bool usbSettingsNeedSaving = false; // 1.3.135: a host changed a saved USB audio setting; routine() writes it
+constexpr int32_t kDeviceSongNameMax = 40; // 1.3.149: the longest song name 0x4D carries
 // 1.3.148: pad brightness set from a host is the SAVED default (Settings > Defaults > Pad brightness), written once the
 // slider has been still for 2 s so a drag does not write flash at every step. Cody: "set the brightness of the pads as
 // a default so I don't have to keep dropping the brightness to min".
@@ -157,6 +161,10 @@ void HIDSysex::sysexReceived(MIDICable& cable, uint8_t* data, int32_t len) {
 
 	case SysEx::SysexCommands::MixerSet:
 		receiveMixerSet(cable, data, len);
+		break;
+
+	case SysEx::SysexCommands::SongLoad:
+		receiveSongLoad(cable, data, len);
 		break;
 
 	case 1:
@@ -2314,7 +2322,8 @@ static void saveFeaturesIfNeeded() {
 // Chroma (0x4D): the device's own state - which track the player is on, how bright the pads are, and every
 // Features setting. Three things a host otherwise learns only by walking a menu or reading the card.
 //
-//   F0 00 21 7B 01 02 4D <track> <brightness> <count> then count x (<hashHi> <hashLo> <value>) <master> F7
+//   F0 00 21 7B 01 02 4D <track> <brightness> <count> then count x (<hashHi> <hashLo> <value>) <master> <layout>
+//        <unsaved> <nameLen> <name...> (1.3.149) F7
 //
 // <track> is the position of the current clip's track in the 0x49 list, 7F for none. <brightness> is 1-25.
 // Each setting is named by settingNameHash() of its stored name; <value> is its value, capped at 127.
@@ -2322,7 +2331,7 @@ void HIDSysex::sendDeviceStateIfChanged(bool force) {
 	if (lastHidCable == nullptr) {
 		return;
 	}
-	uint8_t msg[7 + 3 + RuntimeFeatureSettingType::MaxElement * 3 + 2 + 1];
+	uint8_t msg[7 + 3 + RuntimeFeatureSettingType::MaxElement * 3 + 2 + 2 + kDeviceSongNameMax + 1];
 	int32_t i = 0;
 	msg[i++] = 0xf0;
 	msg[i++] = 0x00;
@@ -2411,6 +2420,22 @@ void HIDSysex::sendDeviceStateIfChanged(bool force) {
 	// KeyboardLayoutType number 0x48 sends for the current one. Cody: "a setting for setting the default keyboard
 	// view so that I don't have to rotate through them". Read here; set from the Deluge's own menu.
 	put((uint8_t)util::to_underlying(FlashStorage::defaultKeyboardLayout));
+	// THE SONG IN HAND (1.3.149), after the default layout: <unsaved 0/1> <length> <name>, so the Song tab can mark the
+	// current song and ask before a load would throw away unsaved work. The name is the song's own (its file name
+	// without ".XML"), empty for a song never saved; at most kDeviceSongNameMax characters, 7-bit.
+	put(songNeedsRecoverySave ? 1 : 0);
+	{
+		const char* songName = (currentSong != nullptr) ? currentSong->name.get() : "";
+		int32_t n = 0;
+		while (songName != nullptr && songName[n] != 0 && n < kDeviceSongNameMax) {
+			n++;
+		}
+		put((uint8_t)n);
+		for (int32_t k = 0; k < n; k++) {
+			const uint8_t c = (uint8_t)songName[k] & 0x7f;
+			put((c >= 32) ? c : '?');
+		}
+	}
 
 	static uint32_t lastHash = 0;
 	static bool everSent = false;
@@ -3022,6 +3047,72 @@ static void pushPadsIfChanged(MIDICable& cable) {
 	memcpy(padLastSent, raw, (size_t)p);
 }
 
+// Chroma (0x56 in, 0x4F out, 1.3.149): LOAD A SONG. The first write of the 2026-11-27 UI pass; Cody: "song should be
+// the first tab ... so we can load a song if we care to".
+//
+//   in   F0 00 21 7B 01 02 56 <seq> <flags> <name...> F7
+//   out  F0 00 21 7B 01 02 4F <seq> <result> F7          (once, when the load is done or refused)
+//
+// <name>   the file's name in SONGS/, 1-63 printable ASCII, with or without ".XML"; no slash, no backslash, no colon.
+// <flags>  bit 0: load over unsaved work (the host has asked the player). Without it, a song with unsaved changes is
+//          left alone and the answer is 4.
+// <result> 0 loaded   1 no such song   3 bad request   4 unsaved work, nothing done   5 busy (a menu or browser is
+//          open, or a load is under way)   7 the load failed   8 armed: playing, the new song starts at the launch
+//
+// The command handler runs inside "check usb midi" and must never touch the card, so it only checks the request and
+// leaves it for routine(), which runs with no USB resource - the same context a press of LOAD is handled in.
+static char songLoadName[68];
+static uint8_t songLoadSeq = 0;
+static bool songLoadOwed = false;
+static MIDICable* songLoadCable = nullptr;
+
+static bool deviceCanLoadNow() {
+	return getCurrentUI() == getRootUI() && currentUIMode == UI_MODE_NONE && !loadSongUI.isLoadingSong();
+}
+
+static void sendOutcome(MIDICable& cable, uint8_t seq, uint8_t result) {
+	uint8_t reply[10] = {0xf0, 0x00, 0x21, 0x7b, 0x01, 0x02, SysEx::SysexCommands::CommandOutcome, seq, result, 0xf7};
+	cable.sendSysex(reply, sizeof(reply));
+}
+
+void HIDSysex::receiveSongLoad(MIDICable& cable, uint8_t* data, int32_t len) {
+	// data[0] = 0x02, data[1] = 0x56, data[2] = seq, data[3] = flags, then the name, then F7 (counted in len)
+	const uint8_t seq = (len >= 3) ? (data[2] & 0x7f) : 0;
+	const int32_t nameLen = len - 5;
+	if (len < 6 || nameLen > 63) {
+		sendOutcome(cable, seq, 3);
+		return;
+	}
+	char name[sizeof(songLoadName)];
+	for (int32_t k = 0; k < nameLen; k++) {
+		const uint8_t c = data[4 + k];
+		if (c < 32 || c > 126 || c == '/' || c == '\\' || c == ':') {
+			sendOutcome(cable, seq, 3);
+			return;
+		}
+		name[k] = (char)c;
+	}
+	name[nameLen] = 0;
+	const char* tail = &name[nameLen > 4 ? nameLen - 4 : 0];
+	const bool hasExtension =
+	    nameLen > 4 && tail[0] == '.' && (tail[1] | 0x20) == 'x' && (tail[2] | 0x20) == 'm' && (tail[3] | 0x20) == 'l';
+	if (!hasExtension) {
+		strcpy(&name[nameLen], ".XML");
+	}
+	if (songLoadOwed || !deviceCanLoadNow()) {
+		sendOutcome(cable, seq, 5);
+		return;
+	}
+	if (songNeedsRecoverySave && !(data[3] & 1)) {
+		sendOutcome(cable, seq, 4);
+		return;
+	}
+	memcpy(songLoadName, name, sizeof(songLoadName));
+	songLoadSeq = seq;
+	songLoadCable = &cable;
+	songLoadOwed = true;
+}
+
 // THE PUSHES' OWN TASK (1.3.134), registered in deluge.cpp at low priority with no USB resource. While a host holds a
 // pad subscription: the pads whenever they change (at most every 40 ms), and the other change checks every 100 ms -
 // the clock the host's pad poll used to provide, now the instrument's own. An older host's one-off request is
@@ -3036,6 +3127,17 @@ void HIDSysex::routine() {
 	if (usbSettingsNeedSaving && !sdRoutineLock) {
 		usbSettingsNeedSaving = false;
 		FlashStorage::writeSettings();
+	}
+	// 1.3.149: a song a host asked for (0x56). Checked again here: the player may have opened a menu since. While the
+	// Deluge plays, performLoad() waits for the launch, and these pushes wait with it.
+	if (songLoadOwed && !sdRoutineLock) {
+		// songLoadOwed stays set until the load is over, so a second request meanwhile is answered "busy" and cannot
+		// overwrite the name this one is still reading.
+		const uint8_t result = deviceCanLoadNow() ? loadSongUI.loadFromHost(songLoadName) : 5;
+		if (songLoadCable != nullptr) {
+			sendOutcome(*songLoadCable, songLoadSeq, result);
+		}
+		songLoadOwed = false;
 	}
 	if (transportOwed >= 0) {
 		const bool wantPlaying = transportOwed == 1;

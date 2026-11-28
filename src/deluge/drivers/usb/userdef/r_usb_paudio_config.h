@@ -49,8 +49,12 @@
 /* Returning channels. Must be even: see usb_audio_stream.cpp. */
 #define USB_CFG_PAUDIO_RX_CHANNELS (4u)
 
-/* The largest returning packet: 45 frames, which is what a 44.1 kHz host sends in a 1 ms frame. */
-#define USB_CFG_PAUDIO_RX_MAX_FRAMES (45u)
+/* The largest returning packet: AS LARGE AS THE LARGEST OUTGOING ONE (1.3.147). The return is paced by implicit
+ * feedback (1.3.129): the host sizes each packet it sends to match the packets it receives, and the Deluge's run to 46
+ * frames when its clock steps a block to keep the lead. Declared at 45, the host's mirrored 46-frame packet would
+ * exceed wMaxPacketSize, and macOS stopped sending ~80 ms after the stream opened - the computer's audio went silent
+ * (found 2026-11-27 by the plugin's sync-word loopback: pipe ready, DMA waiting, FIFO empty, nothing arriving). */
+#define USB_CFG_PAUDIO_RX_MAX_FRAMES (USB_CFG_PAUDIO_MAX_FRAMES)
 #define USB_CFG_PAUDIO_RX_PACKET_BYTES (USB_CFG_PAUDIO_RX_CHANNELS * 2u * USB_CFG_PAUDIO_RX_MAX_FRAMES)
 /* Room for six channels, so the buffer map does not move if the return is widened. */
 #define USB_CFG_PAUDIO_RX_BUF_BYTES (576u)

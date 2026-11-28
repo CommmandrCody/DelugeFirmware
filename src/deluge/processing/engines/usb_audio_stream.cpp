@@ -276,6 +276,10 @@ constexpr uint32_t kRxMaxPacketBytes = USB_CFG_PAUDIO_RX_PACKET_BYTES;
 static_assert(kRxFrameBytes % 4u == 0u, "the return must carry an even number of channels");
 static_assert(kRxPairs >= 1u, "the return carries at least one pair");
 static_assert(kRxMaxPacketBytes / kRxFrameBytes >= (kSampleRate + 999u) / 1000u, "a 45-frame packet must fit");
+// Implicit feedback: the host mirrors the outgoing packet sizes, so the return must accept the largest of them, or a
+// host stops sending the moment the Deluge sends one (1.3.147).
+static_assert(kRxMaxPacketBytes / kRxFrameBytes >= kMaxFramesPerPacket,
+              "the return must take a packet as large as the largest outgoing one");
 static_assert(kRxMaxPacketBytes <= USB_CFG_PAUDIO_RX_BUF_BYTES, "a return packet must fit the pipe buffer");
 
 /// A Full Speed frame has a fixed allowance for periodic traffic in both directions, and the host reserves against
@@ -283,7 +287,10 @@ static_assert(kRxMaxPacketBytes <= USB_CFG_PAUDIO_RX_BUF_BYTES, "a return packet
 /// moves, so the declared total is held to the largest pair measured to open.
 constexpr uint32_t kDeclaredOut = USB_CFG_PAUDIO_MAX_FRAMES * kFrameBytes;
 constexpr uint32_t kDeclaredIn = kRxMaxPacketBytes;
-static_assert(kDeclaredOut + kDeclaredIn <= 46u * 16u + 45u * 8u,
+// 1.3.147: the return widened from 45 to 46 frames (8 bytes) to take the host's mirrored packets: 1104 bytes a frame,
+// between the 1096 measured to open and the 1288 measured to be refused. TO BE CONFIRMED by the 1.3.147 measurement
+// (macOS opens the device, and the return keeps flowing); if it is refused, this is the line to revisit.
+static_assert(kDeclaredOut + kDeclaredIn <= 46u * 16u + 46u * 8u,
               "wider than any configuration a host has been measured to accept");
 
 /// Pipe buffer blocks, double buffering counted. The block number is valid from 4 to 127.
